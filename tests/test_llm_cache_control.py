@@ -129,9 +129,12 @@ class TestAddCacheControlToContent:
             {"type": "image", "source": {"type": "base64", "data": "..."}},
             {"type": "thinking", "thinking": "Let me think..."},
         ]
+        # Store original for comparison
+        original_copy = [item.copy() for item in content]
         result = llm._add_cache_control_to_content(content)
 
         assert result == content
+        assert content == original_copy  # Verify original wasn't mutated
         # Verify no cache_control was added
         for item in result:
             assert "cache_control" not in item
