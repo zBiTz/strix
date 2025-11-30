@@ -208,12 +208,34 @@ class LLM:
     def _add_cache_control_to_content(
         self, content: str | list[dict[str, Any]]
     ) -> str | list[dict[str, Any]]:
+        """Add cache control to content blocks.
+
+        When extended thinking is enabled, content is block-structured.
+        We must only cache text blocks, never thinking blocks.
+        """
         if isinstance(content, str):
             return [{"type": "text", "text": content, "cache_control": {"type": "ephemeral"}}]
+
         if isinstance(content, list) and content:
-            last_item = content[-1]
-            if isinstance(last_item, dict) and last_item.get("type") == "text":
-                return content[:-1] + [{**last_item, "cache_control": {"type": "ephemeral"}}]
+            # Find the last text block (never cache thinking blocks)
+            last_text_idx = None
+            for i in range(len(content) - 1, -1, -1):
+                if isinstance(content[i], dict) and content[i].get("type") == "text":
+                    last_text_idx = i
+                    break
+
+            if last_text_idx is not None:
+                # Create a copy and add cache_control to the last text block
+                cached_content = [
+                    block.copy() if isinstance(block, dict) else block for block in content
+                ]
+                cached_content[last_text_idx] = {
+                    **cached_content[last_text_idx],
+                    "cache_control": {"type": "ephemeral"},
+                }
+                return cached_content
+
+        # If no text blocks found or content is empty, return as-is
         return content
 
     def _is_anthropic_model(self) -> bool:
