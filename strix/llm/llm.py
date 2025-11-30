@@ -233,7 +233,9 @@ class LLM:
                 }
                 return cached_content
 
-        # If no text blocks found or content is empty, return as-is
+        # If no text blocks found or content is empty, return a copy for consistency
+        if isinstance(content, list) and content:
+            return [block.copy() if isinstance(block, dict) else block for block in content]
         return content
 
     def _is_anthropic_model(self) -> bool:
