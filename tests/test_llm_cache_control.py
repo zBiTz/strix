@@ -1,5 +1,6 @@
 """Tests for LLM cache control functionality."""
 
+from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
@@ -137,7 +138,7 @@ class TestAddCacheControlToContent:
 
     def test_empty_list_returns_unchanged(self, llm: LLM) -> None:
         """Test that an empty list is returned unchanged."""
-        content: list[dict[str, str]] = []
+        content: list[dict[str, Any]] = []
         result = llm._add_cache_control_to_content(content)
 
         assert result == []
