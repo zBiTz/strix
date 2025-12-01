@@ -25,18 +25,28 @@ from strix.tools import get_tools_prompt
 
 logger = logging.getLogger(__name__)
 
-api_key = os.getenv("LLM_API_KEY")
-if api_key:
-    litellm.api_key = api_key
 
-api_base = (
-    os.getenv("LLM_API_BASE")
-    or os.getenv("OPENAI_API_BASE")
-    or os.getenv("LITELLM_BASE_URL")
-    or os.getenv("OLLAMA_API_BASE")
-)
-if api_base:
-    litellm.api_base = api_base
+def configure_litellm() -> None:
+    """Configure litellm with environment variables.
+
+    This function reads environment variables at runtime (not import time)
+    to properly configure litellm's API key and base URL.
+
+    The API base URL follows this priority chain:
+    LLM_API_BASE → OPENAI_API_BASE → LITELLM_BASE_URL → OLLAMA_API_BASE
+    """
+    api_key = os.getenv("LLM_API_KEY")
+    if api_key:
+        litellm.api_key = api_key
+
+    api_base = (
+        os.getenv("LLM_API_BASE")
+        or os.getenv("OPENAI_API_BASE")
+        or os.getenv("LITELLM_BASE_URL")
+        or os.getenv("OLLAMA_API_BASE")
+    )
+    if api_base:
+        litellm.api_base = api_base
 
 
 class LLMRequestFailedError(Exception):
@@ -138,6 +148,9 @@ class LLM:
     def __init__(
         self, config: LLMConfig, agent_name: str | None = None, agent_id: str | None = None
     ):
+        # Configure litellm with environment variables at initialization time
+        configure_litellm()
+
         self.config = config
         self.agent_name = agent_name
         self.agent_id = agent_id
