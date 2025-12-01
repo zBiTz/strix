@@ -31,6 +31,7 @@ from strix.interface.utils import (
     process_pull_line,
     validate_llm_response,
 )
+from strix.llm.llm import configure_litellm
 from strix.runtime.docker_runtime import STRIX_IMAGE
 from strix.telemetry.tracer import get_global_tracer
 
@@ -188,19 +189,9 @@ async def warm_up_llm() -> None:
 
     try:
         model_name = os.getenv("STRIX_LLM", "openai/gpt-5")
-        api_key = os.getenv("LLM_API_KEY")
 
-        if api_key:
-            litellm.api_key = api_key
-
-        api_base = (
-            os.getenv("LLM_API_BASE")
-            or os.getenv("OPENAI_API_BASE")
-            or os.getenv("LITELLM_BASE_URL")
-            or os.getenv("OLLAMA_API_BASE")
-        )
-        if api_base:
-            litellm.api_base = api_base
+        # Configure litellm with environment variables at runtime
+        configure_litellm()
 
         test_messages = [
             {"role": "system", "content": "You are a helpful assistant."},
