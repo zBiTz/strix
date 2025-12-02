@@ -1,0 +1,312 @@
+<session_management_guide>
+<title>SESSION MANAGEMENT VULNERABILITIES</title>
+
+<critical>Session management flaws enable session hijacking, fixation, and unauthorized access. Focus on session fixation, session puzzling, concurrent session handling, token entropy, timeout issues, and cross-subdomain leakage. Weak session handling leads to account takeover without credentials.</critical>
+
+<scope>
+- Session fixation attacks
+- Session puzzling and variable overwriting
+- Concurrent session handling issues
+- Session token entropy analysis
+- Session timeout and expiration problems
+- Cross-subdomain session leakage
+- Session riding (CSRF variant)
+- Session donation attacks
+- Logout incomplete session invalidation
+</scope>
+
+<methodology>
+1. Analyze session tokens: cookies, headers, storage location
+2. Test fixation: set session before and after authentication
+3. Test concurrent sessions: login multiple times simultaneously
+4. Measure entropy: collect tokens, analyze randomness
+5. Test expiration: idle timeout, absolute timeout, logout behavior
+6. Test scope: subdomain isolation, path restrictions, secure flags
+7. Test persistence: survive browser close, password change, account changes
+8. Test inheritance: session data overwriting, variable confusion
+</methodology>
+
+<session_fixation>
+<attack_pattern>
+1. Attacker gets session ID from target site (unauthenticated)
+2. Attacker sends session ID to victim (URL, cookie)
+3. Victim authenticates with attacker's session ID
+4. Attacker uses same session ID → now authenticated as victim
+
+Example:
+http://target.com/login?sessionid=ATTACKER_SESSION
+Victim logs in, server doesn't regenerate session ID
+Attacker uses ATTACKER_SESSION → hijacks victim account
+</attack_pattern>
+
+<test_methodology>
+1. Request site, capture session cookie (PHPSESSID, JSESSIONID, etc)
+2. Send session cookie to victim (or in URL parameter)
+3. Victim authenticates
+4. Use original session cookie
+5. Check if now authenticated as victim
+
+curl -c cookies.txt http://target.com/
+SESS=$(grep session cookies.txt | awk '{print $7}')
+# Send to victim: http://target.com/?sessionid=$SESS
+# Victim logs in
+curl -b "sessionid=$SESS" http://target.com/profile
+# If shows victim data: vulnerable to fixation
+</test_methodology>
+
+<session_id_sources>
+- Cookies: PHPSESSID, JSESSIONID, connect.sid
+- URL parameters: sessionid=, sid=, token=
+- POST body: hidden form fields
+- HTTP headers: X-Session-Token, Authorization
+- HTML5 storage: localStorage.sessionId
+</session_id_sources>
+</session_fixation>
+
+<session_puzzling>
+<variable_overloading>
+- Application uses same session variable in different contexts
+- Context 1: sets user.role = "temp" for unauthenticated
+- Context 2: checks user.role for authorization
+- Attacker manipulates flow to set privileged value
+
+Example:
+1. Visit /admin-panel → sets session.adminAccess = false
+2. Visit /forgot-password?adminAccess=true → overwrites session var
+3. Session.adminAccess now true
+4. Access /admin-panel → authorized due to session variable
+</variable_overloading>
+
+<session_injection>
+- Inject session variables via query params, forms
+- ?is_admin=true, ?role=admin, ?user_type=administrator
+- Backend assigns to session without validation
+
+Test:
+GET /any-page?session[role]=admin
+POST /update-profile
+{
+  "session": {"is_admin": true}
+}
+</session_injection>
+</session_puzzling>
+
+<concurrent_sessions>
+<multiple_active_sessions>
+- User can be logged in from multiple devices/browsers
+- No limit on concurrent sessions
+- Compromised session remains active
+
+Impact:
+- Attacker steals session, creates new one
+- Victim logs in again, both sessions valid
+- Attacker maintains access indefinitely
+</multiple_active_sessions>
+
+<session_race_conditions>
+- Parallel requests with same session
+- Session data corruption due to concurrent writes
+- Race in session update logic
+
+Example:
+Thread 1: session.balance = 100; session.balance -= 50;
+Thread 2: session.balance = 100; session.balance -= 30;
+Final: session.balance = 70 (expected: 20)
+</session_race_conditions>
+</concurrent_sessions>
+
+<session_token_entropy>
+<weak_randomness>
+- Predictable session IDs enable hijacking
+- Sources of weak entropy:
+  - MD5(sequential ID)
+  - Timestamp + user ID
+  - Auto-incrementing integers
+  - Math.random() (not crypto-secure)
+
+Analysis method:
+1. Collect 20+ session IDs
+2. Look for patterns: sequential, time-based, low entropy
+3. Try to predict next session ID
+4. Test prediction by creating new session and comparing
+</weak_randomness>
+
+<entropy_calculation>
+- Minimum: 128 bits of entropy (OWASP recommendation)
+- Session ID length vs character set:
+  - 32 hex chars: 128 bits ✓
+  - 16 hex chars: 64 bits ✗ (brute-forceable)
+  - 10 digits: 33 bits ✗ (weak)
+
+Check:
+sessionid="0123456789abcdef" (16 hex = 64 bits, insufficient)
+sessionid="a7f3e9c2b8d4f1a6c9e7b3d8f2a5c1e9b4d7f3a8" (40 hex = 160 bits ✓)
+</entropy_calculation>
+</session_token_entropy>
+
+<session_timeout_issues>
+<no_idle_timeout>
+- Session never expires due to inactivity
+- Compromised session valid indefinitely
+- Attacker accesses weeks/months later
+
+Test:
+1. Login, capture session cookie
+2. Wait 24-72 hours without activity
+3. Use session cookie
+4. If still valid: no idle timeout
+</no_idle_timeout>
+
+<no_absolute_timeout>
+- Session valid forever if kept active
+- Even with idle timeout, can be refreshed indefinitely
+
+Test:
+1. Login
+2. Make request every 30 minutes for 30 days
+3. If session remains valid: no absolute timeout
+</no_absolute_timeout>
+
+<remember_me_vulnerabilities>
+- "Remember me" token never expires
+- Token not rotated after password change
+- Persistent token reused across accounts
+
+Test:
+1. Login with "Remember me" checked
+2. Capture persistent cookie
+3. Clear other sessions, logout
+4. Use persistent cookie after days/weeks
+5. Change password, test if token still valid
+</remember_me_vulnerabilities>
+</session_timeout_issues>
+
+<cross_subdomain_leakage>
+<cookie_scope_issues>
+- Cookie set for entire domain: .example.com
+- Accessible from all subdomains
+- Attacker controls subdomain (via injection, takeover)
+- Steals cookies from main domain
+
+Test:
+1. Check cookie domain attribute
+2. If Domain=.example.com: accessible to all subdomains
+3. If attacker controls any.example.com: can read main cookies
+4. Subdomain takeover → session hijacking
+</cookie_scope_issues>
+
+<secure_flag_missing>
+- Secure flag not set on cookies
+- Cookie sent over HTTP as well as HTTPS
+- MITM can intercept over HTTP
+
+Test:
+1. Capture cookie: PHPSESSID=abc123; Secure?
+2. If no Secure flag: vulnerable
+3. Make HTTP request: http://target.com/ (not https)
+4. Cookie sent in plaintext
+</secure_flag_missing>
+
+<httponly_missing>
+- HttpOnly flag not set
+- JavaScript can access: document.cookie
+- XSS can steal session tokens
+
+Test:
+console.log(document.cookie);
+// If session cookie visible: HttpOnly missing
+</httponly_missing>
+</cross_subdomain_leakage>
+
+<logout_issues>
+<incomplete_invalidation>
+- Logout doesn't destroy session on server
+- Session cookie remains valid after logout
+- Attacker with old session can still access
+
+Test:
+1. Login, capture session cookie
+2. Logout via UI
+3. Use old session cookie
+4. If still authenticated: incomplete invalidation
+</incomplete_invalidation>
+
+<client_side_logout>
+- Logout only clears cookie client-side
+- Server session remains active
+- Restoring cookie restores session
+
+Test:
+1. Login, copy session cookie
+2. Logout (clears cookie)
+3. Re-inject session cookie
+4. Access protected page
+5. If authenticated: server didn't invalidate
+</client_side_logout>
+
+<csrf_logout>
+- Logout endpoint vulnerable to CSRF
+- Attacker forces victim logout
+- DoS attack vector
+</csrf_logout>
+</logout_issues>
+
+<session_donation>
+<attack_scenario>
+- Attacker creates account
+- Attacker triggers action with their session
+- Victim continues with attacker's session
+- Victim's actions attributed to attacker's account
+
+Example OAuth flow:
+1. Attacker starts OAuth, gets code
+2. Attacker sends code/state to victim
+3. Victim completes OAuth with attacker's session
+4. Victim's account linked to attacker's OAuth
+</attack_scenario>
+</session_donation>
+
+<validation>
+1. Session fixation: set session before auth, verify not regenerated after
+2. Concurrent sessions: login twice, verify both sessions work
+3. Entropy: collect 10+ tokens, analyze randomness, calculate bits
+4. Timeout: test idle and absolute timeout durations
+5. Scope: verify Secure, HttpOnly, Domain, Path attributes
+6. Logout: verify server-side invalidation
+7. Impact: demonstrate session hijacking leading to account access
+</validation>
+
+<false_positives>
+- High-entropy tokens regenerated after authentication
+- Proper idle (30 min) and absolute (8-24 hr) timeouts
+- Secure, HttpOnly flags set correctly
+- Server-side session invalidation on logout
+- Concurrent session limits enforced
+</false_positives>
+
+<impact>
+- Session hijacking (account takeover without credentials)
+- Persistent unauthorized access (weak timeout)
+- Cross-subdomain session theft
+- Session fixation (attacker-controlled authentication)
+- Privilege escalation (session puzzling)
+- Account linking attacks (session donation)
+</impact>
+
+<pro_tips>
+1. Always check session regeneration after authentication—most critical test
+2. Capture session cookies with browser DevTools Application tab
+3. Use Burp Suite Session Handling to maintain session across tests
+4. Test timeout with real wait times—automated tools may not catch
+5. Check all cookie flags: Secure, HttpOnly, SameSite, Domain, Path
+6. Test logout from multiple devices—verify all sessions invalidated
+7. Session IDs in URLs are immediately suspicious—check for fixation
+8. Calculate entropy: bits = length × log2(charset_size)
+9. Test remember-me separately—often weaker than main session
+10. Monitor Set-Cookie headers—verify session ID changes after login
+11. Test password change—session should be invalidated/regenerated
+12. Check for session in localStorage—less secure than HttpOnly cookies
+</pro_tips>
+
+<remember>Secure session management requires: high-entropy tokens, regeneration after authentication, server-side storage and invalidation, proper timeouts, Secure/HttpOnly/SameSite flags, and single-point-of-failure prevention via concurrent session limits. Any weakness enables account takeover.</remember>
+</session_management_guide>

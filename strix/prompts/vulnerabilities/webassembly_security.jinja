@@ -1,0 +1,260 @@
+<webassembly_security_guide>
+<title>WEBASSEMBLY SECURITY</title>
+
+<critical>WebAssembly (WASM) runs near-native code in browsers with memory access capabilities. Security concerns include memory corruption vulnerabilities, sandbox escape attempts, import/export function abuse, linear memory exploitation, and WASI security issues. Focus on binary analysis, memory bounds checking, and JavaScript interop vulnerabilities.</critical>
+
+<scope>
+- WASM binary analysis and reverse engineering
+- Memory corruption vulnerabilities (buffer overflow, use-after-free)
+- Sandbox escape techniques
+- Import/export function abuse
+- Linear memory exploitation
+- WASI (WebAssembly System Interface) security issues
+- JavaScript/WASM interop vulnerabilities
+- Side-channel attacks (Spectre, timing)
+</scope>
+
+<methodology>
+1. Identify WASM usage: look for .wasm files, WebAssembly.instantiate calls
+2. Download and analyze binary: use wasm2wat, wasm-objdump, or online tools
+3. Inspect imports/exports: understand JavaScript bridge functions
+4. Test memory bounds: attempt out-of-bounds reads/writes
+5. Analyze WASI calls: check for filesystem, network access abuse
+6. Reverse engineer logic: understand crypto, auth, business logic
+7. Fuzz inputs: test for memory corruption, integer overflow
+8. Test side-channels: timing attacks, speculative execution leaks
+</methodology>
+
+<discovery_and_analysis>
+<finding_wasm>
+- Network tab: filter for .wasm files
+- Search JS for: WebAssembly.instantiate, WebAssembly.compile
+- Common paths: /static/wasm/, /assets/, /dist/
+- Files: app.wasm, module.wasm, crypto.wasm
+</finding_wasm>
+
+<binary_tools>
+- wasm2wat: convert binary to text format
+  wasm2wat module.wasm -o module.wat
+- wasm-objdump: inspect sections, imports, exports
+  wasm-objdump -x module.wasm
+- wasm-decompile: pseudo-C code generation
+  wasm-decompile module.wasm -o module.c
+- Online: wasmer.io, webassembly.studio
+</binary_tools>
+
+<inspection_targets>
+- Imports: functions from JavaScript (IO, DOM, crypto)
+- Exports: functions exposed to JavaScript (API surface)
+- Memory: linear memory size, initial/max pages
+- Tables: indirect function calls (potential for hijack)
+- Globals: mutable state, configuration values
+- Data sections: embedded strings, constants, secrets
+</inspection_targets>
+</discovery_and_analysis>
+
+<memory_corruption>
+<buffer_overflow>
+- WASM memory is linear array of bytes
+- Bounds checking done by VM but logic bugs remain
+- C/C++ compiled to WASM inherits vulnerabilities
+- Test: supply oversized inputs to exported functions
+- Payload: long strings, large arrays, nested structures
+- Impact: overwrite adjacent memory, corrupt state, DoS
+</buffer_overflow>
+
+<integer_overflow>
+- Arithmetic on memory indices (i32, i64)
+- Overflow can bypass bounds checks
+- Example: size_t index = offset + length; (overflows)
+- Memory.grow: test with extreme values
+</integer_overflow>
+
+<use_after_free>
+- Manual memory management in C/Rust compiled to WASM
+- Free memory but retain pointer, later deref
+- Difficult to exploit in WASM sandbox but causes crashes
+</use_after_free>
+</memory_corruption>
+
+<sandbox_escape>
+<memory_access>
+- WASM linear memory isolated from process memory
+- No direct escape via memory access alone
+- But: shared memory (SharedArrayBuffer) enables cross-origin leaks
+</memory_access>
+
+<import_abuse>
+- Injected imports can break sandbox
+- If attacker controls instantiation:
+  WebAssembly.instantiate(bytes, {
+    env: {
+      evil: () => { /* attacker code */ }
+    }
+  });
+- Module calls imported evil() → JavaScript execution
+</import_abuse>
+
+<side_channels>
+- Spectre: speculative execution leaks memory
+- Timing: measure execution time to infer secrets
+- Cache: observe cache timing to leak crypto keys
+- Mitigations: COOP/COEP headers, time precision reduction
+</side_channels>
+</sandbox_escape>
+
+<import_export_abuse>
+<dangerous_imports>
+- eval, Function: if imported, enables arbitrary JS execution
+- Filesystem access: fs.readFile, fs.writeFile via WASI
+- Network: fetch, XMLHttpRequest if imported
+- DOM manipulation: document.getElementById, innerHTML
+
+Example dangerous instantiation:
+const imports = {
+  env: {
+    eval: eval,  // DANGEROUS: WASM can execute arbitrary JS
+    read_file: (path) => fs.readFileSync(path)  // Server-side WASI
+  }
+};
+WebAssembly.instantiate(wasmBytes, imports);
+</dangerous_imports>
+
+<export_analysis>
+- Exported functions callable from JavaScript
+- Look for auth, crypto, payment processing logic
+- Test boundary conditions: null, negative, extreme values
+- Reverse engineer to find logic flaws
+</export_analysis>
+</import_export_abuse>
+
+<linear_memory_exploitation>
+<shared_memory>
+- Linear memory accessible from JS:
+  const memory = new WebAssembly.Memory({initial: 1});
+  const bytes = new Uint8Array(memory.buffer);
+  bytes[0] = 123;  // write directly
+- WASM and JS share same buffer
+- Race conditions: WASM writes, JS reads simultaneously
+- Confusion: WASM pointer is index into bytes array
+</shared_memory>
+
+<memory_inspection>
+- Read WASM memory from JavaScript:
+  const u8 = new Uint8Array(instance.exports.memory.buffer);
+  const u32 = new Uint32Array(instance.exports.memory.buffer);
+- Search for secrets: API keys, tokens hardcoded in WASM
+- Dump entire memory for offline analysis
+</memory_inspection>
+
+<memory_manipulation>
+- Write to WASM memory from JS:
+  u8[address] = value;
+- Modify WASM state: game cheats, bypassing checks
+- Corrupt data structures: linked lists, objects
+</memory_manipulation>
+</linear_memory_exploitation>
+
+<wasi_security>
+<filesystem_access>
+- WASI provides POSIX-like APIs to WASM
+- preopens: directories WASM can access
+- Test: read outside preopened directories
+- Path traversal: ../../../etc/passwd
+- Symlink attacks: follow symlinks to escape
+</filesystem_access>
+
+<network_access>
+- WASI sockets: TCP/UDP from WASM
+- SSRF potential: WASM connects to internal services
+- Test: connect to localhost, RFC1918 addresses
+- Bypass firewall: WASM makes requests, not browser
+</network_access>
+
+<environment_variables>
+- WASI environment: env vars accessible to WASM
+- Secrets may leak: API keys, paths, configurations
+- Read env: getenv() equivalent in WASI
+</environment_variables>
+</wasi_security>
+
+<crypto_analysis>
+<hardcoded_keys>
+- WASM may contain crypto implementations
+- Keys, IVs, salts in data section
+- Extract with wasm-objdump -s -j data
+- Search for patterns: repeated bytes, base64, hex
+</hardcoded_keys>
+
+<weak_crypto>
+- Custom crypto implementations (discouraged)
+- Test for weak algorithms: MD5, SHA1, DES
+- Side-channel attacks on constant-time violations
+- Reverse engineer algorithm for flaws
+</weak_crypto>
+</crypto_analysis>
+
+<javascript_interop>
+<type_confusion>
+- JS/WASM boundary has type coercion
+- JS number is f64, WASM has i32, i64, f32, f64
+- Test edge cases: NaN, Infinity, MAX_SAFE_INTEGER
+- Overflow: JS number too large for i32
+</type_confusion>
+
+<string_handling>
+- WASM has no native string type
+- Strings as pointers to memory + length
+- Encoding issues: UTF-8, UTF-16 mismatches
+- Buffer overflow: string longer than expected
+</string_handling>
+
+<function_signature_mismatch>
+- Imported function signature mismatch
+- WASM expects (i32, i32), JS provides (number)
+- Undefined behavior, potential crashes
+</function_signature_mismatch>
+</javascript_interop>
+
+<validation>
+1. Prove WASM binary location and download link
+2. Show analysis: imports, exports, memory layout
+3. Demonstrate vulnerability: memory corruption, logic flaw, secret leak
+4. Provide exploit: JS code that triggers vulnerability via WASM API
+5. Impact assessment: what attacker gains (XSS, data theft, DoS)
+6. Test in multiple browsers: Chrome, Firefox, Safari differences
+</validation>
+
+<false_positives>
+- WASM by itself is not vulnerability (it's a technology)
+- Obfuscated WASM is not necessarily malicious
+- Large memory requests may be legitimate
+- Complex imports may be proper API design
+</false_positives>
+
+<impact>
+- Memory corruption leading to DoS
+- Business logic bypass (auth, payment checks in WASM)
+- Secret exposure (hardcoded keys, tokens)
+- Side-channel leaks (Spectre, timing)
+- WASI: filesystem access, SSRF, env var leaks
+- Game cheating, DRM bypass (client-side enforcement)
+</impact>
+
+<pro_tips>
+1. Download .wasm files early—they may be rotated or removed
+2. Use wasm2wat for human-readable analysis—text format easier to grep
+3. Check data section for hardcoded secrets—use strings command
+4. Memory dumps: new Uint8Array(instance.exports.memory.buffer)
+5. WASM from C/C++ more likely to have memory bugs than Rust
+6. Test extreme values: -1, 0, MAX_INT, overflow scenarios
+7. Browser DevTools → Sources → WASM module debugging
+8. Look for custom crypto—red flag for vulnerabilities
+9. WASI is rare in browsers, common in server-side WASM (Node, Deno)
+10. SharedArrayBuffer enables powerful timing attacks—check COOP/COEP
+11. Reverse engineering: wasm-decompile gives pseudo-C, easier analysis
+12. Test in worker context: WASM in web workers has different security model
+</pro_tips>
+
+<remember>WASM provides near-native performance with strong sandboxing. Real vulnerabilities lie in logic bugs, memory corruption from unsafe languages, dangerous imports, and side-channel attacks. Always analyze the JavaScript/WASM interface and test boundary conditions thoroughly.</remember>
+</webassembly_security_guide>
