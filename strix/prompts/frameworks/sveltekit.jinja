@@ -1,0 +1,471 @@
+<sveltekit_security_guide>
+<title>SVELTEKIT FRAMEWORK SECURITY TESTING</title>
+
+<critical>SvelteKit is a full-stack framework for Svelte with server-side rendering. Security vulnerabilities arise from form actions issues, hooks vulnerabilities, endpoint security problems, load function data exposure, and CSR/SSR boundary issues. Testing must cover the complete server-client interaction.</critical>
+
+<scope>
+- Form actions security
+- Hooks vulnerabilities (handle, handleError)
+- Endpoint security (+server.js)
+- Load function data exposure
+- CSR/SSR boundary issues
+- Authentication and CSRF
+</scope>
+
+<methodology>
+1. Identify SvelteKit routes and endpoints.
+2. Test form actions for validation bypass.
+3. Probe hooks for security issues.
+4. Analyze +server.js endpoints.
+5. Test load functions for data exposure.
+6. Check CSR/SSR boundary handling.
+</methodology>
+
+<form_actions>
+<action_vulnerabilities>
+{% raw %}
+# Form actions testing:
+
+# Default action:
+POST /route
+Content-Type: application/x-www-form-urlencoded
+
+field1=value1&field2=value2
+
+# Named actions:
+POST /route?/actionName
+POST /route?/deleteUser
+POST /route?/setAdmin
+
+# 1. Action enumeration:
+POST /route?/
+POST /route?/admin
+POST /route?/delete
+POST /route?/create
+
+# 2. Missing validation:
+export const actions = {
+  default: async ({ request }) => {
+    const data = await request.formData();
+    // No validation, directly use data
+    await db.users.create(Object.fromEntries(data));
+  }
+}
+
+# 3. Action injection:
+<input type="hidden" name="isAdmin" value="true">
+<input type="hidden" name="role" value="admin">
+
+# 4. Return data exposure:
+return { success: true, user: fullUserObject };  // Too much data
+{% endraw %}
+</action_vulnerabilities>
+
+<csrf_protection>
+{% raw %}
+# CSRF in SvelteKit:
+
+# SvelteKit checks Origin header by default
+# But may be bypassable:
+
+# 1. Origin header bypass:
+# Some proxies strip Origin
+# Test without Origin header
+
+# 2. Subdomain attacks:
+# Same-origin may include subdomains
+Origin: https://evil.target.com
+
+# 3. csrfCheck config:
+// kit.config.js
+csrf: {
+  checkOrigin: false  // Disabled!
+}
+
+# 4. API endpoint bypass:
+# +server.js may not have CSRF check
+POST /api/action  # API endpoint
+vs POST /route?/action  # Form action
+
+# 5. Cross-site form submission:
+<form action="https://target.com/route?/action" method="POST">
+  <input name="data" value="malicious">
+</form>
+{% endraw %}
+</csrf_protection>
+</form_actions>
+
+<hooks_security>
+<handle_hook>
+{% raw %}
+# hooks.server.js vulnerabilities:
+
+# 1. Missing auth check:
+export async function handle({ event, resolve }) {
+  // Should check auth here
+  return resolve(event);
+}
+
+# 2. Bypass via route:
+// Handle may not protect all routes
+if (event.url.pathname.startsWith('/api')) {
+  // API routes unprotected
+}
+
+# 3. Locals manipulation:
+event.locals.user = await getUser(event);
+// If getUser is bypassable, locals are wrong
+
+# 4. Request modification:
+// Handle can modify request
+// Test if modifications are secure
+
+# 5. Response manipulation:
+const response = await resolve(event);
+// Check if sensitive headers are exposed
+
+# 6. Sequence hooks:
+// Multiple hooks may conflict
+export const handle = sequence(auth, logging, ...);
+{% endraw %}
+</handle_hook>
+
+<error_handling>
+{% raw %}
+# handleError hook issues:
+
+# 1. Error disclosure:
+export function handleError({ error, event }) {
+  return {
+    message: error.message,
+    stack: error.stack  // Exposes internals!
+  };
+}
+
+# 2. Sensitive data in errors:
+// Error may contain:
+// - Database queries
+// - API keys
+// - Internal paths
+
+# 3. Missing error handling:
+// Unhandled errors bubble up
+// Default error page may expose info
+
+# 4. Error-based enumeration:
+// Different errors for different states
+// User exists vs not exists
+
+# 5. Custom error pages:
+// /src/routes/+error.svelte
+// May render sensitive error data
+{% endraw %}
+</error_handling>
+</hooks_security>
+
+<endpoint_security>
+<server_endpoints>
+{% raw %}
+# +server.js endpoint testing:
+
+# 1. Method handling:
+// routes/api/users/+server.js
+export async function GET({ params }) { ... }
+export async function POST({ request }) { ... }
+export async function DELETE({ params }) { ... }
+
+# Test all methods:
+curl -X GET /api/users
+curl -X POST /api/users
+curl -X PUT /api/users
+curl -X DELETE /api/users
+curl -X PATCH /api/users
+
+# 2. Missing auth:
+export async function GET() {
+  // No auth check!
+  return json(await db.users.findMany());
+}
+
+# 3. Parameter injection:
+export async function GET({ params, url }) {
+  const id = url.searchParams.get('id');
+  // id not validated
+  return json(await db.users.find(id));
+}
+
+# 4. Request body issues:
+export async function POST({ request }) {
+  const body = await request.json();
+  // body not validated, may contain extra fields
+}
+{% endraw %}
+</server_endpoints>
+
+<api_vulnerabilities>
+{% raw %}
+# API endpoint vulnerabilities:
+
+# 1. IDOR:
+GET /api/users/1
+GET /api/users/2  # Other user's data
+
+# 2. SQL/NoSQL injection:
+GET /api/users?id=1' OR '1'='1
+GET /api/search?q={"$ne":null}
+
+# 3. Path traversal:
+GET /api/files/../../../etc/passwd
+
+# 4. SSRF:
+POST /api/fetch
+{"url": "http://169.254.169.254/"}
+
+# 5. Mass assignment:
+POST /api/users
+{"name": "user", "isAdmin": true}
+
+# 6. Response data exposure:
+GET /api/users/1
+// Returns: password, apiKey, etc.
+{% endraw %}
+</api_vulnerabilities>
+</endpoint_security>
+
+<load_functions>
+<load_data_exposure>
+{% raw %}
+# Load function data exposure:
+
+# +page.server.js (server-side):
+export async function load({ params, locals }) {
+  return {
+    user: await getUser(locals.userId),
+    secretConfig: process.env.SECRET  // Exposed to client!
+  };
+}
+
+# +page.js (universal):
+// Runs on both server and client
+// Be careful with sensitive data
+
+# 1. Access load data:
+// Check $page.data in browser console
+// Or fetch data directly
+
+# 2. Depends tracking:
+export async function load({ depends }) {
+  depends('app:users');
+  // May expose cache keys
+}
+
+# 3. Parent data:
+export async function load({ parent }) {
+  const parentData = await parent();
+  // Parent data may be sensitive
+}
+
+# 4. Error in load:
+// Load errors may expose data
+throw error(500, { sensitive: data });
+{% endraw %}
+</load_data_exposure>
+
+<load_authorization>
+{% raw %}
+# Load function authorization:
+
+# 1. Missing auth check:
+export async function load({ params }) {
+  // No auth verification
+  return { data: await getData(params.id) };
+}
+
+# 2. Client-side only check:
+// +page.js runs on client
+// Easy to bypass
+if (!user) redirect(303, '/login');
+
+# 3. Streaming exposure:
+// Streamed data may be visible before auth
+export async function load() {
+  return {
+    streamed: {
+      sensitive: fetchSensitive()
+    }
+  };
+}
+
+# 4. Prerendering issues:
+// Static pages may include sensitive data
+export const prerender = true;
+
+# 5. Layout load bypass:
+// Child pages may not inherit parent auth
+// Direct access to child data
+{% endraw %}
+</load_authorization>
+</load_functions>
+
+<csr_ssr_boundary>
+<boundary_issues>
+{% raw %}
+# CSR/SSR boundary vulnerabilities:
+
+# 1. Client-only code on server:
+// browser check bypass
+if (browser) {
+  // Sensitive client code
+}
+
+# 2. Server-only code exposed:
+// May run on client in dev mode
+import { SECRET } from '$env/static/private';
+
+# 3. Hydration mismatches:
+// Server renders different from client
+// May expose server data
+
+# 4. Environment variables:
+// $env/static/private - server only
+// $env/static/public - client accessible
+// Make sure secrets in private
+
+# 5. Form enhancement:
+// Progressive enhancement
+// Non-JS form vs enhanced form behavior
+// Different security paths
+{% endraw %}
+</boundary_issues>
+
+<client_exposure>
+{% raw %}
+# Client-side data exposure:
+
+# 1. Page data in DOM:
+// __data in script tag
+<script>
+  const __data = {...};  // Check for secrets
+</script>
+
+# 2. Store exposure:
+// Svelte stores may contain sensitive data
+import { page } from '$app/stores';
+$page.data.user.apiKey  // Exposed
+
+# 3. Browser history:
+// Data in URL may persist
+goto(`/users?token=${secret}`);
+
+# 4. Console logging:
+// Dev logging may expose data
+console.log(sensitiveData);
+
+# 5. Error boundaries:
+// Client errors may show data
+{#if error}
+  {error.details}  // May be sensitive
+{/if}
+{% endraw %}
+</client_exposure>
+</csr_ssr_boundary>
+
+<authentication>
+<auth_patterns>
+{% raw %}
+# Authentication testing:
+
+# 1. Cookie-based auth:
+// Check cookie security
+Set-Cookie: session=...; HttpOnly; Secure; SameSite=Lax
+
+# 2. hooks.server.js auth:
+export async function handle({ event, resolve }) {
+  event.locals.user = await getUserFromCookie(event);
+  // Test with manipulated cookies
+}
+
+# 3. Protected routes:
+// Layout load with auth
+export async function load({ locals }) {
+  if (!locals.user) redirect(303, '/login');
+}
+
+# 4. API auth:
+// Separate auth for API endpoints?
+export async function GET({ locals }) {
+  if (!locals.user) return json({ error: 'Unauthorized' }, { status: 401 });
+}
+
+# 5. Session management:
+// Session fixation
+// Session timeout
+// Concurrent sessions
+{% endraw %}
+</auth_patterns>
+</authentication>
+
+<common_payloads>
+{% raw %}
+# Action testing:
+POST /route?/actionName
+
+# Endpoint access:
+GET /api/endpoint
+POST /api/endpoint
+
+# IDOR:
+GET /api/users/other_user_id
+
+# Load data check:
+// Browser console: $page.data
+
+# Environment exposure:
+// Check source for $env usage
+
+# CSRF:
+<form action="https://target.com/route" method="POST">
+{% endraw %}
+</common_payloads>
+
+<validation>
+1. Demonstrate form action bypass or injection.
+2. Show endpoint authorization issue.
+3. Prove load function data exposure.
+4. Document hooks security bypass.
+5. Provide CSR/SSR boundary issue evidence.
+</validation>
+
+<false_positives>
+- Proper auth in hooks.server.js
+- Form actions with validation
+- Secure cookie configuration
+- Consistent auth across routes
+- Proper error handling without disclosure
+- Environment variables properly scoped
+</false_positives>
+
+<impact>
+- Authentication bypass via hooks
+- Data exposure via load functions
+- CSRF via disabled origin check
+- Injection via unvalidated inputs
+- Privilege escalation via action manipulation
+- Information disclosure via errors
+</impact>
+
+<pro_tips>
+1. Check hooks.server.js for auth logic.
+2. Test all named form actions.
+3. Verify +server.js endpoint protection.
+4. Check $page.data in browser console.
+5. Look for sensitive data in load returns.
+6. Test CSRF by disabling JavaScript.
+7. Check environment variable scoping.
+8. Verify error handling doesn't leak.
+9. Test layout/page load inheritance.
+10. Document route structure and protection.
+</pro_tips>
+
+<remember>SvelteKit's file-based routing creates many potential endpoints. Every +page.server.js, +server.js, and action is a security boundary. Ensure consistent authentication and authorization across all server-side code paths.</remember>
+</sveltekit_security_guide>

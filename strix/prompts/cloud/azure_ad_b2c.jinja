@@ -1,0 +1,418 @@
+<azure_ad_b2c_security_guide>
+<title>AZURE AD B2C SECURITY TESTING</title>
+
+<critical>Azure AD B2C is a customer identity and access management service. Security vulnerabilities arise from custom policy weaknesses, token validation issues, user flow manipulation, API connector abuse, and identity provider misconfigurations. Testing must cover the complete authentication lifecycle.</critical>
+
+<scope>
+- Custom policy vulnerabilities
+- Token validation issues
+- User flow manipulation
+- API connector abuse
+- Identity provider misconfiguration
+- Claims transformation
+- Session management
+</scope>
+
+<methodology>
+1. Identify B2C tenant and configuration.
+2. Test token handling and validation.
+3. Probe custom policies for bypass.
+4. Analyze user flows for manipulation.
+5. Test API connectors for injection.
+6. Check identity provider configurations.
+</methodology>
+
+<custom_policies>
+<policy_vulnerabilities>
+{% raw %}
+# Custom policy (Identity Experience Framework) testing:
+
+# 1. Policy discovery:
+# Common policy IDs:
+B2C_1A_signup_signin
+B2C_1A_ProfileEdit
+B2C_1A_PasswordReset
+B2C_1_signupsignin
+B2C_1_profileediting
+
+# 2. Policy endpoint:
+https://{tenant}.b2clogin.com/{tenant}.onmicrosoft.com/{policy}/oauth2/v2.0/authorize
+
+# 3. XML injection in policies:
+# If custom claims from user input:
+<ClaimType Id="userInput">
+  <UserInputType>TextBox</UserInputType>
+</ClaimType>
+# Inject: "><ClaimType Id="admin">true</ClaimType>
+
+# 4. Technical profile bypass:
+# Test if validation profiles can be skipped
+# Manipulate orchestration steps
+
+# 5. Claims bag manipulation:
+# Modify claims during flow
+<OutputClaim ClaimTypeReferenceId="role" DefaultValue="user"/>
+# Try to inject: role=admin
+{% endraw %}
+</policy_vulnerabilities>
+
+<claims_attacks>
+{% raw %}
+# Claims transformation attacks:
+
+# 1. Claims injection:
+# If claims from external source:
+{
+  "extension_CustomRole": "admin",
+  "extension_BypassMFA": "true"
+}
+
+# 2. Claims override:
+# Input claims may override calculated claims
+# Send claim in request that should be server-set
+
+# 3. Collection manipulation:
+# If claims are arrays:
+{
+  "groups": ["users", "admins"]
+}
+
+# 4. Type coercion:
+# String "true" vs boolean true
+# Number as string
+
+# 5. Null/empty handling:
+# Test null, empty string, missing claims
+# May bypass validation
+{% endraw %}
+</claims_attacks>
+</custom_policies>
+
+<token_validation>
+<token_issues>
+{% raw %}
+# Token validation vulnerabilities:
+
+# 1. Issuer (iss) validation:
+# Must match expected B2C tenant
+"iss": "https://{tenant}.b2clogin.com/{tenant_id}/v2.0/"
+# Test with different tenant
+
+# 2. Audience (aud) validation:
+# Must match application client ID
+"aud": "client-id-here"
+# Test with different client ID
+
+# 3. Token lifetime:
+# Check exp claim validation
+# Test with expired tokens
+# Test with far-future tokens
+
+# 4. nonce validation:
+# Prevent replay attacks
+# Reuse nonce from different session
+
+# 5. Algorithm confusion:
+# Test alg: none
+# RS256 -> HS256 attack
+{% endraw %}
+</token_issues>
+
+<token_theft>
+{% raw %}
+# Token theft vectors:
+
+# 1. Implicit flow tokens:
+# Token in URL fragment
+https://app.com/callback#access_token=xxx
+# Leakage via Referrer
+
+# 2. Authorization code theft:
+# Code in URL
+?code=xxx
+# Open redirect + code theft
+
+# 3. Token in logs:
+# Check if tokens logged
+# Server logs, client console
+
+# 4. Token storage:
+# LocalStorage (XSS vulnerable)
+# SessionStorage
+# Cookies without proper flags
+
+# 5. Refresh token abuse:
+# Long-lived refresh tokens
+# No rotation
+{% endraw %}
+</token_theft>
+</token_validation>
+
+<user_flows>
+<flow_manipulation>
+{% raw %}
+# User flow manipulation:
+
+# 1. Sign-up bypass:
+# Skip email verification
+POST /signup
+{
+  "email": "victim@example.com",
+  "emailVerified": true
+}
+
+# 2. Password reset abuse:
+# Request reset for any email
+# Check if verified before reset
+
+# 3. Profile edit bypass:
+# Edit protected fields
+{
+  "extension_AccountType": "premium",
+  "extension_Role": "admin"
+}
+
+# 4. MFA bypass:
+# Skip MFA step
+# Manipulate MFA claims
+
+# 5. Age verification bypass:
+# Self-reported age
+# Modify birthdate claim
+{% endraw %}
+</flow_manipulation>
+
+<flow_enumeration>
+{% raw %}
+# User flow enumeration:
+
+# 1. Account enumeration:
+# Sign-up: "Email already registered"
+# Sign-in: Different errors for user/password
+
+# 2. Email verification:
+# Verify link enumeration
+https://tenant.b2clogin.com/.../verify?code=xxx
+# Brute force verification codes
+
+# 3. Password reset enumeration:
+# "Reset link sent" for existing accounts
+# Different response for non-existing
+
+# 4. Social login enumeration:
+# Different flows for linked accounts
+# Error messages reveal existence
+
+# 5. Attribute enumeration:
+# Custom attributes may be queryable
+{% endraw %}
+</flow_enumeration>
+</user_flows>
+
+<api_connectors>
+<connector_attacks>
+{% raw %}
+# API connector exploitation:
+
+# 1. SSRF via connector:
+# If connector URL controllable:
+{
+  "apiConnectorConfiguration": {
+    "postFederationSignup": {
+      "url": "http://169.254.169.254/metadata"
+    }
+  }
+}
+
+# 2. Response injection:
+# Malicious API response:
+{
+  "version": "1.0.0",
+  "action": "Continue",
+  "extension_isAdmin": true
+}
+
+# 3. Authentication bypass:
+# Connector with no auth
+# Weak basic auth credentials
+
+# 4. Input injection:
+# User input passed to connector
+# SQL injection in backend
+# Command injection
+
+# 5. Error handling:
+# Connector errors may expose info
+# Fallback behavior on failure
+{% endraw %}
+</connector_attacks>
+
+<connector_security>
+{% raw %}
+# API connector security testing:
+
+# 1. Endpoint discovery:
+# Find connector endpoints
+# May be exposed externally
+
+# 2. Authentication testing:
+# Test without credentials
+# Brute force basic auth
+
+# 3. Replay attacks:
+# Replay connector requests
+# Missing nonce/timestamp
+
+# 4. Response tampering:
+# MITM connector response
+# If HTTPS not enforced
+
+# 5. Rate limiting:
+# Abuse connector for DoS
+# Many requests to backend
+{% endraw %}
+</connector_security>
+</api_connectors>
+
+<identity_providers>
+<idp_misconfiguration>
+{% raw %}
+# Identity provider issues:
+
+# 1. Provider trust:
+# Trust any provider token?
+# Missing issuer validation
+
+# 2. Account linking:
+# Link attacker account to victim
+# Email-based linking bypass
+
+# 3. Claims mapping:
+# Malicious claims from provider
+# Role injection via social login
+
+# 4. State parameter:
+# Missing state validation
+# CSRF via social login
+
+# 5. Custom providers:
+# Add malicious provider
+# Phish credentials
+{% endraw %}
+</idp_misconfiguration>
+
+<federation_attacks>
+{% raw %}
+# Federation attack vectors:
+
+# 1. SAML attacks:
+# Signature wrapping
+# XXE in SAML response
+
+# 2. OIDC attacks:
+# Mix-up attacks
+# Authorization code injection
+
+# 3. Provider impersonation:
+# Fake social login page
+# Token substitution
+
+# 4. JIT provisioning:
+# Control provisioned attributes
+# Privilege escalation
+
+# 5. Logout issues:
+# Single logout bypass
+# Session persistence after federated logout
+{% endraw %}
+</federation_attacks>
+</identity_providers>
+
+<session_management>
+<session_attacks>
+{% raw %}
+# Session security testing:
+
+# 1. Session fixation:
+# Set session before auth
+# Session ID not regenerated
+
+# 2. Session timeout:
+# Long session lifetimes
+# No idle timeout
+
+# 3. Concurrent sessions:
+# Multiple active sessions
+# No session limit
+
+# 4. Session revocation:
+# Logout doesn't invalidate
+# Token still works after logout
+
+# 5. Remember me:
+# Persistent sessions
+# Device binding
+{% endraw %}
+</session_attacks>
+</session_management>
+
+<common_payloads>
+{% raw %}
+# Policy endpoint:
+/oauth2/v2.0/authorize?p=B2C_1_signupsignin
+
+# Token manipulation:
+"extension_isAdmin": true
+
+# API connector:
+POST /api/connector?bypass=true
+
+# Account enumeration:
+POST /signup {"email": "test@test.com"}
+
+# Claims injection:
+{"groups": ["admins"]}
+{% endraw %}
+</common_payloads>
+
+<validation>
+1. Demonstrate custom policy bypass.
+2. Show token validation weakness.
+3. Prove user flow manipulation.
+4. Document API connector vulnerability.
+5. Provide claims injection evidence.
+</validation>
+
+<false_positives>
+- Properly validated tokens with all claims checked
+- Custom policies with strict validation
+- API connectors with proper authentication
+- User flows with complete verification
+- Session management with proper revocation
+- Identity providers with strict configuration
+</false_positives>
+
+<impact>
+- Account takeover via flow bypass
+- Privilege escalation via claims injection
+- Authentication bypass via policy weakness
+- Data access via token manipulation
+- Identity theft via provider misconfiguration
+- Session hijacking via weak management
+</impact>
+
+<pro_tips>
+1. Enumerate all user flows and policies.
+2. Test token validation on all claims.
+3. Check custom policies for injection.
+4. Test API connector security.
+5. Verify identity provider configurations.
+6. Check claims transformation logic.
+7. Test session management thoroughly.
+8. Look for account enumeration.
+9. Verify MFA enforcement.
+10. Document tenant and application IDs.
+</pro_tips>
+
+<remember>Azure AD B2C combines multiple components: policies, user flows, API connectors, and identity providers. Each component must be properly configured. A weakness in any part can compromise the entire authentication system.</remember>
+</azure_ad_b2c_security_guide>

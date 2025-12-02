@@ -1,0 +1,431 @@
+<temporal_workflow_security_guide>
+<title>TEMPORAL.IO WORKFLOW SECURITY TESTING</title>
+
+<critical>Temporal is a workflow orchestration platform that handles distributed state and execution. Security vulnerabilities arise from signal injection, activity tampering, workflow execution hijacking, search attribute manipulation, and namespace security issues. Testing must cover the entire workflow lifecycle.</critical>
+
+<scope>
+- Signal injection attacks
+- Activity tampering
+- Workflow execution hijacking
+- Search attribute manipulation
+- Namespace security
+- Worker security
+- Data encryption and visibility
+</scope>
+
+<methodology>
+1. Identify Temporal clusters and namespaces.
+2. Test signal/query handling for injection.
+3. Probe activity task routing for hijacking.
+4. Analyze search attributes for manipulation.
+5. Check namespace access controls.
+6. Review worker security configurations.
+</methodology>
+
+<signal_injection>
+<signal_attacks>
+{% raw %}
+# Signal injection vulnerabilities:
+
+# 1. Direct signal injection:
+# If signal handlers trust input:
+temporal workflow signal \
+  --workflow-id target-workflow \
+  --name approveTransaction \
+  --input '{"amount": 1000000, "recipient": "attacker"}'
+
+# 2. Signal handler bypass:
+# Signal without proper authorization:
+{
+  "signalName": "adminOverride",
+  "input": {"bypassAuth": true}
+}
+
+# 3. Signal timing attacks:
+# Send signal during vulnerable state
+# Race condition in signal handling
+
+# 4. Malformed signal payloads:
+# Injection in signal data:
+{
+  "command": "process",
+  "data": "'; DROP TABLE users; --"
+}
+
+# 5. Signal flooding:
+# DoS via excessive signals
+for i in {1..10000}; do
+  temporal workflow signal --workflow-id $WF_ID --name spam
+done
+{% endraw %}
+</signal_attacks>
+
+<query_attacks>
+{% raw %}
+# Query handler vulnerabilities:
+
+# 1. Query injection:
+# If queries execute with elevated privileges:
+temporal workflow query \
+  --workflow-id $WF_ID \
+  --name getSecretData
+
+# 2. Side-channel via queries:
+# Infer state from query responses
+# Timing attacks on query execution
+
+# 3. Unauthorized data access:
+# Query returns more than authorized
+{
+  "queryType": "getAllData",
+  "args": {"includeSecrets": true}
+}
+
+# 4. Query handler bugs:
+# Trigger errors revealing internal state
+# Stack traces in query responses
+{% endraw %}
+</query_attacks>
+</signal_injection>
+
+<activity_tampering>
+<activity_attacks>
+{% raw %}
+# Activity task manipulation:
+
+# 1. Task token forgery:
+# If task tokens are predictable:
+{
+  "taskToken": "forged-token",
+  "result": {"status": "approved"}
+}
+
+# 2. Activity result injection:
+# Worker returns malicious result:
+def activity_handler(input):
+    return {
+        "result": input,
+        "escalatePrivilege": True
+    }
+
+# 3. Activity timeout exploitation:
+# Force activity timeout
+# Trigger retry with modified input
+
+# 4. Heartbeat manipulation:
+# Fake heartbeats to extend execution
+# Heartbeat with malicious details
+
+# 5. Activity hijacking:
+# Register worker for specific task queue
+# Intercept activities meant for legitimate workers
+{% endraw %}
+</activity_attacks>
+
+<worker_security>
+{% raw %}
+# Worker security issues:
+
+# 1. Malicious worker registration:
+# Register worker on target task queue
+client = Client.connect("temporal:7233")
+worker = Worker(
+    client,
+    task_queue="target-queue",
+    workflows=[MaliciousWorkflow],
+    activities=[malicious_activity]
+)
+
+# 2. Worker impersonation:
+# Use same identity as legitimate worker
+# Process activities meant for other workers
+
+# 3. Task queue enumeration:
+# Discover task queues via API
+# List workflows using each queue
+
+# 4. Worker data exfiltration:
+# Worker logs/transmits activity inputs
+# Sensitive data in activity parameters
+
+# 5. Dependency injection:
+# Malicious dependencies in worker environment
+# Supply chain attacks on workflow code
+{% endraw %}
+</worker_security>
+</activity_tampering>
+
+<workflow_hijacking>
+<execution_hijacking>
+{% raw %}
+# Workflow execution hijacking:
+
+# 1. Workflow ID collision:
+# Start workflow with existing ID
+temporal workflow start \
+  --workflow-id "existing-workflow-id" \
+  --type HijackWorkflow
+
+# 2. Run ID manipulation:
+# Access workflow with known run ID
+temporal workflow describe \
+  --workflow-id $WF_ID \
+  --run-id $RUN_ID
+
+# 3. Continue-as-new abuse:
+# Force workflow to continue with new params
+workflow.continue_as_new(args=malicious_args)
+
+# 4. Child workflow hijacking:
+# Intercept child workflow execution
+# Parent trusts child result
+
+# 5. Workflow termination:
+# Terminate workflows without authorization
+temporal workflow terminate --workflow-id $WF_ID
+{% endraw %}
+</execution_hijacking>
+
+<state_manipulation>
+{% raw %}
+# Workflow state manipulation:
+
+# 1. Reset workflow:
+# Reset to vulnerable point in history
+temporal workflow reset \
+  --workflow-id $WF_ID \
+  --event-id 5 \
+  --reason "attack"
+
+# 2. History modification:
+# If history is editable
+# Inject malicious events
+
+# 3. Memo manipulation:
+# If memos are trusted:
+{
+  "memo": {
+    "isAdmin": true,
+    "bypassAuth": true
+  }
+}
+
+# 4. Version manipulation:
+# Force workflow to use vulnerable version
+# Skip security patches
+
+# 5. Timer manipulation:
+# Cancel or modify timers
+# Force premature execution
+{% endraw %}
+</state_manipulation>
+</workflow_hijacking>
+
+<search_attributes>
+<search_manipulation>
+{% raw %}
+# Search attribute attacks:
+
+# 1. Search attribute injection:
+# If attributes used in decisions:
+temporal workflow start \
+  --search-attr "isApproved=true" \
+  --search-attr "role=admin"
+
+# 2. Query manipulation via search:
+# Manipulate list workflow queries
+temporal workflow list \
+  --query "CustomAttribute = 'injected'"
+
+# 3. Privilege escalation via attributes:
+# Set attributes that grant privileges:
+workflow.upsert_search_attributes({
+    "adminLevel": 10,
+    "department": "security"
+})
+
+# 4. Data exfiltration via attributes:
+# Store sensitive data in searchable attributes
+# Query to extract
+
+# 5. Attribute type confusion:
+# Wrong type may bypass validation
+# Keyword vs Text type issues
+{% endraw %}
+</search_manipulation>
+</search_attributes>
+
+<namespace_security>
+<namespace_attacks>
+{% raw %}
+# Namespace security testing:
+
+# 1. Namespace enumeration:
+temporal operator namespace list
+# Discover all namespaces
+
+# 2. Cross-namespace access:
+# Access workflows in other namespaces
+temporal workflow list --namespace other-namespace
+
+# 3. Namespace creation:
+# Create unauthorized namespaces
+temporal operator namespace create --namespace evil
+
+# 4. Namespace configuration:
+# Modify namespace settings
+temporal operator namespace update \
+  --namespace target \
+  --retention 1
+
+# 5. Global namespace abuse:
+# If using global namespaces
+# Access from any cluster
+{% endraw %}
+</namespace_attacks>
+
+<access_control>
+{% raw %}
+# Access control testing:
+
+# 1. API key exposure:
+# Check for exposed API keys
+# Test with found keys
+
+# 2. mTLS bypass:
+# If mTLS required:
+# Test without certificates
+# Test with self-signed certs
+
+# 3. Authorization header:
+# JWT/token-based auth
+# Token forgery attempts
+
+# 4. RBAC bypass:
+# Test operations without permission
+# Privilege escalation via roles
+
+# 5. Audit log manipulation:
+# If audit logs editable
+# Clear evidence of access
+{% endraw %}
+</access_control>
+</namespace_security>
+
+<data_security>
+<encryption_issues>
+{% raw %}
+# Data encryption testing:
+
+# 1. Payload encryption:
+# Check if payloads encrypted
+# Test with sensitive data
+
+# 2. Codec bypass:
+# If using custom codec:
+# Send unencoded data
+
+# 3. Key management:
+# Encryption key exposure
+# Key rotation issues
+
+# 4. Visibility settings:
+# History visibility
+# Payload visibility
+
+# 5. Debug/dev exposure:
+# Temporal Web UI access
+# Clear text in UI
+{% endraw %}
+</encryption_issues>
+
+<sensitive_data>
+{% raw %}
+# Sensitive data exposure:
+
+# 1. Workflow inputs:
+# Sensitive data in workflow args
+temporal workflow show --workflow-id $WF_ID
+
+# 2. Activity results:
+# Credentials in activity outputs
+# API keys passed between activities
+
+# 3. Search attributes:
+# PII in search attributes
+# Queryable sensitive data
+
+# 4. Memo fields:
+# Secrets stored in memos
+# Visible without encryption
+
+# 5. Stack traces:
+# Internal details in errors
+# Path disclosure in traces
+{% endraw %}
+</sensitive_data>
+</data_security>
+
+<common_payloads>
+{% raw %}
+# Signal injection:
+temporal workflow signal --workflow-id $WF --name approve
+
+# Query attack:
+temporal workflow query --workflow-id $WF --name getSecrets
+
+# Workflow termination:
+temporal workflow terminate --workflow-id $WF
+
+# Namespace enumeration:
+temporal operator namespace list
+
+# Search attribute injection:
+--search-attr "isAdmin=true"
+
+# Worker hijacking:
+Worker(client, task_queue="target-queue", ...)
+{% endraw %}
+</common_payloads>
+
+<validation>
+1. Demonstrate signal injection affecting workflow state.
+2. Show unauthorized access to workflow data.
+3. Prove activity hijacking or tampering.
+4. Document namespace access control bypass.
+5. Provide workflow manipulation evidence.
+</validation>
+
+<false_positives>
+- Proper signal validation and authorization
+- Encrypted payloads with strong key management
+- Strict namespace access controls
+- mTLS enforced for all connections
+- Activity authorization in handlers
+- Search attributes not used for security decisions
+</false_positives>
+
+<impact>
+- Workflow state manipulation
+- Unauthorized transaction approval
+- Data exfiltration through activities
+- Denial of service via signal flooding
+- Privilege escalation through attribute manipulation
+- Cross-tenant data access
+</impact>
+
+<pro_tips>
+1. Enumerate all namespaces and task queues.
+2. Test signal handlers with malicious payloads.
+3. Check query handlers for data exposure.
+4. Verify activity authorization on workers.
+5. Test search attribute manipulation.
+6. Check for unencrypted sensitive data.
+7. Test mTLS and authentication requirements.
+8. Look for workflow ID prediction.
+9. Verify child workflow authorization.
+10. Document workflow types and permissions.
+</pro_tips>
+
+<remember>Temporal workflows are long-running distributed processes where security must be maintained throughout the entire lifecycle. Signal handlers, activity workers, and search attributes all present attack surfaces that can compromise workflow integrity and data security.</remember>
+</temporal_workflow_security_guide>

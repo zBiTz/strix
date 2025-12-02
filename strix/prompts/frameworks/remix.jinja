@@ -1,0 +1,415 @@
+<remix_security_guide>
+<title>REMIX FRAMEWORK SECURITY TESTING</title>
+
+<critical>Remix is a full-stack React framework with server-side rendering. Security vulnerabilities arise from loader/action data exposure, form handling issues, server-side data fetching vulnerabilities, cookie-based session attacks, and nested routing security gaps. Testing must cover both server and client boundaries.</critical>
+
+<scope>
+- Loader/action data exposure
+- Form handling vulnerabilities
+- Server-side data fetching issues
+- Cookie-based session attacks
+- Nested routing security
+- CSRF and authentication
+</scope>
+
+<methodology>
+1. Identify Remix routes and their loaders/actions.
+2. Test data exposure in loader responses.
+3. Probe form actions for validation bypass.
+4. Analyze cookie-based session security.
+5. Test nested route authorization.
+6. Check for CSRF protection.
+</methodology>
+
+<loader_exposure>
+<data_leakage>
+{% raw %}
+# Loader data exposure:
+
+# Access loader data directly:
+GET /route?_data=routes/resource
+GET /resource?_data=routes%2Fresource
+
+# Remix data header:
+Accept: application/json
+# May return raw loader data
+
+# Check for sensitive data in loaders:
+# - User information
+# - API keys
+# - Database data
+# - Internal configurations
+
+# Deferred data exposure:
+# Streaming responses may leak data
+# Check defer() usage
+
+# Example vulnerable loader:
+export async function loader({ request }) {
+  const user = await getUser(request);
+  return json({
+    user,
+    secretApiKey: process.env.API_KEY  // Exposed!
+  });
+}
+{% endraw %}
+</data_leakage>
+
+<authorization_bypass>
+{% raw %}
+# Loader authorization bypass:
+
+# 1. Direct loader access:
+# Skip client-side checks
+GET /admin?_data=routes/admin
+
+# 2. Missing auth check:
+# Loader may not verify authentication
+export async function loader({ request }) {
+  // No auth check!
+  return json(await getSensitiveData());
+}
+
+# 3. Child route bypass:
+# Parent has auth, child doesn't
+/dashboard (protected)
+/dashboard/settings?_data=routes/dashboard.settings
+
+# 4. Index route bypass:
+# Index vs layout route confusion
+/parent?_data=routes/parent._index
+/parent?_data=routes/parent
+
+# 5. Resource route access:
+# API-like routes without protection
+/api/users.json?_data=routes/api.users
+{% endraw %}
+</authorization_bypass>
+</loader_exposure>
+
+<action_vulnerabilities>
+<form_handling>
+{% raw %}
+# Action/form handling issues:
+
+# 1. Action method bypass:
+# Actions should only accept POST
+GET /submit?action=delete  # May work
+
+# 2. Missing validation:
+POST /register
+Content-Type: application/x-www-form-urlencoded
+
+email=admin@target.com&role=admin
+
+# 3. formData manipulation:
+# Inject additional fields
+<form method="post">
+  <input name="username" value="user">
+  <input name="is_admin" value="true">  <!-- Added -->
+</form>
+
+# 4. Action routing:
+# ?/action parameter manipulation
+POST /route?/deleteUser
+POST /route?/createAdmin
+
+# 5. Multiple form handling:
+# Wrong intent matched
+<input type="hidden" name="_action" value="privileged">
+{% endraw %}
+</form_handling>
+
+<csrf_testing>
+{% raw %}
+# CSRF in Remix actions:
+
+# Default Remix doesn't have built-in CSRF
+# Check for custom implementation
+
+# Test cross-origin POST:
+<form action="https://target.com/action" method="POST">
+  <input name="data" value="malicious">
+</form>
+
+# Remix auth session patterns:
+# Cookie-based sessions may be vulnerable
+
+# Check for:
+# - CSRF tokens in forms
+# - SameSite cookie attribute
+# - Origin/Referer validation
+
+# If using remix-auth:
+# Test session fixation
+# Test cookie security attributes
+{% endraw %}
+</csrf_testing>
+</action_vulnerabilities>
+
+<data_fetching>
+<server_side_issues>
+{% raw %}
+# Server-side data fetching vulnerabilities:
+
+# 1. SSRF via fetch:
+export async function loader({ request }) {
+  const url = new URL(request.url);
+  const external = url.searchParams.get('url');
+  const data = await fetch(external);  // SSRF!
+  return json(await data.json());
+}
+
+# Payloads:
+?url=http://169.254.169.254/latest/meta-data/
+?url=http://localhost:8080/admin
+
+# 2. SQL injection in loaders:
+export async function loader({ params }) {
+  const user = await db.query(
+    `SELECT * FROM users WHERE id = ${params.id}`  // Vulnerable
+  );
+}
+
+# 3. NoSQL injection:
+export async function loader({ request }) {
+  const body = await request.json();
+  return json(await User.findOne(body.query));  // Vulnerable
+}
+
+# 4. Path traversal:
+export async function loader({ params }) {
+  const file = await readFile(`./uploads/${params.filename}`);
+  // Payload: ../../../etc/passwd
+}
+{% endraw %}
+</server_side_issues>
+
+<api_integration>
+{% raw %}
+# External API integration issues:
+
+# 1. API key in loader:
+export async function loader() {
+  const response = await fetch('https://api.service.com', {
+    headers: { 'Authorization': `Bearer ${process.env.API_KEY}` }
+  });
+  // Key may be exposed in errors or responses
+}
+
+# 2. Response forwarding:
+export async function loader({ request }) {
+  const response = await fetch(externalAPI);
+  return response;  // May include sensitive headers
+}
+
+# 3. Error propagation:
+// External service errors may expose information
+try {
+  await externalCall();
+} catch (e) {
+  throw json({ error: e.message });  // Too detailed
+}
+
+# 4. Race conditions:
+// Parallel fetches may have timing issues
+const [userData, permissions] = await Promise.all([...]);
+{% endraw %}
+</api_integration>
+</data_fetching>
+
+<session_security>
+<cookie_sessions>
+{% raw %}
+# Cookie-based session attacks:
+
+# Remix uses cookie-based sessions by default
+# Session data is client-visible
+
+# 1. Session content analysis:
+# Decode session cookie (if not encrypted)
+# Look for sensitive data
+
+# 2. Session manipulation:
+# If using createCookieSessionStorage:
+# Weak secret = forged sessions
+
+# 3. Session fixation:
+# Set session before login
+Set-Cookie: __session=attacker_value
+
+# 4. Cookie attributes:
+# Check for:
+# - Secure flag
+# - HttpOnly flag
+# - SameSite attribute
+# - Path scope
+
+# 5. Session secret:
+# Common weak secrets
+const sessionStorage = createCookieSessionStorage({
+  cookie: {
+    secrets: ["s3cr3t"]  // Weak!
+  }
+});
+{% endraw %}
+</cookie_sessions>
+
+<auth_bypass>
+{% raw %}
+# Authentication bypass:
+
+# 1. Missing requireUser:
+// Loader doesn't require auth
+export async function loader({ request }) {
+  const user = await getUser(request);  // Optional
+  return json({ user });
+}
+
+# 2. Partial auth check:
+// Only checks existence, not validity
+export async function loader({ request }) {
+  const session = await getSession(request);
+  if (!session.has("userId")) throw redirect("/login");
+  // Doesn't verify user still exists/active
+}
+
+# 3. Role confusion:
+// Wrong permission check
+if (user.role !== "admin") throw redirect("/");
+// vs user.role === "user" (allows other roles)
+
+# 4. Cookie theft:
+// If XSS exists:
+document.cookie  // Steal session
+
+# 5. Remember me:
+// Long-lived tokens without rotation
+{% endraw %}
+</auth_bypass>
+</session_security>
+
+<nested_routing>
+<routing_security>
+{% raw %}
+# Nested route security:
+
+# Remix nested routes:
+# routes/
+#   dashboard.tsx (parent)
+#   dashboard/
+#     settings.tsx (child)
+#     users.tsx (child)
+
+# 1. Parent auth bypass:
+# Child route loads without parent
+GET /dashboard/settings?_data=routes/dashboard.settings
+# May bypass parent's auth loader
+
+# 2. Outlet injection:
+# Child content in wrong parent context
+
+# 3. Layout route confusion:
+# routes/dashboard.tsx vs routes/dashboard/index.tsx
+# Different auth requirements
+
+# 4. Catch-all routes:
+# routes/$.tsx may catch sensitive paths
+
+# 5. Pathless layouts:
+# _auth.tsx applies to children
+# But may be bypassed with direct access
+{% endraw %}
+</routing_security>
+
+<error_handling>
+{% raw %}
+# Error boundary security:
+
+# 1. Error disclosure:
+export function ErrorBoundary() {
+  const error = useRouteError();
+  return <div>{error.stack}</div>;  // Exposes internals
+}
+
+# 2. Loader errors:
+// Thrown data may be sensitive
+throw json({ debug: internalData }, { status: 500 });
+
+# 3. Missing error boundary:
+// Uncaught errors bubble up
+// May reveal stack traces
+
+# 4. Action error handling:
+// Redirect vs error response
+// May reveal validation logic
+
+# 5. 404 handling:
+// Catch-all may reveal route structure
+{% endraw %}
+</error_handling>
+</nested_routing>
+
+<common_payloads>
+{% raw %}
+# Loader access:
+GET /route?_data=routes/resource
+
+# Action bypass:
+POST /action?/privilegedAction
+
+# SSRF:
+?url=http://169.254.169.254/
+
+# Form injection:
+<input name="role" value="admin">
+
+# Session manipulation:
+Cookie: __session=forged_value
+
+# Path traversal:
+/files/../../../etc/passwd
+{% endraw %}
+</common_payloads>
+
+<validation>
+1. Demonstrate loader data exposure.
+2. Show action authorization bypass.
+3. Prove session manipulation or forgery.
+4. Document nested route security issue.
+5. Provide SSRF or injection evidence.
+</validation>
+
+<false_positives>
+- Proper loader authorization checks
+- Actions with CSRF protection
+- Encrypted session cookies with strong secrets
+- Consistent auth across nested routes
+- Proper input validation in actions
+- Secure cookie attributes
+</false_positives>
+
+<impact>
+- Sensitive data exposure via loaders
+- Privilege escalation via action bypass
+- Session hijacking via cookie manipulation
+- SSRF and injection via data fetching
+- Authentication bypass via routing issues
+- Cross-site request forgery
+</impact>
+
+<pro_tips>
+1. Test loader data with _data parameter.
+2. Check all routes for auth requirements.
+3. Verify session cookie encryption.
+4. Test nested routes independently.
+5. Check action intent handling.
+6. Look for SSRF in external fetches.
+7. Verify CSRF protection exists.
+8. Test error boundaries for disclosure.
+9. Check resource routes for auth.
+10. Document route structure and protection.
+</pro_tips>
+
+<remember>Remix blurs server and client boundaries. Every loader and action is a potential API endpoint. Authorization must be consistent across routes, especially with nested layouts and direct data access patterns.</remember>
+</remix_security_guide>

