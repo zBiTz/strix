@@ -37,7 +37,11 @@ def _normalize_host(host: str) -> tuple[str, int]:
 
 def _get_certificate(host: str, port: int) -> dict[str, Any] | None:
     """Retrieve SSL certificate from host."""
-    context = ssl.create_default_context()
+    # Create context with secure minimum protocol version
+    # Note: We disable verification as this is a security analysis tool
+    # that needs to connect to potentially misconfigured servers
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    context.minimum_version = ssl.TLSVersion.TLSv1_2
     context.check_hostname = False
     context.verify_mode = ssl.CERT_NONE
 
