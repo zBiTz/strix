@@ -1,0 +1,364 @@
+<mfa_bypass_techniques_guide>
+<title>MFA BYPASS TECHNIQUES</title>
+
+<critical>Multi-Factor Authentication adds security layer but implementation flaws enable bypass. Focus on MFA fatigue, backup code brute force, response manipulation, race conditions, and recovery flow weaknesses. Successful bypass grants full account access despite MFA being enabled.</critical>
+
+<scope>
+- MFA fatigue and push bombing
+- Backup/recovery code brute force
+- Response manipulation (status code, JSON)
+- Race conditions in verification
+- SIM swap and SS7 attack indicators
+- TOTP time window exploitation
+- Recovery flow bypass (reset, phone number change)
+- Remember device flaws
+- MFA enrollment bypass
+</scope>
+
+<methodology>
+1. Map MFA implementation: TOTP, SMS, push, email, backup codes
+2. Test enrollment: can it be skipped, bypassed, or disabled
+3. Test verification: response manipulation, race conditions
+4. Test backup methods: brute force recovery codes
+5. Test persistence: "remember this device" weaknesses
+6. Test recovery: password reset, phone change without MFA
+7. Test rate limiting: unlimited verification attempts
+8. Test session handling: session before/after MFA
+</methodology>
+
+<mfa_fatigue_push_bombing>
+<attack_pattern>
+- Send many push notifications to user's device
+- User gets annoyed, accidentally approves
+- Social engineering: "Approve to stop notifications"
+- Typically 50-100+ push notifications in short time
+
+Example:
+for i in range(100):
+    POST /api/mfa/push-approve
+    {
+        "user": "victim@example.com"
+    }
+    sleep(0.5)
+</attack_pattern>
+
+<combined_social_engineering>
+- Push bombing + phone call: "We detected login attempt, approve push to secure account"
+- User trusts call, approves malicious push
+- Effective against Duo, Microsoft Authenticator, Okta Verify
+</combined_social_engineering>
+
+<mitigation_bypass>
+- Number matching: requires user to input number shown in push
+- Still vulnerable to social engineering: "Enter 73 to verify"
+</mitigation_bypass>
+</mfa_fatigue_push_bombing>
+
+<backup_code_brute_force>
+<weak_backup_codes>
+- 6-digit codes: 1,000,000 combinations
+- 8-digit codes: 100,000,000 combinations
+- No rate limiting: brute force feasible
+
+Test:
+for code in range(000000, 999999):
+    POST /api/mfa/verify-backup
+    {
+        "code": str(code).zfill(6)
+    }
+    if response.status_code == 200:
+        print(f"Valid code: {code}")
+        break
+</weak_backup_codes>
+
+<backup_code_enumeration>
+- Different responses for valid vs invalid codes
+- Status code: 200 vs 401
+- Message: "Incorrect code" vs "Code not found"
+- Timing: database lookup for valid, immediate reject for invalid
+</backup_code_enumeration>
+
+<unlimited_attempts>
+- No rate limit on backup code verification
+- Can try all combinations
+- Codes often don't expire after failed attempts
+</unlimited_attempts>
+</backup_code_brute_force>
+
+<response_manipulation>
+<status_code_manipulation>
+- Client checks HTTP status code for MFA success
+- Backend returns 401 but doesn't enforce server-side
+- Intercept and change 401 → 200
+
+Example:
+POST /api/mfa/verify
+{
+    "code": "000000"
+}
+Response: 401 Unauthorized
+
+Intercept with proxy:
+Change status: 401 → 200
+Forward to client: application thinks MFA passed
+</status_code_manipulation>
+
+<json_response_manipulation>
+- Backend returns {"mfa_verified": false}
+- Client checks this value
+- Change false → true in proxy
+
+Example response:
+{
+    "success": false,
+    "mfa_verified": false,
+    "message": "Invalid code"
+}
+
+Modified:
+{
+    "success": true,
+    "mfa_verified": true,
+    "message": "Valid code"
+}
+</json_response_manipulation>
+
+<missing_server_side_check>
+- Frontend validates MFA, backend trusts frontend
+- Skip MFA verification step entirely
+- Go directly from login → authenticated state
+
+Test:
+1. Login with username/password
+2. Capture MFA verification request
+3. Skip MFA step, go to /dashboard
+4. If dashboard loads: server doesn't enforce MFA
+</missing_server_side_check>
+</response_manipulation>
+
+<race_conditions>
+<parallel_verification>
+- Submit same valid code multiple times in parallel
+- First request validates and consumes code
+- Subsequent requests may bypass due to race
+
+Test:
+import concurrent.futures
+import requests
+
+def verify(code):
+    return requests.post('/api/mfa/verify', json={'code': code})
+
+with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+    futures = [executor.submit(verify, '123456') for _ in range(10)]
+    results = [f.result() for f in futures]
+    
+# Check if multiple requests succeeded
+</parallel_verification>
+
+<session_race>
+- Session created before MFA verification
+- Parallel request to protected resource during MFA
+- Resource accessible before MFA complete
+
+Test:
+Thread 1: POST /api/mfa/verify (slow, delays)
+Thread 2: GET /api/protected-resource
+If Thread 2 succeeds: race condition exists
+</session_race>
+</race_conditions>
+
+<totp_time_window_exploitation>
+<extended_time_window>
+- TOTP typically 30-second window
+- Some implementations accept codes from past/future windows
+- Try code from previous 30-sec window (60-90 seconds total)
+
+Test:
+import pyotp
+totp = pyotp.TOTP('SECRET')
+current_code = totp.now()
+past_code = totp.at(time.time() - 30)
+future_code = totp.at(time.time() + 30)
+
+# Try all three codes
+</extended_time_window>
+
+<time_sync_issues>
+- Server and client time desynchronized
+- Very long acceptance windows (5+ minutes)
+- Allows reuse of old codes
+</time_sync_issues>
+
+<totp_secret_extraction>
+- QR code stored in HTML/localStorage
+- Secret extractable from QR code
+- Generate unlimited valid codes
+
+Check:
+- View page source for otpauth://totp/...?secret=BASE32SECRET
+- localStorage.getItem('totp_secret')
+- API response containing secret
+</totp_secret_extraction>
+</totp_time_window_exploitation>
+
+<recovery_flow_bypass>
+<password_reset_skips_mfa>
+- Password reset doesn't require MFA
+- Attacker resets password, disables MFA
+- Or: password reset link allows MFA disable
+
+Test:
+1. Trigger password reset for victim account
+2. Complete reset process
+3. Check if MFA still required or can be disabled
+</password_reset_skips_mfa>
+
+<phone_number_change_no_mfa>
+- Change phone number (SMS MFA) without MFA verification
+- Attacker changes to their phone
+- Receives future MFA codes
+
+POST /api/user/phone
+{
+    "phone": "+1-attacker-number"
+}
+// If succeeds without MFA: vulnerable
+</phone_number_change_no_mfa>
+
+<email_change_no_mfa>
+- Change email (email MFA) without verification
+- Similar to phone number attack
+</email_change_no_mfa>
+
+<disable_mfa_no_verification>
+- Disable MFA without current MFA code
+- Or: only requires password, not MFA
+
+POST /api/mfa/disable
+{
+    "password": "user-password"
+}
+// Should require MFA code, not just password
+</disable_mfa_no_verification>
+</recovery_flow_bypass>
+
+<remember_device_flaws>
+<token_reuse>
+- "Remember this device" token never expires
+- Token not invalidated after password change
+- Token transferable to different device
+
+Test:
+1. Login with MFA, check "Remember device"
+2. Capture device token (cookie, localStorage)
+3. Use token on different device/browser
+4. If works: token not device-specific
+</token_reuse>
+
+<weak_device_token>
+- Device token predictable or low entropy
+- Can be guessed or brute forced
+- Example: MD5(user_id + device_name)
+</weak_device_token>
+</remember_device_flaws>
+
+<enrollment_bypass>
+<optional_mfa>
+- MFA enrollment optional, not enforced
+- User can skip and never enable
+- Admin panel doesn't require MFA
+
+Test:
+1. Create account
+2. Skip MFA enrollment
+3. Access all functionality
+4. Check admin panel: accessible without MFA
+</optional_mfa>
+
+<forced_enrollment_bypass>
+- MFA enrollment required but skippable via API
+- Frontend enforces, backend doesn't
+
+Test:
+1. Start signup flow
+2. Backend assigns session before MFA enrolled
+3. Skip MFA enrollment step in API calls
+4. Go directly to dashboard
+</forced_enrollment_bypass>
+</enrollment_bypass>
+
+<sms_mfa_specific>
+<sim_swap>
+- Attacker convinces carrier to port number
+- Receives victim's SMS codes
+- Not a technical vulnerability but attack vector
+
+Indicators:
+- Recent phone number port
+- Sudden loss of service for victim
+- Login from new location after number change
+</sim_swap>
+
+<sms_interception>
+- SS7 network vulnerabilities
+- SMS forwarding attacks
+- Compromised carrier employee
+</sms_interception>
+
+<rate_limit_bypass>
+- Send SMS codes unlimited times
+- Brute force 6-digit code: 1M attempts
+- Use IP rotation, different sessions
+
+Test:
+for code in range(000000, 999999):
+    POST /api/mfa/verify-sms
+    {
+        "code": str(code).zfill(6)
+    }
+</rate_limit_bypass>
+</sms_mfa_specific>
+
+<validation>
+1. Map MFA flow: all steps from login to authenticated
+2. Test bypass vectors: response manipulation, race conditions, recovery
+3. Demonstrate bypass: show successful authentication without valid MFA
+4. Verify impact: access to protected resources, account takeover
+5. Test all MFA methods: TOTP, SMS, push, backup codes
+6. Document preconditions: requires username/password, specific timing
+</validation>
+
+<false_positives>
+- MFA properly enforced with rate limiting
+- Response manipulation validated server-side
+- Backup codes high entropy with rate limits
+- Recovery flows require MFA verification
+- Device tokens properly scoped and validated
+</false_positives>
+
+<impact>
+- Full account takeover despite MFA enabled
+- Bypass of primary security control
+- Access to sensitive data and admin functions
+- Lateral movement in enterprise environment
+- Compliance violations (MFA requirement circumvented)
+</impact>
+
+<pro_tips>
+1. Test response manipulation first—most common bypass
+2. Check for MFA enforcement on all endpoints, not just login
+3. Backup codes often weakest link—test rate limiting
+4. Remember device tokens rarely device-specific—test token reuse
+5. Password reset flow often bypasses MFA—test thoroughly
+6. Race conditions rare but high impact—test with automated tools
+7. TOTP secret in QR code/localStorage is critical finding
+8. Test MFA disable/change without MFA verification
+9. Push bombing + social engineering very effective
+10. Check if admin panel requires MFA (often doesn't)
+11. Test OAuth flows—may bypass MFA
+12. Mobile apps may have different MFA implementation
+</pro_tips>
+
+<remember>MFA bypass enables full account access despite security controls. Secure implementation requires: server-side enforcement, rate limiting on all methods, proper session handling, MFA required for sensitive changes, high-entropy backup codes, and device tokens properly scoped. Frontend validation alone is insufficient.</remember>
+</mfa_bypass_techniques_guide>

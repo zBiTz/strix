@@ -1,0 +1,223 @@
+<broken_object_property_level_authorization_guide>
+<title>BROKEN OBJECT PROPERTY LEVEL AUTHORIZATION (OWASP API #3)</title>
+
+<critical>BOPLA occurs when APIs expose sensitive object properties that users should not access or modify. Unlike BOLA (object-level), this affects individual fields within authorized objects—users can read/write properties beyond their privilege scope. Focus on mass assignment, excessive data exposure, and field-level authorization gaps.</critical>
+
+<scope>
+- Excessive data exposure in API responses (admin flags, internal IDs, PII)
+- Mass assignment via property injection (isAdmin, role, balance, status)
+- Unauthorized property modification in UPDATE/PATCH operations
+- Nested object property access control gaps
+- GraphQL field-level authorization bypass
+- Response filtering and projection bypass
+- JSON/XML property injection in write operations
+</scope>
+
+<methodology>
+1. Enumerate all object properties in API responses—look for sensitive fields (role, balance, email, tokens, internal IDs)
+2. Test read authorization: attempt to request sensitive fields via query params, GraphQL field selection, or projection operators
+3. Test write authorization: inject unauthorized properties in POST/PUT/PATCH (isAdmin=true, role=admin, balance=1000000)
+4. Compare responses between privileged and unprivileged accounts—diff the property sets
+5. Test nested object properties and array element access control
+6. Validate server-side filtering vs client-side filtering (bypass by removing filters)
+</methodology>
+
+<detection_surfaces>
+<read_side>
+- API responses containing more properties than UI displays (excess data exposure)
+- Admin/internal properties visible in low-privilege responses: isAdmin, role, permissions[], internalId, systemNotes
+- PII leakage: email, phone, address when only name should be visible
+- Sensitive nested properties: user.paymentMethods[].cardNumber, organization.billingDetails
+- Debug/metadata fields in production: _meta, _debug, _sql, createdBy, modifiedBy
+- Aggregate data when only specific fields authorized: /users returns full profiles vs just names
+</read_side>
+
+<write_side>
+- Mass assignment in user registration/update: inject {"isAdmin": true, "role": "admin"}
+- Property injection in PATCH/PUT: modify read-only fields (balance, credits, verified, approved)
+- Nested property modification: user.permissions[0].scope, user.settings.isFeatureEnabled
+- Array manipulation: add admin roles to roles[], modify paymentMethods[] ownership
+- Status/state manipulation: change order.status, ticket.priority without authorization
+- Relationship injection: assign userId to objects, modify ownerId, change parent references
+</write_side>
+</detection_surfaces>
+
+<testing_techniques>
+<excessive_data_exposure>
+- Compare API response properties to UI rendered fields—excess indicates potential leak
+- Check different HTTP methods on same endpoint: GET vs POST may return different property sets
+- Test with different Accept headers: application/json vs application/xml may expose different fields
+- Query parameter projection: ?fields=*, ?select=*, ?include=* to request all properties
+- Version testing: older API versions (v1 vs v2) may have different filtering
+- Error responses: may contain full object dumps with sensitive properties
+</excessive_data_exposure>
+
+<mass_assignment>
+- Register/create operations: inject extra properties in POST body
+  POST /api/users {"username": "test", "email": "test@test.com", "isAdmin": true, "role": "admin"}
+- Update operations: add unauthorized fields to PATCH/PUT
+  PATCH /api/users/123 {"name": "New Name", "balance": 1000000, "verified": true}
+- Nested injection: {"user": {"profile": {"name": "Test"}, "permissions": {"admin": true}}}
+- Array manipulation: {"roles": ["user", "admin"], "groups": [1, 2, 999]}
+- Type confusion: send objects where primitives expected to bypass validation
+</mass_assignment>
+
+<graphql_specific>
+- Request all fields explicitly in query to detect missing field-level auth
+  query { user(id: 123) { id name email phone ssn isAdmin role salary } }
+- Use inline fragments to access interface/union fields without auth
+- Bypass via aliases: query { user1: user(id: 1) { isAdmin } user2: user(id: 2) { isAdmin } }
+- Introspection to enumerate all available fields, then request sensitive ones
+- Nested queries to access related object properties: user { orders { internalNotes creditCardLast4 } }
+- Mutation testing: try setting all fields in update mutations
+</graphql_specific>
+
+<filtering_bypass>
+- Remove client-side projection: API sends ?fields=name,email but remove filter to get all
+- Default projection: omit fields param to get full object instead of filtered view
+- Wildcard projection: ?fields=* or ?select=* to override whitelist
+- ORM/query builder leaks: some frameworks expose internal field filters that can be manipulated
+- Content negotiation: XML vs JSON vs form-encoded may have different filter rules
+</filtering_bypass>
+</testing_techniques>
+
+<property_targets>
+<authentication_authorization>
+- isAdmin, isActive, isVerified, emailVerified, phoneVerified
+- role, roles[], permissions[], scopes[], authorities[]
+- accessLevel, privilegeLevel, accountType, userType
+- canEdit, canDelete, canApprove, isOwner, isModerator
+- banned, suspended, locked, disabled
+</authentication_authorization>
+
+<financial_sensitive>
+- balance, credits, points, wallet, accountBalance
+- paymentMethods[], cards[], bankAccounts[]
+- transactions[], payments[], invoices[]
+- discountRate, pricing, cost, internalPrice
+- commission, revenue, profit, earning
+</financial_sensitive>
+
+<pii_confidential>
+- email, phone, address, ssn, taxId, dob, birthDate
+- fullName vs displayName (may contain real name when only public name should be visible)
+- ipAddress, userAgent, deviceId, sessionId
+- location, gps, coordinates, lastLogin, loginHistory
+- securityQuestions, recoveryEmail, backupEmail
+</pii_confidential>
+
+<internal_metadata>
+- internalId, systemId, legacyId, externalId
+- createdBy, modifiedBy, deletedBy, approvedBy
+- createdAt, updatedAt, deletedAt (soft delete visibility)
+- version, revision, changeLog, auditLog
+- _meta, _debug, _sql, _internal, _system
+- apiKey, secretKey, token, refreshToken, accessToken
+</internal_metadata>
+</property_targets>
+
+<rest_specific>
+<http_method_property_exposure>
+- GET may filter properties, but POST/PUT on same endpoint may return unfiltered
+- OPTIONS may expose all available properties in schema
+- HEAD responses may include property names in headers
+- DELETE may return full object before deletion
+</http_method_property_exposure>
+
+<query_parameter_abuse>
+- ?fields=admin,role,balance to request sensitive fields
+- ?expand=* or ?include=* to include nested sensitive objects
+- ?debug=true or ?verbose=true may disable filtering
+- ?format=full or ?view=admin to change response projection
+- ?version=internal or ?mode=debug to access unfiltered endpoints
+</query_parameter_abuse>
+
+<path_variations>
+- /api/users/123 vs /api/users/123/admin vs /api/users/123?view=admin
+- /api/v1/users/123 (old version) vs /api/v2/users/123 (new version with better filtering)
+- /api/public/users/123 vs /api/internal/users/123
+</path_variations>
+</rest_specific>
+
+<validation_bypass>
+<server_side_gaps>
+- Validation only on specific properties but not all—inject new properties to bypass
+- Whitelist validation that checks presence but not values—set isAdmin to true passes if isAdmin is allowed
+- Type coercion: send "isAdmin": "true" (string) vs "isAdmin": true (boolean)
+- Null/undefined handling: send null values to reset properties or bypass validation
+- Array/object injection where primitive expected: {"role": {"$ne": "user"}} in NoSQL
+</server_side_gaps>
+
+<client_side_reliance>
+- UI only shows name/email but API returns full user object—client filters, server doesn't
+- Modify client code to request additional fields or remove filtering
+- Intercept and modify API responses to see hidden properties
+- Compare mobile app API calls to web app—different property sets may be exposed
+</client_side_reliance>
+</validation_bypass>
+
+<impact_scenarios>
+<privilege_escalation>
+- Set isAdmin=true, role=admin to gain administrative access
+- Modify permissions[] array to grant unauthorized scopes
+- Change accountType from free to premium
+- Bypass approval workflows by setting approved=true, status=approved
+</privilege_escalation>
+
+<data_exposure>
+- Read other users' PII: email, phone, address, payment info
+- Access internal identifiers that enable further attacks (IDOR)
+- Retrieve API keys, tokens, secrets from user objects
+- View audit logs, system notes, internal comments
+</data_exposure>
+
+<financial_fraud>
+- Increase account balance, credits, points
+- Modify pricing, discounts, commission rates
+- Change payment method ownership
+- Alter transaction history or amounts
+</financial_fraud>
+</impact_scenarios>
+
+<validation>
+1. Prove property exposure: show sensitive property in response that should not be visible to current user
+2. Demonstrate write capability: modify unauthorized property and show server accepted it
+3. Verify persistence: modified property remains changed on subsequent reads
+4. Show impact: privilege escalation (isAdmin), financial gain (balance), or PII access
+5. Compare with authorized user: same operation succeeds without injection for admin
+6. Test multiple endpoints: ensure vulnerability is not isolated to single endpoint
+</validation>
+
+<false_positives>
+- Properties visible but not sensitive (public profile fields)
+- Properties returned but ignored/masked by proper frontend (server sends, UI doesn't render)
+- Test/development environments with debug mode enabled (not production behavior)
+- Properties writable but validated on business logic layer (attempt rejected despite acceptance)
+- Public APIs intended to expose full object for legitimate reasons
+</false_positives>
+
+<impact>
+- Horizontal privilege escalation: read/modify other users' sensitive properties
+- Vertical privilege escalation: grant admin rights, bypass approval workflows
+- Financial fraud: manipulate balances, pricing, payment information
+- PII breach: access confidential personal/financial data
+- Business logic bypass: modify state/status to skip workflows
+</impact>
+
+<pro_tips>
+1. Always diff API responses vs UI display—excess properties are reconnaissance gold
+2. Test mass assignment on every write endpoint—inject isAdmin, role, balance systematically
+3. GraphQL field enumeration via introspection reveals all properties—request them all
+4. Compare responses between different user privilege levels—admin sees what regular users shouldn't
+5. Nested objects often lack property-level checks—go deep into object hierarchies
+6. Arrays of objects are commonly under-validated—inject into nested array elements
+7. Version differences (v1 vs v2) may have different property filters—test all versions
+8. Error responses and debug modes bypass filters—trigger errors intentionally
+9. ORM frameworks expose more properties than intended—understand the ORM in use
+10. Test with different Accept/Content-Type headers—XML/JSON/form may have different validation
+11. Remove client-side projections—omit ?fields= to get default (often full object)
+12. Status/state properties are high-value targets—approved, verified, active, enabled
+</pro_tips>
+
+<remember>Property-level authorization must be enforced server-side for both reads and writes. Whitelist exactly which properties each user role can access/modify, and validate on every operation regardless of client filtering.</remember>
+</broken_object_property_level_authorization_guide>

