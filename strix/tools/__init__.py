@@ -58,6 +58,20 @@ if not SANDBOX_MODE:
     from .timing_analyzer import *  # noqa: F403
     from .websocket_client import *  # noqa: F403
 
+    # New security testing tools (batch 3) - Reconnaissance
+    from .asn_lookup import *  # noqa: F403
+    from .dns_resolver import *  # noqa: F403
+    from .google_dorker import *  # noqa: F403
+    from .ssl_certificate_analyzer import *  # noqa: F403
+    from .wayback_fetcher import *  # noqa: F403
+    from .whois_lookup import *  # noqa: F403
+
+    # New security testing tools (batch 3) - Testing
+    from .cookie_analyzer import *  # noqa: F403
+    from .rate_limit_tester import *  # noqa: F403
+    from .regex_tester import *  # noqa: F403
+    from .sqli_tester import *  # noqa: F403
+
     if HAS_PERPLEXITY_API:
         from .web_search import *  # noqa: F403
 else:
@@ -89,6 +103,20 @@ else:
     from .terminal import *  # noqa: F403
     from .timing_analyzer import *  # noqa: F403
     from .websocket_client import *  # noqa: F403
+
+    # New security testing tools (batch 3) - also available in sandbox mode
+    from .asn_lookup import *  # noqa: F403
+    from .dns_resolver import *  # noqa: F403
+    from .google_dorker import *  # noqa: F403
+    from .ssl_certificate_analyzer import *  # noqa: F403
+    from .wayback_fetcher import *  # noqa: F403
+    from .whois_lookup import *  # noqa: F403
+
+    # New testing tools (batch 3) - also available in sandbox mode
+    from .cookie_analyzer import *  # noqa: F403
+    from .rate_limit_tester import *  # noqa: F403
+    from .regex_tester import *  # noqa: F403
+    from .sqli_tester import *  # noqa: F403
 
 __all__ = [
     "ImplementedInClientSideOnlyError",
