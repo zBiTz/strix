@@ -1,0 +1,420 @@
+<auth0_security_guide>
+<title>AUTH0 SECURITY TESTING</title>
+
+<critical>Auth0 is a widely adopted identity-as-a-service platform. Misconfigurations in Auth0 can lead to authentication bypass, account takeover, privilege escalation, and data exposure. Security testing must cover tenant settings, application configurations, rules/actions, and token handling.</critical>
+
+<scope>
+- Universal Login and custom login pages
+- OAuth 2.0/OIDC flows (authorization code, implicit, PKCE)
+- Rules, Actions, and Hooks (server-side customization)
+- Management API and authentication API
+- Social connections and enterprise federations
+- Multi-factor authentication and passwordless
+- Token validation and JWT handling
+</scope>
+
+<methodology>
+1. Enumerate Auth0 tenant and application configurations via metadata endpoints.
+2. Test OAuth 2.0/OIDC flows for redirect URI validation, state/nonce handling, and token leaks.
+3. Probe rule/action logic for injection and bypass vulnerabilities.
+4. Examine JWT tokens for algorithm confusion, claim manipulation, and validation gaps.
+5. Test MFA enrollment and bypass scenarios.
+</methodology>
+
+<reconnaissance>
+<tenant_discovery>
+{% raw %}
+# Auth0 tenant endpoints
+https://{tenant}.auth0.com/.well-known/openid-configuration
+https://{tenant}.auth0.com/.well-known/jwks.json
+
+# Custom domains
+https://auth.example.com/.well-known/openid-configuration
+
+# Application metadata
+# Check client_id, redirect_uris, grant_types, response_types
+
+# Common tenant naming patterns
+{company}.auth0.com
+{company}-dev.auth0.com
+{company}-staging.auth0.com
+{% endraw %}
+</tenant_discovery>
+
+<client_enumeration>
+{% raw %}
+# Enumerate client IDs from:
+# - JavaScript source code
+# - Mobile app decompilation
+# - Network traffic
+# - Error messages
+
+# Test for exposed Management API credentials
+# Look for: AUTH0_CLIENT_ID, AUTH0_CLIENT_SECRET, AUTH0_DOMAIN
+{% endraw %}
+</client_enumeration>
+</reconnaissance>
+
+<oauth_attacks>
+<redirect_uri_manipulation>
+{% raw %}
+# Test redirect_uri validation strictness
+# Open redirect scenarios
+
+# Path traversal
+redirect_uri=https://example.com/callback/../attacker
+
+# Subdomain bypass
+redirect_uri=https://attacker.example.com/callback
+
+# Parser differential
+redirect_uri=https://example.com@attacker.com
+redirect_uri=https://example.com%40attacker.com
+redirect_uri=https://example.com.attacker.com
+
+# Fragment bypass
+redirect_uri=https://example.com/callback#.attacker.com
+
+# Unicode/encoding bypass
+redirect_uri=https://example.com/callback%2F..%2Fattacker
+{% endraw %}
+</redirect_uri_manipulation>
+
+<authorization_code_attacks>
+{% raw %}
+# Authorization code interception
+# Test if code is exposed in:
+# - URL fragments
+# - Referrer headers
+# - Browser history
+# - Server logs
+
+# Code reuse test
+# Can the same authorization code be used multiple times?
+
+# Cross-client code usage
+# Can a code issued for client_A be used by client_B?
+
+# PKCE bypass
+# Does the server accept requests without code_verifier?
+# Does it accept any code_verifier?
+{% endraw %}
+</authorization_code_attacks>
+
+<state_nonce_attacks>
+{% raw %}
+# Missing state parameter
+# CSRF attack if state not required
+
+GET /authorize?
+  client_id=xxx
+  &response_type=code
+  &redirect_uri=https://app.com/callback
+  # Note: no state parameter
+
+# State fixation
+# Can attacker pre-set state value?
+
+# Nonce validation bypass
+# Is nonce properly validated in ID tokens?
+{% endraw %}
+</state_nonce_attacks>
+
+<implicit_flow_attacks>
+{% raw %}
+# Token in URL fragment - history/referrer leak
+response_type=token
+response_type=id_token token
+
+# Access token exposure via:
+# - JavaScript access to location.hash
+# - Referrer header leakage
+# - Browser history
+{% endraw %}
+</implicit_flow_attacks>
+</oauth_attacks>
+
+<token_attacks>
+<jwt_vulnerabilities>
+{% raw %}
+# Algorithm confusion attack
+# Change RS256 to HS256, use public key as secret
+{
+  "alg": "HS256",
+  "typ": "JWT"
+}
+
+# None algorithm attack
+{
+  "alg": "none",
+  "typ": "JWT"
+}
+
+# Key ID injection
+{
+  "alg": "RS256",
+  "kid": "../../etc/passwd",
+  "typ": "JWT"
+}
+
+# JKU/X5U header injection
+{
+  "alg": "RS256",
+  "jku": "https://attacker.com/jwks.json",
+  "typ": "JWT"
+}
+{% endraw %}
+</jwt_vulnerabilities>
+
+<claim_manipulation>
+{% raw %}
+# Claim injection/modification
+# Check if these claims are properly validated:
+{
+  "sub": "auth0|attacker_user_id",
+  "email": "admin@company.com",
+  "email_verified": true,
+  "roles": ["admin"],
+  "permissions": ["read:all", "write:all"],
+  "app_metadata": {"role": "admin"},
+  "aud": ["https://target-api.com"],
+  "scope": "openid profile email admin"
+}
+
+# Test claim precedence
+# Do app_metadata claims override user claims?
+{% endraw %}
+</claim_manipulation>
+
+<token_validation_bypass>
+{% raw %}
+# Audience validation
+# Test if API accepts tokens with wrong audience
+
+# Issuer validation
+# Test if API accepts tokens from different tenants
+
+# Signature verification
+# Test with modified payload but original signature
+
+# Expiration bypass
+# Test with expired tokens
+# Test with tokens far in the future
+{% endraw %}
+</token_validation_bypass>
+</token_attacks>
+
+<rules_actions_attacks>
+<rule_injection>
+{% raw %}
+# If user input flows into rules/actions:
+# Test for JavaScript injection
+
+# Input via app_metadata or user_metadata
+user_metadata: {
+  "nickname": "'; require('child_process').exec('whoami'); '"
+}
+
+# Context manipulation
+# Can attacker influence context object passed to rules?
+
+# Rule bypass via claim manipulation
+# If rule checks claims, can claims be injected?
+{% endraw %}
+</rule_injection>
+
+<rule_order_bypass>
+{% raw %}
+# Rules execute in order
+# Can early rules be bypassed to skip security checks?
+
+# Test with different connection types
+# Some rules may only apply to specific connections
+
+# Test with different grant types
+# Rules may behave differently for different flows
+{% endraw %}
+</rule_order_bypass>
+
+<action_vulnerabilities>
+{% raw %}
+# Actions can access external services
+# Test for SSRF if URLs are user-controllable
+
+# Secret exposure
+# Are action secrets properly protected?
+
+# Denial of service
+# Can infinite loops or resource exhaustion be triggered?
+{% endraw %}
+</action_vulnerabilities>
+</rules_actions_attacks>
+
+<mfa_attacks>
+<mfa_bypass>
+{% raw %}
+# Test if MFA can be bypassed:
+# - Using different flow/grant type
+# - Through API vs web authentication
+# - With specific client IDs
+# - Via enrollment status manipulation
+
+# Enrollment bypass
+# Can user skip MFA enrollment?
+
+# Factor downgrade
+# Can stronger factor be downgraded to weaker?
+{% endraw %}
+</mfa_bypass>
+
+<mfa_fatigue>
+{% raw %}
+# Push notification fatigue attack
+# Repeatedly trigger MFA prompts until user accepts
+
+# OTP brute force
+# Is there rate limiting on OTP attempts?
+# Is account lockout implemented?
+{% endraw %}
+</mfa_fatigue>
+
+<recovery_code_attacks>
+{% raw %}
+# Recovery code enumeration
+# Are recovery codes predictable?
+
+# Recovery code reuse
+# Can same recovery code be used multiple times?
+
+# Recovery code generation
+# Can attacker trigger new recovery codes?
+{% endraw %}
+</recovery_code_attacks>
+</mfa_attacks>
+
+<management_api>
+<api_exposure>
+{% raw %}
+# Test for exposed Management API tokens
+# Check for: access_token in client-side code
+
+# Test token permissions
+# Can token perform unauthorized operations?
+
+# API endpoints to test:
+GET /api/v2/users
+GET /api/v2/clients
+GET /api/v2/connections
+GET /api/v2/rules
+POST /api/v2/users
+PATCH /api/v2/users/{id}
+{% endraw %}
+</api_exposure>
+
+<rbac_bypass>
+{% raw %}
+# Role-based access control bypass
+# Test role assignment via user_metadata
+# Test direct permission manipulation
+
+# Cross-tenant access
+# Can management token access other tenants?
+
+# Permission scope escalation
+# Can limited token perform admin operations?
+{% endraw %}
+</rbac_bypass>
+</management_api>
+
+<social_connection_attacks>
+<account_linking>
+{% raw %}
+# Account linking vulnerabilities
+# Can attacker link their social account to victim's account?
+
+# Email verification bypass
+# Test if unverified email from social provider is trusted
+
+# Connection switching
+# Can credentials from one connection authenticate another?
+{% endraw %}
+</account_linking>
+
+<social_provider_bypass>
+{% raw %}
+# Test each social provider separately
+# Different providers may have different security postures
+
+# OAuth token reuse
+# Can social provider token be used for other Auth0 clients?
+
+# Provider-specific attacks
+# Facebook: test with test users
+# Google: check service account authentication
+# Apple: test with Sign in with Apple vulnerabilities
+{% endraw %}
+</social_provider_bypass>
+</social_connection_attacks>
+
+<common_payloads>
+{% raw %}
+# Redirect URI manipulation
+redirect_uri=https://target.com/callback/../../../attacker.com
+redirect_uri=https://target.com%2F@attacker.com
+redirect_uri=https://target.com.attacker.com/callback
+
+# JWT algorithm confusion
+# Header: {"alg": "none"}
+# Header: {"alg": "HS256"} with RSA public key as secret
+
+# State bypass
+# Omit state parameter entirely
+
+# Scope escalation
+scope=openid profile email admin:* read:users write:users
+
+# Claim injection (in user_metadata)
+{"role": "admin", "permissions": ["*"]}
+{% endraw %}
+</common_payloads>
+
+<validation>
+1. Demonstrate authentication bypass or unauthorized access.
+2. Show token manipulation leading to privilege escalation.
+3. Prove redirect URI bypass with successful code/token theft.
+4. Document the exact misconfiguration exploited.
+5. Provide reproducible steps including tenant/client configuration.
+</validation>
+
+<false_positives>
+- Strict redirect URI validation with exact matching
+- Proper PKCE enforcement for public clients
+- Correct JWT algorithm and signature validation
+- MFA enforced at tenant level without bypass paths
+- Management API tokens with minimal required permissions
+</false_positives>
+
+<impact>
+- Complete account takeover via authentication bypass
+- Privilege escalation to admin roles
+- Cross-tenant data access
+- OAuth token theft and session hijacking
+- MFA bypass leading to unauthorized access
+- Management API abuse for mass user manipulation
+</impact>
+
+<pro_tips>
+1. Always check the .well-known/openid-configuration for tenant details.
+2. Test all configured OAuth flows; security may vary per flow.
+3. Look for Auth0 credentials in client-side code and mobile apps.
+4. Test rules with various user_metadata inputs for injection.
+5. Check if implicit flow is enabled when it shouldn't be.
+6. Test MFA bypass by authenticating through different paths.
+7. Examine JWTs for weak algorithm configuration.
+8. Look for Management API tokens with overly broad permissions.
+9. Test social connections separately; security varies by provider.
+10. Check for email verification enforcement across all connection types.
+</pro_tips>
+
+<remember>Auth0 security depends on proper configuration at multiple levels: tenant settings, application settings, rules/actions, and token validation. A single misconfiguration can undermine the entire authentication flow. Always test the complete authentication journey, not just individual components.</remember>
+</auth0_security_guide>

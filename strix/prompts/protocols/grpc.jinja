@@ -1,0 +1,463 @@
+<grpc_security_guide>
+<title>gRPC SECURITY TESTING</title>
+
+<critical>gRPC is a high-performance RPC framework using Protocol Buffers for serialization. Its binary nature and lack of browser-native debugging tools create security blind spots. Testing must cover authentication, authorization, message manipulation, and protocol-level attacks specific to gRPC and HTTP/2.</critical>
+
+<scope>
+- Reflection API enumeration and abuse
+- Authentication bypass (mTLS, token-based)
+- Authorization and access control flaws
+- Message manipulation and injection
+- Metadata injection attacks
+- Streaming vulnerabilities
+- HTTP/2 protocol-level attacks
+</scope>
+
+<methodology>
+1. Discover gRPC services via reflection API or proto file analysis.
+2. Enumerate available methods and message structures.
+3. Test authentication mechanisms for bypass vulnerabilities.
+4. Probe authorization: can methods be called without proper permissions?
+5. Examine message handling for injection and validation issues.
+</methodology>
+
+<service_discovery>
+<reflection_api>
+{% raw %}
+# gRPC Server Reflection allows runtime service discovery
+# Often enabled in development, sometimes left in production
+
+# Using grpcurl to list services
+grpcurl -plaintext localhost:50051 list
+
+# Get service details
+grpcurl -plaintext localhost:50051 describe mypackage.MyService
+
+# Get message type details
+grpcurl -plaintext localhost:50051 describe mypackage.MyRequest
+
+# Output example:
+service MyService {
+  rpc GetUser (.mypackage.GetUserRequest) returns (.mypackage.User);
+  rpc UpdateUser (.mypackage.UpdateUserRequest) returns (.mypackage.User);
+  rpc DeleteUser (.mypackage.DeleteUserRequest) returns (.google.protobuf.Empty);
+  rpc AdminOperation (.mypackage.AdminRequest) returns (.mypackage.AdminResponse);
+}
+{% endraw %}
+</reflection_api>
+
+<proto_file_analysis>
+{% raw %}
+# If proto files are available (source code, decompilation):
+
+# Extract from mobile apps (APK/IPA)
+# Look for .proto files or compiled descriptors
+
+# Analyze proto definitions for:
+# - Service methods
+# - Message structures
+# - Field types and constraints
+# - Custom options
+
+# Generate client stubs
+protoc --python_out=. --grpc_python_out=. service.proto
+{% endraw %}
+</proto_file_analysis>
+
+<endpoint_identification>
+{% raw %}
+# gRPC over HTTP/2 characteristics:
+# - Port 443 (with TLS) or 50051 (common default)
+# - Content-Type: application/grpc
+# - POST method only
+# - Path: /{package}.{service}/{method}
+
+# HTTP/2 headers
+:method: POST
+:path: /mypackage.MyService/GetUser
+:scheme: https
+content-type: application/grpc
+{% endraw %}
+</endpoint_identification>
+</service_discovery>
+
+<authentication_attacks>
+<no_auth_testing>
+{% raw %}
+# Test methods without authentication
+
+# Call method directly
+grpcurl -plaintext localhost:50051 mypackage.MyService/GetUser
+
+# If successful without credentials, authentication is missing
+
+# Test each method individually
+# Some may have auth, others may not
+{% endraw %}
+</no_auth_testing>
+
+<token_attacks>
+{% raw %}
+# Token-based authentication via metadata
+
+# Valid token
+grpcurl -plaintext \
+  -H "Authorization: Bearer valid_token" \
+  localhost:50051 mypackage.MyService/GetUser
+
+# Test without token
+grpcurl -plaintext localhost:50051 mypackage.MyService/GetUser
+
+# Test with invalid token
+grpcurl -plaintext \
+  -H "Authorization: Bearer invalid" \
+  localhost:50051 mypackage.MyService/GetUser
+
+# Test with expired token
+grpcurl -plaintext \
+  -H "Authorization: Bearer expired_token" \
+  localhost:50051 mypackage.MyService/GetUser
+
+# Test token from different service
+grpcurl -plaintext \
+  -H "Authorization: Bearer other_service_token" \
+  localhost:50051 mypackage.MyService/GetUser
+{% endraw %}
+</token_attacks>
+
+<mtls_attacks>
+{% raw %}
+# Mutual TLS authentication
+
+# Test without client certificate
+grpcurl -insecure target.com:443 mypackage.MyService/GetUser
+
+# Test with self-signed certificate
+grpcurl -cert self_signed.crt -key self_signed.key \
+  target.com:443 mypackage.MyService/GetUser
+
+# Test with valid cert for different service
+grpcurl -cert other_service.crt -key other_service.key \
+  target.com:443 mypackage.MyService/GetUser
+
+# Check certificate validation
+# - Is CA validated?
+# - Are certificate attributes checked?
+# - Is revocation checked?
+{% endraw %}
+</mtls_attacks>
+</authentication_attacks>
+
+<authorization_attacks>
+<horizontal_access>
+{% raw %}
+# Access other users' data (BOLA/IDOR)
+
+# Get another user's data
+grpcurl -plaintext -d '{"user_id": "other_user_id"}' \
+  localhost:50051 mypackage.MyService/GetUser
+
+# Enumerate user IDs
+for i in {1..100}; do
+  grpcurl -plaintext -d "{\"user_id\": \"user_$i\"}" \
+    localhost:50051 mypackage.MyService/GetUser
+done
+
+# Test with UUID variations
+grpcurl -plaintext -d '{"user_id": "00000000-0000-0000-0000-000000000001"}' \
+  localhost:50051 mypackage.MyService/GetUser
+{% endraw %}
+</horizontal_access>
+
+<vertical_access>
+{% raw %}
+# Access admin/privileged methods
+
+# Call admin methods as regular user
+grpcurl -plaintext \
+  -H "Authorization: Bearer regular_user_token" \
+  localhost:50051 mypackage.MyService/AdminOperation
+
+# Test privilege escalation via message fields
+grpcurl -plaintext -d '{"role": "admin"}' \
+  localhost:50051 mypackage.MyService/UpdateUser
+
+# Test hidden/undocumented methods
+grpcurl -plaintext localhost:50051 mypackage.MyService/InternalMethod
+{% endraw %}
+</vertical_access>
+
+<method_enumeration>
+{% raw %}
+# Enumerate and test all methods
+
+# List all methods
+grpcurl -plaintext localhost:50051 describe mypackage.MyService
+
+# Test each with empty request
+grpcurl -plaintext -d '{}' localhost:50051 mypackage.MyService/GetUser
+grpcurl -plaintext -d '{}' localhost:50051 mypackage.MyService/DeleteUser
+grpcurl -plaintext -d '{}' localhost:50051 mypackage.MyService/AdminMethod
+
+# Note which methods return data vs require auth
+{% endraw %}
+</method_enumeration>
+</authorization_attacks>
+
+<message_attacks>
+<field_manipulation>
+{% raw %}
+# Protobuf message manipulation
+
+# Add unexpected fields
+grpcurl -plaintext -d '{
+  "user_id": "123",
+  "role": "admin",
+  "is_admin": true,
+  "permissions": ["read", "write", "admin"]
+}' localhost:50051 mypackage.MyService/UpdateUser
+
+# Type confusion
+grpcurl -plaintext -d '{"user_id": "123"}' localhost:50051 mypackage.MyService/GetUser
+grpcurl -plaintext -d '{"user_id": 123}' localhost:50051 mypackage.MyService/GetUser
+
+# Large values
+grpcurl -plaintext -d '{"count": 999999999}' localhost:50051 mypackage.MyService/ListUsers
+
+# Negative values
+grpcurl -plaintext -d '{"amount": -1000}' localhost:50051 mypackage.MyService/Transfer
+{% endraw %}
+</field_manipulation>
+
+<injection_in_fields>
+{% raw %}
+# SQL injection via gRPC
+grpcurl -plaintext -d '{"query": "test\" OR 1=1--"}' \
+  localhost:50051 mypackage.MyService/Search
+
+# Command injection
+grpcurl -plaintext -d '{"filename": "test; cat /etc/passwd"}' \
+  localhost:50051 mypackage.MyService/ProcessFile
+
+# Path traversal
+grpcurl -plaintext -d '{"path": "../../../etc/passwd"}' \
+  localhost:50051 mypackage.MyService/ReadFile
+
+# XSS (if data is reflected in web UI)
+grpcurl -plaintext -d '{"name": "<script>alert(1)</script>"}' \
+  localhost:50051 mypackage.MyService/CreateUser
+{% endraw %}
+</injection_in_fields>
+
+<oneof_abuse>
+{% raw %}
+# Protobuf oneof field attacks
+
+# If message uses oneof:
+# message Request {
+#   oneof type {
+#     UserRequest user = 1;
+#     AdminRequest admin = 2;
+#   }
+# }
+
+# Try setting the privileged variant
+grpcurl -plaintext -d '{"admin": {"action": "delete_all"}}' \
+  localhost:50051 mypackage.MyService/Process
+{% endraw %}
+</oneof_abuse>
+</message_attacks>
+
+<metadata_attacks>
+<header_injection>
+{% raw %}
+# gRPC metadata (headers) injection
+
+# Inject sensitive headers
+grpcurl -plaintext \
+  -H "x-user-id: admin" \
+  -H "x-role: administrator" \
+  -H "x-internal: true" \
+  localhost:50051 mypackage.MyService/GetUser
+
+# Test for header trust
+grpcurl -plaintext \
+  -H "x-forwarded-for: 127.0.0.1" \
+  -H "x-real-ip: 127.0.0.1" \
+  localhost:50051 mypackage.MyService/AdminMethod
+
+# Custom auth headers
+grpcurl -plaintext \
+  -H "x-api-key: test" \
+  -H "x-auth-token: admin_token" \
+  localhost:50051 mypackage.MyService/GetUser
+{% endraw %}
+</header_injection>
+
+<deadline_attacks>
+{% raw %}
+# gRPC deadline (timeout) manipulation
+
+# Set very long deadline
+grpcurl -plaintext \
+  -connect-timeout 3600 \
+  -max-time 3600 \
+  localhost:50051 mypackage.MyService/LongOperation
+
+# Set very short deadline (DoS potential)
+# May cause partial operations
+
+# Deadline propagation issues
+# If service calls other services, deadline may not propagate correctly
+{% endraw %}
+</deadline_attacks>
+</metadata_attacks>
+
+<streaming_attacks>
+<client_streaming>
+{% raw %}
+# Client streaming vulnerabilities
+
+# Send massive stream
+for i in {1..1000000}; do
+  echo '{"data": "chunk_'$i'"}'
+done | grpcurl -plaintext -d @ localhost:50051 mypackage.MyService/Upload
+
+# Send stream without completing
+# May leave resources allocated
+
+# Stream with malformed messages
+{% endraw %}
+</client_streaming>
+
+<server_streaming>
+{% raw %}
+# Server streaming attacks
+
+# Request stream that never ends
+grpcurl -plaintext -d '{"filter": ""}' \
+  localhost:50051 mypackage.MyService/Subscribe
+
+# Request large stream
+grpcurl -plaintext -d '{"limit": 999999999}' \
+  localhost:50051 mypackage.MyService/ListAll
+
+# Cancel stream mid-way
+# Test resource cleanup
+{% endraw %}
+</server_streaming>
+
+<bidirectional>
+{% raw %}
+# Bidirectional streaming
+# Most complex attack surface
+
+# Race conditions in message handling
+# Out-of-order messages
+# Stream hijacking (if connection reused)
+{% endraw %}
+</bidirectional>
+</streaming_attacks>
+
+<protocol_attacks>
+<http2_attacks>
+{% raw %}
+# HTTP/2 specific attacks
+
+# HPACK bombing (header compression)
+# Send many headers to exhaust table space
+
+# Stream multiplexing abuse
+# Open many streams concurrently
+
+# Flow control attacks
+# Manipulate window sizes
+
+# PING flood
+# Send excessive PING frames
+{% endraw %}
+</http2_attacks>
+
+<grpc_web>
+{% raw %}
+# gRPC-Web bridges HTTP/1.1 to gRPC
+
+# Test via HTTP/1.1
+curl -X POST \
+  -H "Content-Type: application/grpc-web-text" \
+  -H "X-Grpc-Web: 1" \
+  -d "base64_encoded_message" \
+  https://target.com/mypackage.MyService/GetUser
+
+# gRPC-Web may have different auth than native gRPC
+# Test both paths
+{% endraw %}
+</grpc_web>
+</protocol_attacks>
+
+<testing_tools>
+{% raw %}
+# grpcurl - CLI for gRPC
+brew install grpcurl  # or go install
+grpcurl -plaintext localhost:50051 list
+
+# grpcui - Web UI for gRPC
+go install github.com/fullstorydev/grpcui/cmd/grpcui@latest
+grpcui -plaintext localhost:50051
+
+# BloomRPC - GUI client
+# Evans - Another CLI tool
+# Postman - Has gRPC support
+
+# Burp Suite with gRPC extensions
+# - gRPC/Protobuf decoder
+# - grpc-scan
+
+# Custom Python client
+import grpc
+channel = grpc.insecure_channel('localhost:50051')
+stub = mypackage_pb2_grpc.MyServiceStub(channel)
+response = stub.GetUser(mypackage_pb2.GetUserRequest(user_id='123'))
+{% endraw %}
+</testing_tools>
+
+<validation>
+1. Demonstrate unauthorized method access via reflection enumeration.
+2. Show authentication bypass by calling protected methods.
+3. Prove IDOR by accessing other users' data.
+4. Document message manipulation leading to privilege escalation.
+5. Provide reproducible grpcurl commands.
+</validation>
+
+<false_positives>
+- Reflection API disabled in production
+- Proper authentication on all methods
+- Authorization checks at method and field level
+- Input validation preventing injection
+- Rate limiting and resource controls
+</false_positives>
+
+<impact>
+- Service enumeration via reflection API
+- Authentication bypass leading to unauthorized access
+- Data exposure through IDOR vulnerabilities
+- Privilege escalation via message manipulation
+- Denial of service through streaming abuse
+- Remote code execution via injection attacks
+</impact>
+
+<pro_tips>
+1. Always check if reflection API is enabled; it's a goldmine for enumeration.
+2. Use grpcui for interactive testing; it generates UI from reflection.
+3. Test authentication on each method separately; coverage may be inconsistent.
+4. Examine proto files for hidden services and deprecated methods.
+5. Test field validation; protobuf doesn't enforce all constraints.
+6. Check for different auth mechanisms on gRPC-Web vs native gRPC.
+7. Monitor for error messages revealing internal structure.
+8. Test streaming endpoints for resource exhaustion.
+9. Look for admin/internal methods exposed alongside public methods.
+10. Test with malformed protobuf to check parser robustness.
+</pro_tips>
+
+<remember>gRPC's binary nature creates a false sense of security. The same vulnerabilities that affect REST APIs exist in gRPC: authentication bypass, authorization flaws, injection attacks, and IDOR. The reflection API often provides a roadmap to all available methods. Always test as if the attacker has full knowledge of the service definition.</remember>
+</grpc_security_guide>

