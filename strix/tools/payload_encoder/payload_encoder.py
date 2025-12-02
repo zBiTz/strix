@@ -220,6 +220,8 @@ def payload_encoder(
                         try:
                             results[enc_name] = decode_fn(payload)
                         except (ValueError, UnicodeDecodeError, base64.binascii.Error):
+                            # Expected: not all encodings will decode a given payload successfully.
+                            # Silently skip failed decodings and continue trying other formats.
                             pass
 
                 return {
