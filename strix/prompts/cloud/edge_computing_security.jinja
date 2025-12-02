@@ -1,0 +1,42 @@
+<edge_computing_security_guide>
+<title>EDGE COMPUTING SECURITY TESTING</title>
+
+<critical>Edge computing security covers Cloudflare Workers, Vercel Edge Functions, Deno Deploy, and Lambda@Edge. Testing focuses on edge-specific vulnerabilities, KV store security, and geographic bypass.</critical>
+
+<scope>
+- Cloudflare Workers security
+- Vercel Edge Functions
+- Deno Deploy testing
+- AWS Lambda@Edge
+- Edge-specific vulnerabilities
+- KV store security
+- Geographic bypass
+</scope>
+
+<cloudflare_workers>
+{% raw %}
+# Workers security:
+# Check for exposed secrets:
+env.API_KEY
+
+# Test KV store access:
+await NAMESPACE.get('key')
+
+# SSRF via fetch():
+await fetch(userInput)
+{% endraw %}
+</cloudflare_workers>
+
+<edge_bypass>
+{% raw %}
+# Geographic restrictions bypass:
+# Use VPN/proxy in allowed region
+
+# Edge cache bypass:
+# Cache-Control: no-cache
+# Pragma: no-cache
+{% endraw %}
+</edge_bypass>
+
+<remember>Edge security: Check Workers for secret exposure, test KV store permissions, validate fetch() SSRF protection, attempt geographic bypass.</remember>
+</edge_computing_security_guide>

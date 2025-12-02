@@ -80,6 +80,12 @@ if not SANDBOX_MODE:
     from .waf_detector import *  # noqa: F403
     from .xxe_tester import *  # noqa: F403
 
+    # New security testing tools (batch 5) - Specialized Tools
+    from .cve_lookup import *  # noqa: F403
+    from .cvss_calculator import *  # noqa: F403
+    from .entropy_analyzer import *  # noqa: F403
+    from .polyglot_generator import *  # noqa: F403
+
     if HAS_PERPLEXITY_API:
         from .web_search import *  # noqa: F403
 else:
@@ -133,6 +139,12 @@ else:
     from .ssti_tester import *  # noqa: F403
     from .waf_detector import *  # noqa: F403
     from .xxe_tester import *  # noqa: F403
+
+    # New security testing tools (batch 5) - also available in sandbox mode
+    from .cve_lookup import *  # noqa: F403
+    from .cvss_calculator import *  # noqa: F403
+    from .entropy_analyzer import *  # noqa: F403
+    from .polyglot_generator import *  # noqa: F403
 
 __all__ = [
     "ImplementedInClientSideOnlyError",

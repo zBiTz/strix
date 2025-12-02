@@ -1,0 +1,43 @@
+<service_mesh_security_guide>
+<title>SERVICE MESH SECURITY TESTING</title>
+
+<critical>Service mesh security testing covers Istio/Envoy vulnerabilities, mTLS bypass, authorization policy bypass, sidecar injection attacks, and control plane exploitation.</critical>
+
+<scope>
+- Istio security testing
+- Envoy proxy exploitation
+- mTLS bypass techniques
+- Sidecar injection attacks
+- Authorization policy bypass
+- Traffic interception
+- Control plane attacks
+</scope>
+
+<mtls_testing>
+{% raw %}
+# mTLS bypass:
+# Check if mTLS enforced:
+kubectl get peerauthentication -n namespace
+
+# Test without client cert:
+curl http://service.namespace.svc.cluster.local:8080
+
+# Sidecar bypass:
+# Direct pod IP access bypasses sidecar
+curl http://10.244.1.5:8080
+{% endraw %}
+</mtls_testing>
+
+<authorization_bypass>
+{% raw %}
+# Authorization policy testing:
+# Check policies:
+kubectl get authorizationpolicies -A
+
+# Test unauthorized access:
+curl -H "Authorization: Bearer invalid" http://service/admin
+{% endraw %}
+</authorization_bypass>
+
+<remember>Service mesh security: Test mTLS enforcement, check authorization policies, attempt sidecar bypass via direct pod access, validate control plane security.</remember>
+</service_mesh_security_guide>

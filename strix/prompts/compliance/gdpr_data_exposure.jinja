@@ -1,0 +1,772 @@
+<gdpr_compliance_guide>
+<title>GDPR DATA EXPOSURE AND COMPLIANCE TESTING</title>
+
+<critical>General Data Protection Regulation (GDPR) compliance testing ensures proper handling of personal data for EU residents. Testing must cover data discovery, consent mechanisms, data subject rights (access, deletion, portability), cross-border transfers, privacy by design, and data minimization principles.</critical>
+
+<scope>
+- Personal data discovery and classification
+- Sensitive personal data (Article 9) handling
+- Consent mechanism validation
+- Right to access (Article 15) implementation
+- Right to erasure/"Right to be Forgotten" (Article 17)
+- Right to data portability (Article 20)
+- Cross-border data transfer compliance
+- Data minimization and purpose limitation
+- Privacy by design and default
+- Data breach notification procedures
+- Data Processing Agreements (DPA) validation
+</scope>
+
+<methodology>
+1. Discover and classify all personal data collection points.
+2. Test consent mechanisms for compliance and revocability.
+3. Validate data subject rights implementations (access, erasure, portability).
+4. Assess cross-border data transfer mechanisms.
+5. Test data minimization and retention policies.
+6. Verify privacy controls and default settings.
+7. Check lawful basis for processing.
+8. Test data breach detection and notification procedures.
+</methodology>
+
+<personal_data_discovery>
+<data_identification>
+{% raw %}
+# Personal data under GDPR includes:
+
+# Identification data:
+# - Name, address, email
+# - Phone number
+# - ID numbers (passport, driver's license)
+# - IP addresses
+# - Cookie identifiers
+# - Device IDs
+# - Location data
+# - Online identifiers
+
+# Sensitive personal data (Article 9):
+# - Racial or ethnic origin
+# - Political opinions
+# - Religious or philosophical beliefs
+# - Trade union membership
+# - Genetic data
+# - Biometric data
+# - Health data
+# - Sex life or sexual orientation
+
+# Test for personal data collection:
+# Check all forms, APIs, cookies, tracking
+{% endraw %}
+</data_identification>
+
+<data_mapping>
+{% raw %}
+# Create data flow map:
+
+# 1. Collection points:
+# - Registration forms
+# - Contact forms
+# - Newsletter signup
+# - Cookie consent
+# - Analytics tracking
+# - Third-party integrations
+
+# 2. Storage locations:
+# - Primary database
+# - Backup systems
+# - Log files
+# - Analytics platforms
+# - CRM systems
+# - Email marketing tools
+
+# 3. Data transfers:
+# - To third-party processors
+# - Cross-border transfers
+# - API integrations
+# - Affiliate networks
+
+# Test for undocumented data collection:
+# Intercept all requests during user journey
+# Document all data fields sent to server
+# Compare against privacy policy
+{% endraw %}
+</data_mapping>
+
+<excessive_data_collection>
+{% raw %}
+# Test for data minimization violations:
+
+# Registration form:
+POST /register
+{
+  "email": "user@example.com",
+  "password": "password123",
+  "full_name": "John Doe",
+  "date_of_birth": "1990-01-01",
+  "phone": "+1234567890",
+  "address": "123 Main St",
+  "city": "New York",
+  "postal_code": "10001",
+  "country": "USA",
+  "social_security": "123-45-6789",  # Excessive
+  "ethnicity": "Caucasian",  # Sensitive, may be excessive
+  "income": "75000"  # Excessive
+}
+# Question: Is all this data necessary for the purpose?
+
+# Principle: Collect only data necessary for stated purpose
+# Test: Can user register with minimal data?
+POST /register
+{
+  "email": "user@example.com",
+  "password": "password123"
+}
+# Should be sufficient for basic account
+
+# Check required vs optional fields:
+# All fields should have clear justification
+# Optional fields should be clearly marked
+{% endraw %}
+</excessive_data_collection>
+</personal_data_discovery>
+
+<consent_management>
+<consent_validation>
+{% raw %}
+# GDPR consent requirements:
+# - Freely given
+# - Specific
+# - Informed
+# - Unambiguous
+# - Easily withdrawn
+
+# Test consent mechanism:
+
+# 1. Pre-checked boxes (NON-COMPLIANT):
+<input type="checkbox" name="marketing" checked>
+I agree to receive marketing emails
+
+# 2. Compliant opt-in:
+<input type="checkbox" name="marketing">
+I consent to receive marketing emails
+
+# 3. Bundled consent (NON-COMPLIANT):
+<input type="checkbox" name="terms_and_marketing" required>
+I agree to Terms and to receive marketing
+
+# Should be separate:
+<input type="checkbox" name="terms" required>
+I agree to Terms of Service (required)
+<input type="checkbox" name="marketing">
+I consent to marketing emails (optional)
+
+# Test consent granularity:
+POST /user/consent
+{
+  "marketing_email": true,
+  "marketing_sms": false,
+  "analytics": true,
+  "third_party_sharing": false
+}
+# User should be able to consent to specific purposes
+{% endraw %}
+</consent_validation>
+
+<consent_withdrawal>
+{% raw %}
+# Test consent withdrawal:
+
+# Must be as easy as giving consent
+# No dark patterns
+# Immediate effect
+
+# Test withdrawal process:
+# 1. User withdraws marketing consent
+POST /user/consent/withdraw
+{"consent_type": "marketing_email"}
+
+# 2. Verify processing stops
+# Check if user still receives marketing emails
+# Should stop immediately
+
+# 3. Test consent status:
+GET /user/consent
+Response: {
+  "marketing_email": false,
+  "marketing_sms": false,
+  "analytics": true
+}
+
+# 4. Test data deletion after withdrawal:
+# Some data may need to be deleted
+# E.g., marketing profile data
+
+# Test for consent wall (may be non-compliant):
+# Access to service denied without consent to non-essential processing
+# Example: "Accept all cookies or leave"
+# May violate "freely given" requirement
+{% endraw %}
+</consent_withdrawal>
+
+<cookie_consent>
+{% raw %}
+# Test cookie consent banner:
+
+# Non-essential cookies should NOT load before consent
+# Check before clicking accept:
+document.cookie
+# Should only show essential cookies
+
+# Test cookie categories:
+# - Strictly necessary (no consent required)
+# - Functional/preference
+# - Analytics/performance
+# - Marketing/advertising
+
+# Test granular consent:
+# User should be able to accept some categories, reject others
+
+# Test reject all:
+# Click "Reject all"
+# Check cookies loaded:
+document.cookie
+# Should only have essential cookies
+
+# Test cookie banner dark patterns:
+# - "Accept all" button prominent, "Reject" hidden
+# - Multiple clicks to reject vs one click to accept
+# - Misleading language
+# - Auto-scroll = consent
+{% endraw %}
+</cookie_consent>
+</consent_management>
+
+<data_subject_rights>
+<right_to_access>
+{% raw %}
+# Article 15: Right to access personal data
+
+# Test data access request:
+GET /api/user/data-export
+# or
+POST /api/user/data-export
+{"format": "json"}
+
+# Should provide:
+# 1. Confirmation that data is processed
+# 2. Copy of personal data
+# 3. Categories of data
+# 4. Purposes of processing
+# 5. Recipients of data
+# 6. Retention period
+# 7. Rights information (rectification, erasure, etc.)
+# 8. Source of data (if not collected from user)
+
+# Response format:
+{
+  "personal_data": {
+    "profile": {
+      "name": "John Doe",
+      "email": "john@example.com",
+      "phone": "+1234567890"
+    },
+    "orders": [...],
+    "preferences": {...},
+    "consent_history": [...]
+  },
+  "processing_purposes": [
+    "Account management",
+    "Order fulfillment",
+    "Marketing (with consent)"
+  ],
+  "data_recipients": [
+    "Payment processor (Stripe)",
+    "Email service (SendGrid)",
+    "Analytics (Google Analytics)"
+  ],
+  "retention_period": "2 years after account closure",
+  "data_sources": ["User registration", "Purchase history"]
+}
+
+# Test access control:
+# Request as User A should only return User A's data
+# Test IDOR:
+GET /api/user/123/data-export  # User 123's data
+GET /api/user/124/data-export  # User 124's data (should fail)
+
+# Timeline requirement:
+# Must respond within 1 month (extendable to 3 months)
+# Test: Submit request, check response time
+{% endraw %}
+</right_to_access>
+
+<right_to_erasure>
+{% raw %}
+# Article 17: Right to be forgotten
+
+# Test data deletion:
+POST /api/user/delete-account
+# or
+DELETE /api/user/account
+
+# Should delete:
+# 1. Personal data from active databases
+# 2. Backup copies (within backup retention)
+# 3. Log files containing personal data
+# 4. Analytics profiles
+# 5. Third-party shared data (notify processors)
+
+# Test deletion completeness:
+# After deletion request:
+# 1. Login should fail
+GET /login
+{"email": "deleted@example.com", "password": "pass"}
+# Should return "account not found"
+
+# 2. Data should not appear in search
+GET /api/admin/users/search?email=deleted@example.com
+# Should return no results
+
+# 3. API should not return data
+GET /api/user/deleted-user-id
+# Should return 404 or error
+
+# 4. Check database:
+SELECT * FROM users WHERE email='deleted@example.com';
+# Should return 0 rows
+
+# Exceptions to deletion:
+# - Legal obligation to retain
+# - Public interest
+# - Legal claims defense
+# - Archiving purposes
+
+# Test deletion with exceptions:
+POST /api/user/delete-account
+Response: {
+  "status": "partially_deleted",
+  "retained_data": "Financial records (legal requirement)",
+  "retention_period": "7 years"
+}
+
+# Soft delete vs hard delete:
+# Test if data is truly deleted or just marked inactive
+SELECT * FROM users WHERE email='deleted@example.com' AND deleted_at IS NOT NULL;
+# If returns data, it's soft delete
+# Hard delete is preferred for GDPR compliance
+{% endraw %}
+</right_to_erasure>
+
+<right_to_data_portability>
+{% raw %}
+# Article 20: Right to data portability
+
+# User should receive data in structured, commonly used, machine-readable format
+
+# Test data export:
+GET /api/user/export
+Accept: application/json
+
+# Response should be structured JSON:
+{
+  "profile": {...},
+  "orders": [...],
+  "preferences": {...}
+}
+
+# Test export formats:
+GET /api/user/export?format=json
+GET /api/user/export?format=csv
+GET /api/user/export?format=xml
+
+# All should be machine-readable
+
+# Test direct transfer to another controller:
+POST /api/user/transfer
+{
+  "destination": "https://competitor.com/import",
+  "api_key": "destination_api_key"
+}
+# Should facilitate direct transfer if technically feasible
+
+# Portability scope:
+# Only data:
+# - Provided by data subject
+# - Processing based on consent or contract
+# - Processing is automated
+
+# Should NOT include:
+# - Derived/inferred data
+# - Data about others
+# - Proprietary algorithms
+{% endraw %}
+</right_to_data_portability>
+
+<right_to_rectification>
+{% raw %}
+# Article 16: Right to rectification
+
+# User should be able to correct inaccurate data
+
+# Test data update:
+PUT /api/user/profile
+{
+  "name": "John Doe Corrected",
+  "email": "newemail@example.com",
+  "phone": "+9876543210"
+}
+
+# Updates should propagate to:
+# - All internal systems
+# - Third-party processors (notification)
+# - Backup systems (eventually)
+
+# Test correction request process:
+POST /api/user/rectification-request
+{
+  "field": "date_of_birth",
+  "current_value": "1990-01-01",
+  "corrected_value": "1991-01-01",
+  "proof": "passport_scan.pdf"
+}
+
+# Should be reviewed and applied within 1 month
+{% endraw %}
+</right_to_rectification>
+
+<right_to_restriction>
+{% raw %}
+# Article 18: Right to restriction of processing
+
+# User can request to limit processing while:
+# - Accuracy is being verified
+# - Processing is unlawful but user doesn't want deletion
+# - Data no longer needed but user needs for legal claims
+# - Objection to processing is pending
+
+# Test restriction:
+POST /api/user/restrict-processing
+{
+  "reason": "accuracy_challenge",
+  "description": "Date of birth is incorrect"
+}
+
+# During restriction:
+# - Data can be stored
+# - Cannot be processed (except with consent or legal claims)
+# - Marketing should stop
+# - Analytics should exclude user
+
+# Test processing during restriction:
+# User has restricted processing
+# Attempt to send marketing email
+# Should be blocked
+
+GET /api/marketing/targets
+# Restricted user should not appear
+{% endraw %}
+</right_to_restriction>
+
+<right_to_object>
+{% raw %}
+# Article 21: Right to object to processing
+
+# Particularly for:
+# - Direct marketing
+# - Profiling for marketing
+# - Processing based on legitimate interests
+# - Scientific/historical research
+
+# Test objection to marketing:
+POST /api/user/object-processing
+{"processing_type": "marketing"}
+
+# User should be removed from marketing lists immediately
+
+# Test objection to profiling:
+POST /api/user/object-processing
+{"processing_type": "profiling"}
+
+# Profiling for personalization should stop
+
+# Marketing objection must be honored:
+# No "compelling legitimate grounds" override
+{% endraw %}
+</right_to_object>
+</data_subject_rights>
+
+<cross_border_transfers>
+<adequacy_testing>
+{% raw %}
+# Test for international data transfers:
+
+# Identify data transfer locations:
+# Check DNS/IP geolocation
+nslookup api.example.com
+whois 203.0.113.1
+
+# Check CDN/cloud providers:
+# - AWS region
+# - Azure region
+# - GCP region
+dig example.com
+# Check CNAME records for cloud provider
+
+# Adequacy decisions:
+# EU Commission approved countries:
+# - UK, Switzerland, Israel, Japan, Canada, etc.
+# Transfers to these OK without additional safeguards
+
+# Non-adequate countries (e.g., USA):
+# Require additional safeguards:
+# - Standard Contractual Clauses (SCCs)
+# - Binding Corporate Rules (BCRs)
+# - Certification mechanisms
+
+# Test for transfers to US:
+curl https://api.example.com/user/data
+# Check response headers for server location
+# Check data storage location
+
+# Privacy Shield invalidated (Schrems II)
+# Test for reliance on Privacy Shield:
+# Check privacy policy for "Privacy Shield" mentions
+# If found, likely non-compliant
+{% endraw %}
+</adequacy_testing>
+
+<scc_validation>
+{% raw %}
+# Standard Contractual Clauses (SCCs) testing:
+
+# Check for SCC implementation:
+# 1. Download privacy policy
+# 2. Check for "Standard Contractual Clauses" mention
+# 3. Verify SCC version (2021 version required)
+
+# Test data processor agreements:
+# Request copy of DPA
+GET /legal/data-processing-agreement
+
+# DPA should include:
+# - SCCs (if transfers outside EU)
+# - Data processing terms
+# - Security measures
+# - Sub-processor list
+# - Data breach notification
+# - Audit rights
+
+# Test sub-processor transparency:
+GET /legal/sub-processors
+# Should list all sub-processors
+# Should notify of changes
+{% endraw %}
+</scc_validation>
+</cross_border_transfers>
+
+<privacy_by_design>
+<default_privacy_settings>
+{% raw %}
+# GDPR requires privacy by default:
+
+# Test default settings after registration:
+GET /api/user/settings
+Response: {
+  "profile_visibility": "private",  # Should be most private by default
+  "marketing_consent": false,  # Should be opt-in, not opt-out
+  "data_sharing": false,  # Should be disabled by default
+  "search_indexing": false  # Should be disabled by default
+}
+
+# Privacy-invasive settings should be OFF by default
+
+# Test account creation defaults:
+POST /register
+{"email": "user@example.com", "password": "pass"}
+# Check created user's settings
+SELECT * FROM user_settings WHERE user_id = [new_user_id];
+# All optional data sharing should be FALSE
+
+# Social media integration:
+# Should be opt-in, not automatic
+# Test: Create account
+# Verify profile not automatically shared/linked
+{% endraw %}
+</default_privacy_settings>
+
+<data_minimization>
+{% raw %}
+# Test data minimization:
+
+# 1. Purpose limitation:
+# Data collected for purpose A should not be used for purpose B
+
+# Example:
+# Email collected for account management
+# Should NOT be used for marketing without consent
+
+# Test:
+POST /register
+{"email": "user@example.com"}  # No marketing consent
+# Later: Check if user receives marketing emails
+# Should NOT receive them
+
+# 2. Retention limits:
+# Data should not be kept longer than necessary
+
+# Test retention policies:
+GET /legal/retention-policy
+# Should specify retention periods for each data category
+
+# Test old data deletion:
+# Create account, wait for retention period, check if deleted
+# Or check for old test accounts:
+SELECT * FROM users WHERE created_at < NOW() - INTERVAL 2 YEAR AND last_login < NOW() - INTERVAL 1 YEAR;
+# If retention policy says 1 year after inactivity, these should be deleted
+
+# 3. Anonymization:
+# Old data should be anonymized if possible
+
+SELECT user_id, anonymized FROM analytics WHERE date < NOW() - INTERVAL 6 MONTH;
+# Should show anonymized = true for old data
+{% endraw %}
+</data_minimization>
+</privacy_by_design>
+
+<breach_notification>
+<breach_detection_testing>
+{% raw %}
+# Test data breach detection:
+
+# Simulate breach scenarios:
+# 1. Unauthorized data export
+GET /api/admin/users/export-all
+# Without proper authorization
+
+# 2. SQL injection extracting data
+GET /search?q=1' UNION SELECT email,password FROM users--
+
+# 3. IDOR accessing multiple accounts
+for i in {1..1000}; do
+  curl https://api.example.com/user/$i/profile
+done
+
+# Check if breach detected:
+# - IDS/IPS alerts
+# - SIEM alerts
+# - Rate limiting triggered
+# - Admin notifications
+
+# Timeline for notification:
+# - Discover breach
+# - 72 hours to notify supervisory authority
+# - "Without undue delay" to notify data subjects
+{% endraw %}
+</breach_detection_testing>
+
+<notification_procedures>
+{% raw %}
+# Test breach notification procedures:
+
+# Check for breach notification plan:
+GET /legal/breach-notification-procedure
+
+# Should include:
+# 1. Incident response team
+# 2. Assessment procedures
+# 3. Notification templates
+# 4. Contact information for supervisory authority
+# 5. Communication plan for data subjects
+
+# Test notification mechanism:
+# How would users be notified of breach?
+# - Email?
+# - In-app notification?
+# - Website banner?
+
+# Notification should include:
+# - Nature of breach
+# - Likely consequences
+# - Measures taken
+# - Contact point for more information
+{% endraw %}
+</notification_procedures>
+</breach_notification>
+
+<common_payloads>
+{% raw %}
+# Data discovery:
+GET /api/user/profile
+GET /api/user/export
+GET /api/user/data
+
+# Access other users' data (IDOR):
+GET /api/user/1/data
+GET /api/user/2/data
+
+# SQL injection for data extraction:
+' UNION SELECT email, password FROM users--
+1' OR '1'='1
+
+# Test consent bypass:
+POST /api/marketing/send
+{"user_id": 123}  # Without checking consent
+
+# Cookie tracking without consent:
+document.cookie = "tracking_id=abc123; domain=.example.com; max-age=31536000"
+
+# Test data deletion:
+DELETE /api/user/account
+POST /api/user/delete
+
+# Test data portability:
+GET /api/user/export?format=json
+GET /api/user/export?format=csv
+{% endraw %}
+</common_payloads>
+
+<validation>
+1. Demonstrate excessive personal data collection without justification.
+2. Show non-compliant consent mechanisms (pre-checked boxes, bundled consent).
+3. Prove data subject rights not implemented (access, erasure, portability).
+4. Document cross-border transfers without adequate safeguards.
+5. Show privacy-invasive default settings.
+6. Demonstrate data retained beyond stated retention period.
+7. Prove processing without lawful basis.
+</validation>
+
+<false_positives>
+- Data collection with clear, specific purpose and consent
+- Properly implemented data subject rights (within 1 month)
+- Privacy-friendly default settings
+- Transparent, granular consent mechanisms
+- Adequate safeguards for cross-border transfers (SCCs)
+- Regular data deletion per retention policy
+- Clear, accessible privacy policy
+</false_positives>
+
+<impact>
+- GDPR fines up to €20M or 4% of global annual turnover (whichever higher)
+- Supervisory authority investigations and corrective measures
+- Mandatory breach notification (72 hours to authority)
+- Individual compensation claims from affected users
+- Reputation damage and loss of customer trust
+- Injunctions to stop processing
+- Suspension of data flows to non-EU countries
+- Criminal liability for serious violations (some jurisdictions)
+</impact>
+
+<pro_tips>
+1. Map all personal data collection points and storage locations.
+2. Test consent mechanisms for GDPR compliance (no pre-checked boxes).
+3. Verify all data subject rights are implemented and functional.
+4. Check default privacy settings (should be most protective).
+5. Test data deletion is complete (hard delete, not soft delete).
+6. Look for excessive data collection (minimization principle).
+7. Verify cross-border transfer safeguards (SCCs for non-adequate countries).
+8. Check cookie consent implementation (no non-essential cookies before consent).
+9. Test data portability in machine-readable format.
+10. Verify retention policies are enforced with automated deletion.
+</pro_tips>
+
+<remember>GDPR compliance is fundamentally about user control and transparency over personal data. The most critical tests are: verifying data subject rights implementation (especially access, erasure, portability), testing consent mechanisms for compliance, checking default privacy settings, and validating cross-border transfer safeguards. Consent must be freely given, specific, informed, unambiguous, and easily withdrawn. Data minimization and purpose limitation are core principles - collect only what's necessary for stated purposes. Fines can be up to €20M or 4% of global revenue.</remember>
+</gdpr_compliance_guide>
