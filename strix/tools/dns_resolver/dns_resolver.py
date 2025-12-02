@@ -181,6 +181,7 @@ def _lookup_all_records(domain: str) -> dict[str, Any]:
         if cname != domain:
             results["records"]["CNAME"] = [cname]
     except (socket.gaierror, socket.herror, OSError):
+        # No CNAME record found or DNS error; ignore and continue.
         pass
 
     # MX records
@@ -204,6 +205,7 @@ def _lookup_all_records(domain: str) -> dict[str, Any]:
             if ips:
                 security_records["spf_indicator"] = "Domain resolves, SPF may exist"
         except (socket.gaierror, socket.herror, OSError):
+            # Ignore DNS resolution errors for SPF check; not all domains have SPF records.
             pass
 
     # DMARC check

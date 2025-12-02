@@ -151,6 +151,7 @@ def _analyze_cookie_security(cookie: dict[str, Any]) -> dict[str, Any]:
                     "issue": "Cookie has very long expiration (>1 year)",
                 })
         except ValueError:
+            # Ignore invalid max-age values; treat as no expiration set.
             pass
 
     return {

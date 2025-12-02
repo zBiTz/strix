@@ -192,22 +192,15 @@ def _analyze_pattern(pattern: str) -> dict[str, Any]:
     # Validate pattern
     try:
         compiled = re.compile(pattern)
-        is_valid = True
-        compile_error = None
     except re.error as e:
-        is_valid = False
-        compile_error = str(e)
-        compiled = None
-
-    if not is_valid:
         return {
             "pattern": pattern,
             "is_valid": False,
-            "error": compile_error,
+            "error": str(e),
         }
 
     # Get pattern info
-    groups = compiled.groups if compiled else 0
+    groups = compiled.groups
 
     # Safety analysis
     safety = _test_regex_safety(pattern)
@@ -217,7 +210,7 @@ def _analyze_pattern(pattern: str) -> dict[str, Any]:
 
     return {
         "pattern": pattern,
-        "is_valid": is_valid,
+        "is_valid": True,
         "groups": groups,
         "safety_analysis": safety,
         "benchmark": {
