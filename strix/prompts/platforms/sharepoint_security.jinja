@@ -1,0 +1,116 @@
+<sharepoint_security_guide>
+<title>SHAREPOINT SECURITY TESTING</title>
+
+<critical>SharePoint security testing covers Microsoft-specific CVEs, deserialization attacks, API discovery, permission misconfiguration, and document library exposure. Critical for enterprise environments with sensitive documents and workflows.</critical>
+
+<scope>
+- SharePoint version detection and CVE testing
+- Deserialization vulnerabilities
+- REST API and SOAP endpoint discovery
+- Permission and access control bypass
+- Document library exposure
+- Search query injection
+- User profile enumeration
+- Custom web parts exploitation
+</scope>
+
+<methodology>
+1. Detect SharePoint version and check for known CVEs.
+2. Enumerate API endpoints (REST, SOAP, OData).
+3. Test for deserialization vulnerabilities.
+4. Assess permission configurations and access controls.
+5. Test document library security.
+6. Enumerate users and test search functionality.
+</methodology>
+
+<version_detection>
+{% raw %}
+# SharePoint version:
+curl -I https://sharepoint.example.com/_layouts/15/
+# SPRequestGuid header
+curl https://sharepoint.example.com/_vti_inf.html
+# Contains version info
+
+# Common CVEs:
+# CVE-2019-0604: RCE via deserialization
+# CVE-2020-0646: RCE
+# CVE-2020-1147: XML parser vulnerability
+{% endraw %}
+</version_detection>
+
+<deserialization_attacks>
+{% raw %}
+# CVE-2019-0604 exploitation:
+POST /_layouts/15/picker.aspx
+__VIEWSTATE: [base64_deserialization_payload]
+
+# TypeConfuseDelegate gadget chain for RCE
+{% endraw %}
+</deserialization_attacks>
+
+<api_testing>
+{% raw %}
+# REST API:
+GET https://sharepoint.example.com/_api/web
+GET https://sharepoint.example.com/_api/web/lists
+GET https://sharepoint.example.com/_api/web/currentuser
+
+# SOAP endpoints:
+POST https://sharepoint.example.com/_vti_bin/lists.asmx
+<soap:Envelope><soap:Body><GetListItems></GetListItems></soap:Body></soap:Envelope>
+
+# OData:
+GET https://sharepoint.example.com/_api/web/lists?$select=Title
+{% endraw %}
+</api_testing>
+
+<permission_testing>
+{% raw %}
+# Access control bypass:
+GET /_layouts/15/viewlsts.aspx  # List all libraries
+GET /Shared%20Documents/sensitive.docx  # Direct file access
+
+# Enumerate libraries:
+GET /_api/web/lists?$filter=BaseTemplate eq 101
+
+# Test anonymous access:
+curl https://sharepoint.example.com/Sites/Team/Documents/
+{% endraw %}
+</permission_testing>
+
+<common_payloads>
+{% raw %}
+# Deserialization:
+__VIEWSTATE: [serialized_payload]
+
+# Search injection:
+' OR 1=1--
+ContentType:Document AND Title:password
+
+# API unauthorized access:
+/_api/web/lists('guid')/items
+/_api/web/siteusers
+
+# Path traversal:
+../../../sensitive-site/Documents/secret.docx
+{% endraw %}
+</common_payloads>
+
+<validation>
+1. Demonstrate SharePoint version and applicable CVE.
+2. Show deserialization RCE (if vulnerable).
+3. Prove unauthorized API access to sensitive data.
+4. Document permission misconfiguration allowing access.
+5. Show document library enumeration and file access.
+</validation>
+
+<impact>
+- Remote Code Execution via deserialization
+- Unauthorized access to sensitive documents
+- Data exfiltration via API endpoints
+- User enumeration and reconnaissance
+- Privilege escalation through permission bypass
+</impact>
+
+<remember>SharePoint security: Check for deserialization CVEs (CVE-2019-0604, CVE-2020-0646). Test REST API (_api/web) and SOAP endpoints for unauthorized access. Enumerate document libraries and test permissions. Search functionality may allow injection. User profile data often exposed via APIs.</remember>
+</sharepoint_security_guide>

