@@ -56,7 +56,7 @@ def _resolve_subdomain(subdomain: str, domain: str) -> dict[str, Any] | None:
 
 def _check_wildcard(domain: str) -> bool:
     """Check if domain has wildcard DNS."""
-    random_subdomain = f"random-nonexistent-{hash(domain) % 10000}"
+    random_subdomain = f"random-wildcard-check-{hash(domain) % 10000}"
     result = _resolve_subdomain(random_subdomain, domain)
     return result is not None
 
@@ -78,8 +78,11 @@ def _enumerate_subdomains(
     wildcard_ips: set[str] = set()
 
     if has_wildcard:
-        # Get wildcard IP(s) for filtering
-        random_result = _resolve_subdomain(f"random-{hash(domain) % 10000}", domain)
+        # Get wildcard IP(s) for filtering using same pattern
+        random_result = _resolve_subdomain(
+            f"random-wildcard-check-{hash(domain) % 10000}",
+            domain,
+        )
         if random_result:
             wildcard_ips = set(random_result["ip_addresses"])
 

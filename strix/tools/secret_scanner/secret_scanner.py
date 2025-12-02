@@ -197,8 +197,10 @@ def _scan_for_secrets(
 
                 # Mask the actual secret value
                 secret_value = match.group()
-                if len(secret_value) > 10:
+                if len(secret_value) > 12:
                     masked = secret_value[:4] + "*" * (len(secret_value) - 8) + secret_value[-4:]
+                elif len(secret_value) > 6:
+                    masked = secret_value[:2] + "*" * (len(secret_value) - 4) + secret_value[-2:]
                 else:
                     masked = "*" * len(secret_value)
 
