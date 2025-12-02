@@ -1,0 +1,44 @@
+<helm_chart_security_guide>
+<title>HELM CHART SECURITY TESTING</title>
+
+<critical>Helm chart security testing covers secret exposure, insecure default values, RBAC misconfigurations, template injection, and dependency vulnerabilities.</critical>
+
+<scope>
+- Secret exposure in Helm charts
+- Insecure default values
+- RBAC misconfigurations
+- Template injection in Helm templates
+- Tiller security (Helm v2)
+- Chart repository security
+- Dependency vulnerabilities
+</scope>
+
+<secret_exposure>
+{% raw %}
+# Secrets in values.yaml:
+helm show values chart-name | grep -i password
+
+# Secrets in templates:
+grep -r "password\|secret\|token" charts/*/templates/
+
+# Hardcoded secrets:
+apiVersion: v1
+kind: Secret
+data:
+  password: cGFzc3dvcmQxMjM=  # base64 encoded, not encrypted
+{% endraw %}
+</secret_exposure>
+
+<template_injection>
+{% raw %}
+# Helm template injection:
+# If user input in template:
+{{ .Values.userInput }}
+
+# Can inject:
+{{ .Values.userInput }}{{ .Release.Name }}{{ .Release.Namespace }}
+{% endraw %}
+</template_injection>
+
+<remember>Helm security: Check for exposed secrets in values/templates, test RBAC permissions, validate template injection protection, scan dependencies for vulnerabilities.</remember>
+</helm_chart_security_guide>
