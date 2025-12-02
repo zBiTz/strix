@@ -72,6 +72,12 @@ if not SANDBOX_MODE:
     from .regex_tester import *  # noqa: F403
     from .sqli_tester import *  # noqa: F403
 
+    # New security testing tools (batch 4) - Active Testing
+    from .http_method_tester import *  # noqa: F403
+    from .ssrf_tester import *  # noqa: F403
+    from .ssti_tester import *  # noqa: F403
+    from .xxe_tester import *  # noqa: F403
+
     if HAS_PERPLEXITY_API:
         from .web_search import *  # noqa: F403
 else:
@@ -117,6 +123,12 @@ else:
     from .rate_limit_tester import *  # noqa: F403
     from .regex_tester import *  # noqa: F403
     from .sqli_tester import *  # noqa: F403
+
+    # New security testing tools (batch 4) - also available in sandbox mode
+    from .http_method_tester import *  # noqa: F403
+    from .ssrf_tester import *  # noqa: F403
+    from .ssti_tester import *  # noqa: F403
+    from .xxe_tester import *  # noqa: F403
 
 __all__ = [
     "ImplementedInClientSideOnlyError",
