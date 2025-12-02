@@ -36,6 +36,16 @@ if not SANDBOX_MODE:
     from .terminal import *  # noqa: F403
     from .thinking import *  # noqa: F403
 
+    # Security testing tools
+    from .jwt_analyzer import *  # noqa: F403
+    from .cors_scanner import *  # noqa: F403
+    from .header_analyzer import *  # noqa: F403
+    from .secret_scanner import *  # noqa: F403
+    from .subdomain_enum import *  # noqa: F403
+    from .api_fuzzer import *  # noqa: F403
+    from .websocket_client import *  # noqa: F403
+    from .graphql_introspection import *  # noqa: F403
+
     if HAS_PERPLEXITY_API:
         from .web_search import *  # noqa: F403
 else:
@@ -45,6 +55,16 @@ else:
     from .proxy import *  # noqa: F403
     from .python import *  # noqa: F403
     from .terminal import *  # noqa: F403
+
+    # Security testing tools (also available in sandbox mode)
+    from .jwt_analyzer import *  # noqa: F403
+    from .cors_scanner import *  # noqa: F403
+    from .header_analyzer import *  # noqa: F403
+    from .secret_scanner import *  # noqa: F403
+    from .subdomain_enum import *  # noqa: F403
+    from .api_fuzzer import *  # noqa: F403
+    from .websocket_client import *  # noqa: F403
+    from .graphql_introspection import *  # noqa: F403
 
 __all__ = [
     "ImplementedInClientSideOnlyError",
