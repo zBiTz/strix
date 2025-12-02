@@ -1,0 +1,443 @@
+<nestjs_security_guide>
+<title>NESTJS SECURITY TESTING</title>
+
+<critical>NestJS is a TypeScript Node.js framework using decorators for structure. Security vulnerabilities include validation bypass via DTOs, decorator order issues, guard circumvention, and injection attacks through pipes. Understanding NestJS's dependency injection and decorator system is key to identifying vulnerabilities.</critical>
+
+<scope>
+- DTO validation bypass
+- Guard and interceptor bypass
+- Pipe transformation vulnerabilities
+- Dependency injection attacks
+- GraphQL resolver security
+- WebSocket gateway security
+- Microservice security
+- Configuration exposure
+</scope>
+
+<methodology>
+1. Identify NestJS patterns and modules in use.
+2. Test DTO validation for bypass opportunities.
+3. Probe guards and middleware for circumvention.
+4. Analyze custom pipes and interceptors.
+5. Test GraphQL/WebSocket if present.
+</methodology>
+
+<identification>
+<nestjs_fingerprinting>
+{% raw %}
+# NestJS indicators:
+
+# Error responses:
+{
+  "statusCode": 400,
+  "message": ["validation error"],
+  "error": "Bad Request"
+}
+
+# Swagger/OpenAPI exposure:
+/api
+/api-docs
+/swagger
+/swagger-json
+
+# Common endpoints:
+/health
+/graphql
+/socket.io
+
+# Response headers:
+# May include Express or Fastify headers
+{% endraw %}
+</nestjs_fingerprinting>
+
+<module_detection>
+{% raw %}
+# Common NestJS modules:
+# - @nestjs/passport (auth)
+# - @nestjs/jwt
+# - @nestjs/graphql
+# - @nestjs/swagger
+# - @nestjs/config
+# - @nestjs/typeorm
+# - @nestjs/mongoose
+
+# Detection via:
+# - Error messages
+# - Endpoint patterns
+# - Response formats
+{% endraw %}
+</module_detection>
+</identification>
+
+<dto_validation>
+<validation_bypass>
+{% raw %}
+# class-validator bypass techniques:
+
+# 1. Missing validation decorator:
+class CreateUserDto {
+  @IsEmail()
+  email: string;
+  
+  role: string;  // No validation - injectable
+}
+
+# 2. Whitelist bypass:
+# If whitelist: true not set in ValidationPipe:
+POST /users
+{
+  "email": "user@example.com",
+  "isAdmin": true  // Extra property passes
+}
+
+# 3. Nested object bypass:
+class UserDto {
+  @ValidateNested()
+  profile: ProfileDto;  // Missing @Type decorator
+}
+# Nested validation may not trigger
+
+# 4. Array validation bypass:
+class BulkDto {
+  @IsArray()
+  items: ItemDto[];  // Each item needs @ValidateNested
+}
+{% endraw %}
+</validation_bypass>
+
+<type_coercion>
+{% raw %}
+# Type transformation issues:
+
+# Transform enabled may cause issues:
+ValidationPipe({ transform: true })
+
+# Array to single value:
+# ?ids=1&ids=2 may become ids=[1,2] or ids="1"
+
+# String to number coercion:
+{
+  "age": "25; DROP TABLE users"  # May bypass @IsNumber
+}
+
+# Boolean coercion:
+{
+  "isAdmin": "true"  # String "true" != boolean true
+}
+{% endraw %}
+</type_coercion>
+</dto_validation>
+
+<guard_bypass>
+<auth_guard>
+{% raw %}
+# Authentication guard bypass:
+
+# 1. Decorator order matters:
+@UseGuards(AuthGuard)  // Must be first
+@Get('protected')
+// vs
+@Get('protected')
+@UseGuards(AuthGuard)  // May not apply correctly
+
+# 2. Route-level vs controller-level:
+@Controller('admin')
+@UseGuards(AdminGuard)  // Controller level
+export class AdminController {
+  @Get('public')  // Still protected by controller guard
+  public() {}
+  
+  @Get('private')
+  @UseGuards(OwnerGuard)  // Both guards apply
+  private() {}
+}
+
+# 3. Global guard bypass:
+# Check for routes excluded from global guards
+# Exception filters may leak before guards
+{% endraw %}
+</auth_guard>
+
+<role_guard>
+{% raw %}
+# Role-based access control bypass:
+
+# 1. Role decorator without guard:
+@Roles('admin')  // Just metadata
+@Get('admin')
+// Missing @UseGuards(RolesGuard)
+
+# 2. Case sensitivity:
+@Roles('Admin')  // vs user has 'admin'
+
+# 3. Role injection via JWT:
+# If roles from token without verification
+{
+  "sub": "user123",
+  "roles": ["admin"]  // Self-assigned
+}
+
+# 4. Multiple role match:
+@Roles('admin', 'moderator')
+// Test if OR or AND logic
+{% endraw %}
+</role_guard>
+</guard_bypass>
+
+<pipe_vulnerabilities>
+<custom_pipes>
+{% raw %}
+# Custom pipe vulnerabilities:
+
+# 1. Unsafe transformation:
+@Injectable()
+export class ParseQueryPipe implements PipeTransform {
+  transform(value: string) {
+    return eval(value);  // RCE
+  }
+}
+
+# 2. SQL injection in pipe:
+@Injectable()
+export class UserPipe implements PipeTransform {
+  transform(id: string) {
+    return this.db.query(`SELECT * FROM users WHERE id = ${id}`);
+  }
+}
+
+# 3. Path traversal:
+@Injectable()
+export class FilePipe implements PipeTransform {
+  transform(filename: string) {
+    return fs.readFileSync(`./uploads/${filename}`);
+  }
+}
+# Input: ../../../etc/passwd
+{% endraw %}
+</custom_pipes>
+
+<built_in_pipes>
+{% raw %}
+# Built-in pipe bypass:
+
+# ParseIntPipe:
+# Input: "123abc" may return 123 (NaN check needed)
+
+# ParseUUIDPipe:
+# Version-specific validation
+# Test with similar-looking strings
+
+# ParseArrayPipe:
+# Items may not be individually validated
+{% endraw %}
+</built_in_pipes>
+</pipe_vulnerabilities>
+
+<interceptor_issues>
+<interceptor_bypass>
+{% raw %}
+# Interceptor security issues:
+
+# 1. Error handling bypass:
+# Interceptors may not catch all errors
+throw new Error('bypass');  // vs HttpException
+
+# 2. Response transformation:
+# Interceptor may expose more data than intended
+# Check if sensitive fields stripped properly
+
+# 3. Timing/order issues:
+# Multiple interceptors execute in specific order
+# Early return may bypass later interceptors
+
+# 4. Async gap:
+# Time between interceptor check and handler execution
+{% endraw %}
+</interceptor_bypass>
+</interceptor_issues>
+
+<graphql_security>
+<graphql_nestjs>
+{% raw %}
+# NestJS GraphQL vulnerabilities:
+
+# 1. Resolver authorization:
+@Query()
+@UseGuards(GqlAuthGuard)  // Specific GraphQL guard needed
+getUsers() {}
+
+# 2. Field-level authorization:
+# Missing @UseGuards on sensitive fields
+
+# 3. Input validation:
+@Args('input') input: CreateUserInput
+# DTO validation must be explicitly applied
+
+# 4. Query complexity:
+# Denial of service via deep queries
+{
+  users {
+    posts {
+      comments {
+        author {
+          posts { ... }
+        }
+      }
+    }
+  }
+}
+
+# 5. Introspection exposure:
+# Check if introspection disabled in production
+{% endraw %}
+</graphql_nestjs>
+</graphql_security>
+
+<websocket_security>
+<gateway_security>
+{% raw %}
+# WebSocket Gateway vulnerabilities:
+
+# 1. Missing authentication:
+@WebSocketGateway()
+export class EventsGateway {
+  @SubscribeMessage('events')
+  handleEvent(client: Socket, data: any) {
+    // No auth check
+  }
+}
+
+# 2. Guard application:
+@UseGuards(WsGuard)  // WebSocket-specific guard needed
+
+# 3. Room/namespace injection:
+client.join(userInput);  // Join arbitrary rooms
+
+# 4. Message injection:
+@SubscribeMessage('message')
+handleMessage(@MessageBody() data: any) {
+  this.server.emit('broadcast', data);  // Unvalidated broadcast
+}
+{% endraw %}
+</websocket_security>
+</websocket_security>
+
+<injection_attacks>
+<orm_injection>
+{% raw %}
+# TypeORM injection:
+# Raw query injection
+this.userRepository.query(`SELECT * FROM users WHERE id = ${id}`);
+
+# QueryBuilder injection:
+queryBuilder.where(`name = '${name}'`);
+
+# Mongoose injection (if using @nestjs/mongoose):
+this.userModel.find({ $where: userInput });
+
+# Safe patterns:
+this.userRepository.findOne({ where: { id } });
+queryBuilder.where('name = :name', { name });
+{% endraw %}
+</orm_injection>
+
+<command_injection>
+{% raw %}
+# Command execution vulnerabilities:
+
+# Unsafe exec:
+import { exec } from 'child_process';
+exec(`convert ${filename} output.png`);
+
+# Inject: filename = "; rm -rf /"
+
+# Path traversal:
+fs.readFileSync(`./uploads/${userPath}`);
+{% endraw %}
+</command_injection>
+</injection_attacks>
+
+<config_exposure>
+<config_module>
+{% raw %}
+# @nestjs/config exposure:
+
+# Environment variables:
+# Check for exposed .env or config
+
+# Swagger exposure:
+# /api-docs may reveal all endpoints and DTOs
+
+# Health check exposure:
+/health
+# May reveal internal service information
+
+# Debug mode:
+# Stack traces exposing file paths
+{% endraw %}
+</config_module>
+</config_exposure>
+
+<common_payloads>
+{% raw %}
+# DTO bypass:
+{"email": "test@test.com", "role": "admin", "isAdmin": true}
+
+# Validation bypass:
+{"nested": {"__proto__": {"admin": true}}}
+
+# Guard bypass:
+Authorization: Bearer <modified_jwt>
+
+# GraphQL depth:
+{users{posts{comments{author{posts{...}}}}}}
+
+# ORM injection:
+{"id": "1 OR 1=1"}
+{"$where": "1==1"}
+
+# Path traversal:
+../../../etc/passwd
+{% endraw %}
+</common_payloads>
+
+<validation>
+1. Demonstrate DTO validation bypass with unauthorized field assignment.
+2. Show guard bypass accessing protected endpoints.
+3. Prove injection through custom pipes or ORM.
+4. Document GraphQL authorization gaps.
+5. Provide evidence of configuration or secret exposure.
+</validation>
+
+<false_positives>
+- ValidationPipe with whitelist and forbidNonWhitelisted
+- Guards applied at controller and method level consistently
+- Custom pipes with proper input sanitization
+- GraphQL complexity limiting enabled
+- ORM queries parameterized
+</false_positives>
+
+<impact>
+- Privilege escalation via validation bypass
+- Authentication bypass through guard circumvention
+- Remote code execution via injection
+- Data exposure through GraphQL
+- Session hijacking via WebSocket
+- Information disclosure via config
+</impact>
+
+<pro_tips>
+1. Check ValidationPipe options - whitelist is not default.
+2. Decorator order affects security behavior.
+3. Guards don't apply to exception filters.
+4. Custom pipes are high-risk injection points.
+5. GraphQL requires specific auth guards.
+6. WebSocket gateways need explicit authentication.
+7. TypeORM raw queries are injection vectors.
+8. Swagger in production exposes API structure.
+9. Nested DTO validation requires @ValidateNested AND @Type.
+10. Global guards can be bypassed by excluded routes.
+</pro_tips>
+
+<remember>NestJS security depends on proper decorator configuration and validation pipe settings. The decorator-based approach can mask missing security controls. Always verify that validation, guards, and interceptors are consistently applied across all endpoints and methods.</remember>
+</nestjs_security_guide>

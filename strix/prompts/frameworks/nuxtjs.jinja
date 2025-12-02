@@ -1,0 +1,396 @@
+<nuxtjs_security_guide>
+<title>NUXT.JS SECURITY TESTING</title>
+
+<critical>Nuxt.js is a Vue.js meta-framework supporting SSR, SSG, and hybrid rendering. Security vulnerabilities include server-side rendering injection, configuration exposure, API route weaknesses, and middleware bypass. Understanding Nuxt's rendering modes and data fetching is essential for comprehensive testing.</critical>
+
+<scope>
+- Server-side rendering (SSR) vulnerabilities
+- API routes and server middleware security
+- Configuration and environment variable exposure
+- Hydration mismatches leading to XSS
+- Authentication middleware bypass
+- Static generation security
+- Nuxt Content module vulnerabilities
+- Plugin and module security
+</scope>
+
+<methodology>
+1. Identify Nuxt version and rendering mode (SSR, SSG, hybrid).
+2. Enumerate API routes and server middleware.
+3. Test for configuration and secret exposure.
+4. Probe SSR injection and hydration vulnerabilities.
+5. Test authentication middleware for bypass.
+</methodology>
+
+<identification>
+<nuxt_fingerprinting>
+{% raw %}
+# Nuxt.js indicators:
+
+# Response patterns:
+# - Hydration scripts in HTML
+# - __NUXT__ or __NUXT_DATA__ global variable
+# - nuxt-link, nuxt-child components
+
+# File structure:
+/_nuxt/           # Static assets
+/_nuxt/*.js       # Bundled JavaScript
+/.nuxt/           # Build directory (should not be exposed)
+
+# Common endpoints:
+/api/*            # Nuxt 3 server API
+/_payload.json    # Nuxt 3 payload data
+/manifest.json    # PWA manifest
+
+# Version detection:
+# Check __NUXT__ for version info
+# Analyze chunk names and structure
+{% endraw %}
+</nuxt_fingerprinting>
+
+<nuxt_versions>
+{% raw %}
+# Nuxt 2 indicators:
+# - asyncData and fetch hooks
+# - serverMiddleware
+# - nuxt.config.js
+
+# Nuxt 3 indicators:
+# - /api/ routes (Nitro server)
+# - useFetch, useAsyncData
+# - nuxt.config.ts
+# - /server/ directory
+
+# Version-specific features:
+# Nuxt 2: Vue 2, Options API
+# Nuxt 3: Vue 3, Composition API, Nitro
+{% endraw %}
+</nuxt_versions>
+</identification>
+
+<ssr_vulnerabilities>
+<ssr_injection>
+{% raw %}
+# SSR injection when user input rendered server-side:
+
+# Vulnerable patterns:
+# 1. v-html with user input
+<div v-html="userContent"></div>
+
+# 2. Unsanitized template interpolation
+<div>{{ userMessage }}</div>  # Usually escaped
+<div v-html="userMessage"></div>  # Not escaped
+
+# 3. Meta tag injection
+useHead({
+  title: userInput,  # Potential injection
+  meta: [
+    { name: 'description', content: userInput }
+  ]
+})
+
+# Attack payloads:
+<script>alert(1)</script>
+<img src=x onerror=alert(1)>
+javascript:alert(1)
+{% endraw %}
+</ssr_injection>
+
+<hydration_mismatch>
+{% raw %}
+# Hydration mismatch XSS:
+# Server renders different content than client expects
+
+# Attack scenario:
+# 1. Server sanitizes input differently than client
+# 2. Mismatch during hydration can execute scripts
+
+# Test for mismatches:
+# - Compare SSR HTML with client-rendered HTML
+# - Look for differences in escaping
+# - Check for conditional server-only rendering
+{% endraw %}
+</hydration_mismatch>
+</ssr_vulnerabilities>
+
+<api_routes>
+<nuxt3_api>
+{% raw %}
+# Nuxt 3 API routes (/server/api/):
+
+# Enumerate routes:
+GET /api/
+GET /api/users
+GET /api/admin
+GET /api/config
+GET /api/debug
+
+# Test for missing authentication:
+GET /api/users  # Should require auth
+
+# Test input validation:
+POST /api/users
+{"role": "admin", "__proto__": {"isAdmin": true}}
+
+# Server-side injection:
+GET /api/search?q='; DROP TABLE users; --
+POST /api/query
+{"filter": {"$where": "1==1"}}
+{% endraw %}
+</nuxt3_api>
+
+<server_middleware>
+{% raw %}
+# Nuxt 2 server middleware:
+# /server-middleware/ or serverMiddleware in config
+
+# Nuxt 3 server middleware:
+# /server/middleware/
+
+# Test for bypass:
+# - Path traversal: /api/../protected
+# - Case sensitivity: /API/users vs /api/users
+# - Trailing slash: /api/users vs /api/users/
+# - Encoded paths: /api/%75sers
+{% endraw %}
+</server_middleware>
+</api_routes>
+
+<configuration_exposure>
+<env_exposure>
+{% raw %}
+# Environment variable exposure:
+
+# Nuxt 3 runtimeConfig exposure:
+# Only publicRuntimeConfig/public should be client-exposed
+
+# Check client bundle for secrets:
+# Search __NUXT__.config
+# Search window.useRuntimeConfig
+
+# Common exposed secrets:
+API_SECRET
+DATABASE_URL
+JWT_SECRET
+PRIVATE_KEY
+
+# Files to check:
+.env
+.env.production
+.env.local
+nuxt.config.ts/js
+{% endraw %}
+</env_exposure>
+
+<build_exposure>
+{% raw %}
+# Build artifact exposure:
+
+# Accessible paths:
+/.nuxt/              # Build directory
+/_nuxt/              # Client assets
+/node_modules/       # Dependencies
+/.output/            # Nuxt 3 output
+
+# Source maps:
+/_nuxt/*.js.map
+# May expose source code
+
+# Manifest files:
+/.nuxt/routes.json
+/.nuxt/components.json
+{% endraw %}
+</build_exposure>
+</configuration_exposure>
+
+<auth_middleware>
+<middleware_bypass>
+{% raw %}
+# Nuxt middleware bypass techniques:
+
+# 1. Route matching issues:
+# Middleware on /admin
+GET /admin          # Protected
+GET /Admin          # Case bypass?
+GET /admin/         # Trailing slash?
+GET //admin         # Double slash?
+
+# 2. Navigation guard bypass:
+# Client-side middleware can be skipped
+# Direct page access vs SPA navigation
+
+# 3. SSR vs client mismatch:
+# Auth checked on client but not server
+
+# 4. Plugin order issues:
+# Auth plugin runs after vulnerable code
+{% endraw %}
+</middleware_bypass>
+
+<auth_module>
+{% raw %}
+# @nuxtjs/auth or @sidebase/nuxt-auth:
+
+# Session token exposure:
+# Check cookies, localStorage, sessionStorage
+
+# Token refresh issues:
+# - Refresh token reuse
+# - No refresh rotation
+
+# OAuth vulnerabilities:
+# - Redirect URI validation
+# - State parameter validation
+
+# Provider-specific issues:
+# Test each configured auth provider
+{% endraw %}
+</auth_module>
+</auth_middleware>
+
+<content_module>
+<nuxt_content>
+{% raw %}
+# @nuxt/content module vulnerabilities:
+
+# Markdown injection:
+# User-controlled content may contain scripts
+# Check for XSS in rendered markdown
+
+# Query injection:
+# If content queries use user input
+GET /api/_content/query?where={"slug": {"$regex": ".*"}}
+
+# Path traversal:
+GET /api/_content/query?path=../../../etc/passwd
+
+# Content preview bypass:
+# Draft content exposure
+GET /api/_content/navigation?draft=true
+{% endraw %}
+</nuxt_content>
+</content_module>
+
+<client_side>
+<vue_security>
+{% raw %}
+# Vue component vulnerabilities:
+
+# v-html XSS:
+<div v-html="unsafeContent"></div>
+
+# Dynamic component injection:
+<component :is="userComponent"></component>
+
+# URL injection in router-link:
+<router-link :to="userUrl">Link</router-link>
+# Inject: javascript:alert(1)
+
+# Event handler injection:
+<button @click="userHandler">Click</button>
+{% endraw %}
+</vue_security>
+
+<state_exposure>
+{% raw %}
+# Pinia/Vuex state exposure:
+
+# Check for sensitive data in state:
+window.__NUXT__.state
+window.__NUXT_DATA__
+
+# Server-side state leakage:
+# State hydrated from SSR may contain secrets
+
+# Persisted state:
+localStorage.getItem('pinia-*')
+{% endraw %}
+</state_exposure>
+</client_side>
+
+<static_generation>
+<ssg_security>
+{% raw %}
+# Static Site Generation (SSG) vulnerabilities:
+
+# Pre-rendered content exposure:
+# - Draft content generated
+# - Private pages generated
+# - API keys in static files
+
+# Incremental Static Regeneration (ISR):
+# - Revalidation token exposure
+# - On-demand revalidation abuse
+
+# Content at build time:
+# - Secrets in .html files
+# - Private data in JSON payloads
+{% endraw %}
+</ssg_security>
+</static_generation>
+
+<common_payloads>
+{% raw %}
+# SSR injection:
+<script>alert(document.domain)</script>
+"><img src=x onerror=alert(1)>
+
+# API route testing:
+{"$where": "1==1"}
+{"__proto__": {"admin": true}}
+
+# Middleware bypass:
+/Admin (case)
+/admin/ (trailing)
+//admin (double slash)
+
+# Content query:
+?where={"slug": {"$regex": ".*"}}
+?draft=true
+
+# State exposure:
+window.__NUXT__.config
+window.__NUXT__.state
+{% endraw %}
+</common_payloads>
+
+<validation>
+1. Demonstrate SSR injection executing scripts.
+2. Show configuration or secret exposure via runtime config.
+3. Prove API route vulnerability with data access.
+4. Document middleware bypass for protected routes.
+5. Provide evidence of state or hydration data leakage.
+</validation>
+
+<false_positives>
+- v-html used only with sanitized content
+- runtimeConfig secrets properly separated (server vs public)
+- Middleware applied consistently on all protected routes
+- API routes have proper authentication
+- Static generation excludes sensitive content
+</false_positives>
+
+<impact>
+- Cross-site scripting via SSR injection
+- Secret exposure leading to further compromise
+- Unauthorized API access
+- Authentication bypass
+- Data leakage through hydration
+- Source code exposure via maps
+</impact>
+
+<pro_tips>
+1. Check __NUXT__ global for runtime configuration exposure.
+2. v-html is the primary XSS vector in Nuxt.
+3. API routes in /server/api/ may lack middleware.
+4. Hydration mismatches can bypass client-side sanitization.
+5. Source maps often exposed in production.
+6. Test middleware with various path encodings.
+7. SSR state may contain server-side secrets.
+8. Static generation can include draft content.
+9. @nuxt/content queries may be injectable.
+10. Check both SSR and client-only components.
+</pro_tips>
+
+<remember>Nuxt.js bridges server and client, creating unique security challenges. SSR injection, configuration exposure, and middleware bypass are the primary concerns. Always analyze both the server-rendered HTML and client-side hydration data for sensitive information leakage.</remember>
+</nuxtjs_security_guide>

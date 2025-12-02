@@ -1,0 +1,489 @@
+<aspnet_core_security_guide>
+<title>ASP.NET CORE SECURITY TESTING</title>
+
+<critical>ASP.NET Core is Microsoft's cross-platform web framework. Security vulnerabilities include authentication/authorization bypass, CSRF token issues, mass assignment, SQL injection through Entity Framework, and configuration exposure. Understanding ASP.NET Core's middleware pipeline and identity system is essential for security testing.</critical>
+
+<scope>
+- Authentication and Identity bypass
+- Authorization policy circumvention
+- Anti-forgery token (CSRF) bypass
+- Model binding mass assignment
+- Entity Framework Core injection
+- Configuration and secrets exposure
+- Razor Pages XSS
+- SignalR security
+</scope>
+
+<methodology>
+1. Identify ASP.NET Core version and configuration.
+2. Test authentication endpoints and token handling.
+3. Probe authorization policies for bypass.
+4. Analyze model binding for mass assignment.
+5. Test database queries for injection.
+</methodology>
+
+<identification>
+<aspnet_fingerprinting>
+{% raw %}
+# ASP.NET Core indicators:
+
+# Response headers:
+Server: Kestrel
+X-Powered-By: ASP.NET (may be removed)
+X-AspNet-Version: (removed in Core)
+
+# Cookies:
+.AspNetCore.Session
+.AspNetCore.Identity.Application
+.AspNetCore.Antiforgery.*
+
+# Error pages:
+# Development mode shows detailed stack traces
+# Status code pages with ASP.NET styling
+
+# Common endpoints:
+/Account/Login
+/Identity/Account/Login
+/api/
+/.well-known/openid-configuration
+{% endraw %}
+</aspnet_fingerprinting>
+
+<version_detection>
+{% raw %}
+# Version detection methods:
+
+# Error messages reveal:
+# - .NET version
+# - ASP.NET Core version
+# - Framework information
+
+# Swagger/OpenAPI:
+/swagger
+/swagger/v1/swagger.json
+
+# Health endpoints:
+/health
+/healthz
+
+# Known CVEs by version:
+# ASP.NET Core < 2.1.23: CVE-2019-0815
+# ASP.NET Core < 3.1.18: CVE-2021-26701
+# ASP.NET Core < 5.0.9: CVE-2021-34532
+{% endraw %}
+</version_detection>
+</identification>
+
+<authentication>
+<identity_attacks>
+{% raw %}
+# ASP.NET Identity vulnerabilities:
+
+# 1. Weak password policy:
+# Test minimum length, complexity requirements
+POST /Identity/Account/Register
+{"Password": "123456", "ConfirmPassword": "123456"}
+
+# 2. Account enumeration:
+# Different responses for existing vs non-existing users
+POST /Identity/Account/Login
+{"Email": "exists@example.com", "Password": "wrong"}
+# vs
+{"Email": "noexist@example.com", "Password": "wrong"}
+
+# 3. Lockout bypass:
+# Test if lockout applies to all auth methods
+# Test lockout reset via password reset
+
+# 4. Session fixation:
+# Check if session ID changes after login
+{% endraw %}
+</identity_attacks>
+
+<jwt_attacks>
+{% raw %}
+# JWT Bearer authentication:
+
+# 1. Algorithm confusion:
+# Change RS256 to HS256
+{"alg": "HS256", "typ": "JWT"}
+# Sign with public key
+
+# 2. None algorithm:
+{"alg": "none", "typ": "JWT"}
+
+# 3. Key confusion:
+# If multiple keys, test each
+
+# 4. Claim manipulation:
+{
+  "sub": "admin",
+  "role": "Administrator",
+  "exp": 9999999999
+}
+
+# 5. Token reuse:
+# Check if tokens invalidated on logout
+{% endraw %}
+</jwt_attacks>
+
+<cookie_auth>
+{% raw %}
+# Cookie authentication issues:
+
+# 1. Cookie settings:
+# Check Secure, HttpOnly, SameSite flags
+
+# 2. Authentication cookie theft:
+# .AspNetCore.Identity.Application cookie
+# If stolen, full account access
+
+# 3. Remember me token:
+# Persistent token security
+# Token rotation on use
+
+# 4. Cookie expiration:
+# Sliding vs absolute expiration
+{% endraw %}
+</cookie_auth>
+</authentication>
+
+<authorization>
+<policy_bypass>
+{% raw %}
+# Authorization policy bypass:
+
+# 1. Role-based bypass:
+[Authorize(Roles = "Admin")]
+# Check if role can be self-assigned
+
+# 2. Policy-based bypass:
+[Authorize(Policy = "RequireAdmin")]
+# Test policy evaluation logic
+
+# 3. Missing authorization:
+// No [Authorize] attribute
+public IActionResult SensitiveAction()
+
+# 4. AllowAnonymous override:
+[AllowAnonymous]  // Overrides parent [Authorize]
+{% endraw %}
+</policy_bypass>
+
+<claims_manipulation>
+{% raw %}
+# Claims-based authorization:
+
+# 1. Claim injection via JWT:
+{
+  "ClaimType": "admin",
+  "ClaimValue": "true"
+}
+
+# 2. External provider claims:
+# OAuth/OIDC claims from IdP
+# May not be validated
+
+# 3. Claims transformation:
+# Custom claim addition may be abusable
+
+# 4. Policy evaluation:
+// RequireClaim("admin", "true")
+// vs RequireRole("Admin")
+{% endraw %}
+</claims_manipulation>
+</authorization>
+
+<csrf_protection>
+<antiforgery_bypass>
+{% raw %}
+# Anti-forgery token bypass:
+
+# 1. Missing [ValidateAntiForgeryToken]:
+[HttpPost]
+// Missing validation attribute
+public IActionResult Submit()
+
+# 2. API controller exception:
+[ApiController]
+// Anti-forgery not required by default
+
+# 3. Token extraction:
+# Token in cookie: .AspNetCore.Antiforgery.*
+# Token in form: <input name="__RequestVerificationToken">
+# Token in header: X-XSRF-TOKEN
+
+# 4. CORS misconfiguration:
+# Overly permissive CORS allows cross-origin requests
+{% endraw %}
+</antiforgery_bypass>
+
+<samesite_bypass>
+{% raw %}
+# SameSite cookie bypass:
+
+# 1. SameSite=None with Secure:
+# Cookies sent cross-site
+
+# 2. Old browser behavior:
+# Some browsers treat unknown SameSite as None
+
+# 3. Top-level navigation:
+# SameSite=Lax allows top-level GET
+{% endraw %}
+</samesite_bypass>
+</csrf_protection>
+
+<mass_assignment>
+<model_binding>
+{% raw %}
+# Model binding mass assignment:
+
+# Vulnerable pattern:
+public async Task<IActionResult> Update(User user)
+{
+    _context.Users.Update(user);  // All properties bound
+}
+
+# Attack:
+POST /Users/Update
+{
+  "Id": 123,
+  "Name": "attacker",
+  "IsAdmin": true,
+  "Role": "Administrator"
+}
+
+# Protection bypass:
+# [Bind] attribute may miss properties
+[Bind("Name", "Email")]
+// What about nested objects?
+
+# BindNever bypass:
+# Check if [BindNever] on all sensitive properties
+{% endraw %}
+</model_binding>
+
+<dto_protection>
+{% raw %}
+# Using DTOs for protection:
+
+# ViewModel pattern:
+public class UserUpdateDto
+{
+    public string Name { get; set; }
+    // No IsAdmin property
+}
+
+# AutoMapper bypass:
+# If mapping includes hidden properties
+# Profile configuration may expose fields
+{% endraw %}
+</dto_protection>
+</mass_assignment>
+
+<ef_core_injection>
+<query_injection>
+{% raw %}
+# Entity Framework Core injection:
+
+# 1. FromSqlRaw/FromSqlInterpolated:
+var users = context.Users
+    .FromSqlRaw($"SELECT * FROM Users WHERE Name = '{name}'");
+// Vulnerable!
+
+# Safe version:
+var users = context.Users
+    .FromSqlInterpolated($"SELECT * FROM Users WHERE Name = {name}");
+
+# 2. ExecuteSqlRaw:
+context.Database.ExecuteSqlRaw(
+    $"DELETE FROM Users WHERE Id = {id}");
+
+# 3. Dynamic LINQ:
+users.Where(userInput);  // If using Dynamic LINQ
+
+# 4. EF.Functions:
+.Where(u => EF.Functions.Like(u.Name, pattern))
+// Pattern from user input
+{% endraw %}
+</query_injection>
+
+<linq_injection>
+{% raw %}
+# LINQ expression injection:
+
+# OrderBy with user input:
+var sorted = query.OrderBy(x => EF.Property<object>(x, sortColumn));
+// sortColumn from user input
+
+# Dynamic sorting:
+switch (sortBy) {
+    case "name": query.OrderBy(x => x.Name);
+    // Missing case allows default
+}
+{% endraw %}
+</linq_injection>
+</ef_core_injection>
+
+<razor_xss>
+<razor_injection>
+{% raw %}
+# Razor Pages/Views XSS:
+
+# 1. Html.Raw():
+@Html.Raw(Model.UserInput)  // No encoding
+
+# 2. JavaScript context:
+<script>
+    var data = '@Model.UserInput';  // Needs JS encoding
+</script>
+
+# 3. Attribute context:
+<a href="@Model.Url">Link</a>  // javascript: protocol
+
+# 4. URL encoding:
+@Url.Action("Index", new { q = Model.Query })
+// Check encoding
+
+# Safe patterns:
+@Model.UserInput  // Auto-encoded
+@Html.Encode(data)
+{% endraw %}
+</razor_injection>
+</razor_xss>
+
+<signalr_security>
+<signalr_attacks>
+{% raw %}
+# SignalR Hub vulnerabilities:
+
+# 1. Hub method authorization:
+[Authorize]
+public class ChatHub : Hub
+{
+    // All methods require auth
+    
+    [AllowAnonymous]  // Overrides
+    public async Task PublicMethod()
+}
+
+# 2. Group authorization:
+await Groups.AddToGroupAsync(Context.ConnectionId, groupName);
+// groupName from user input?
+
+# 3. Message injection:
+await Clients.All.SendAsync("ReceiveMessage", userMessage);
+// XSS if rendered without encoding
+
+# 4. Connection hijacking:
+# Check connection token security
+{% endraw %}
+</signalr_attacks>
+</signalr_security>
+
+<config_exposure>
+<secrets_exposure>
+{% raw %}
+# Configuration and secrets:
+
+# 1. appsettings.json exposure:
+# May contain connection strings, API keys
+
+# 2. User secrets:
+# Development secrets in %APPDATA%
+
+# 3. Environment variables:
+# Logged or exposed in errors
+
+# 4. Azure Key Vault:
+# Check access policies
+
+# 5. Connection strings:
+# In config or environment
+"ConnectionStrings": {
+  "DefaultConnection": "Server=...;Password=..."
+}
+{% endraw %}
+</secrets_exposure>
+
+<debug_exposure>
+{% raw %}
+# Debug information:
+
+# 1. Developer exception page:
+app.UseDeveloperExceptionPage();
+// Stack traces, source code
+
+# 2. Database error details:
+EnableSensitiveDataLogging()
+// SQL queries in logs
+
+# 3. Swagger in production:
+app.UseSwagger();  // API documentation
+{% endraw %}
+</debug_exposure>
+</config_exposure>
+
+<common_payloads>
+{% raw %}
+# Mass assignment:
+{"IsAdmin": true, "Role": "Administrator"}
+
+# EF injection:
+' OR '1'='1
+'; DROP TABLE Users; --
+
+# XSS:
+<script>alert(document.cookie)</script>
+javascript:alert(1)
+
+# JWT manipulation:
+{"alg": "none"}
+{"role": "Administrator"}
+
+# CSRF bypass:
+# Missing __RequestVerificationToken
+{% endraw %}
+</common_payloads>
+
+<validation>
+1. Demonstrate authentication bypass or account enumeration.
+2. Show authorization policy circumvention.
+3. Prove mass assignment modifying unauthorized properties.
+4. Document SQL injection through EF Core.
+5. Provide evidence of XSS through Razor rendering.
+</validation>
+
+<false_positives>
+- [Authorize] consistently applied
+- Anti-forgery validation on all state-changing endpoints
+- ViewModels/DTOs preventing mass assignment
+- EF Core using parameterized queries only
+- Razor auto-encoding not bypassed
+</false_positives>
+
+<impact>
+- Authentication bypass and account takeover
+- Privilege escalation via authorization bypass
+- Data manipulation through mass assignment
+- Database compromise via SQL injection
+- Session hijacking through XSS
+- Information disclosure via configuration
+</impact>
+
+<pro_tips>
+1. Check for [ApiController] - disables some protections.
+2. FromSqlRaw is almost always vulnerable.
+3. [AllowAnonymous] can override class-level [Authorize].
+4. Model binding binds all public properties by default.
+5. Html.Raw and JavaScript contexts are XSS vectors.
+6. SignalR hubs may have different auth than controllers.
+7. Anti-forgery tokens needed on all state-changing POSTs.
+8. Developer exception page reveals stack traces.
+9. Connection strings often in plain text config.
+10. Check middleware order - security middleware must be early.
+</pro_tips>
+
+<remember>ASP.NET Core provides robust security features, but they must be correctly configured and applied. Mass assignment through model binding, raw SQL queries, and missing authorization attributes are common vulnerabilities. Always verify that security middleware is properly ordered and that attributes are consistently applied.</remember>
+</aspnet_core_security_guide>

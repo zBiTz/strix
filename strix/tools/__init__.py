@@ -26,45 +26,69 @@ HAS_PERPLEXITY_API = bool(os.getenv("PERPLEXITY_API_KEY"))
 
 if not SANDBOX_MODE:
     from .agents_graph import *  # noqa: F403
+    from .api_fuzzer import *  # noqa: F403
     from .browser import *  # noqa: F403
+    from .cors_scanner import *  # noqa: F403
     from .file_edit import *  # noqa: F403
     from .finish import *  # noqa: F403
-    from .notes import *  # noqa: F403
-    from .proxy import *  # noqa: F403
-    from .python import *  # noqa: F403
-    from .reporting import *  # noqa: F403
-    from .terminal import *  # noqa: F403
-    from .thinking import *  # noqa: F403
+    from .graphql_introspection import *  # noqa: F403
+    from .hash_identifier import *  # noqa: F403
+    from .header_analyzer import *  # noqa: F403
+    from .js_link_extractor import *  # noqa: F403
 
     # Security testing tools
     from .jwt_analyzer import *  # noqa: F403
-    from .cors_scanner import *  # noqa: F403
-    from .header_analyzer import *  # noqa: F403
+    from .notes import *  # noqa: F403
+    from .oauth_tester import *  # noqa: F403
+    from .parameter_miner import *  # noqa: F403
+    from .payload_encoder import *  # noqa: F403
+    from .poc_generator import *  # noqa: F403
+    from .proxy import *  # noqa: F403
+    from .python import *  # noqa: F403
+    from .reporting import *  # noqa: F403
+    from .request_logger import *  # noqa: F403
+
+    # New security testing tools (batch 2)
+    from .response_diff import *  # noqa: F403
     from .secret_scanner import *  # noqa: F403
     from .subdomain_enum import *  # noqa: F403
-    from .api_fuzzer import *  # noqa: F403
+    from .tech_fingerprinter import *  # noqa: F403
+    from .terminal import *  # noqa: F403
+    from .thinking import *  # noqa: F403
+    from .timing_analyzer import *  # noqa: F403
     from .websocket_client import *  # noqa: F403
-    from .graphql_introspection import *  # noqa: F403
 
     if HAS_PERPLEXITY_API:
         from .web_search import *  # noqa: F403
 else:
+    from .api_fuzzer import *  # noqa: F403
     from .browser import *  # noqa: F403
+    from .cors_scanner import *  # noqa: F403
     from .file_edit import *  # noqa: F403
-    from .notes import *  # noqa: F403
-    from .proxy import *  # noqa: F403
-    from .python import *  # noqa: F403
-    from .terminal import *  # noqa: F403
+    from .graphql_introspection import *  # noqa: F403
+    from .hash_identifier import *  # noqa: F403
+    from .header_analyzer import *  # noqa: F403
+    from .js_link_extractor import *  # noqa: F403
 
     # Security testing tools (also available in sandbox mode)
     from .jwt_analyzer import *  # noqa: F403
-    from .cors_scanner import *  # noqa: F403
-    from .header_analyzer import *  # noqa: F403
+    from .notes import *  # noqa: F403
+    from .oauth_tester import *  # noqa: F403
+    from .parameter_miner import *  # noqa: F403
+    from .payload_encoder import *  # noqa: F403
+    from .poc_generator import *  # noqa: F403
+    from .proxy import *  # noqa: F403
+    from .python import *  # noqa: F403
+    from .request_logger import *  # noqa: F403
+
+    # New security testing tools (batch 2) - also available in sandbox mode
+    from .response_diff import *  # noqa: F403
     from .secret_scanner import *  # noqa: F403
     from .subdomain_enum import *  # noqa: F403
-    from .api_fuzzer import *  # noqa: F403
+    from .tech_fingerprinter import *  # noqa: F403
+    from .terminal import *  # noqa: F403
+    from .timing_analyzer import *  # noqa: F403
     from .websocket_client import *  # noqa: F403
-    from .graphql_introspection import *  # noqa: F403
 
 __all__ = [
     "ImplementedInClientSideOnlyError",

