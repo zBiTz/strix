@@ -73,9 +73,11 @@ if not SANDBOX_MODE:
     from .sqli_tester import *  # noqa: F403
 
     # New security testing tools (batch 4) - Active Testing
+    from .command_injection_tester import *  # noqa: F403
     from .http_method_tester import *  # noqa: F403
     from .ssrf_tester import *  # noqa: F403
     from .ssti_tester import *  # noqa: F403
+    from .waf_detector import *  # noqa: F403
     from .xxe_tester import *  # noqa: F403
 
     if HAS_PERPLEXITY_API:
@@ -125,9 +127,11 @@ else:
     from .sqli_tester import *  # noqa: F403
 
     # New security testing tools (batch 4) - also available in sandbox mode
+    from .command_injection_tester import *  # noqa: F403
     from .http_method_tester import *  # noqa: F403
     from .ssrf_tester import *  # noqa: F403
     from .ssti_tester import *  # noqa: F403
+    from .waf_detector import *  # noqa: F403
     from .xxe_tester import *  # noqa: F403
 
 __all__ = [
