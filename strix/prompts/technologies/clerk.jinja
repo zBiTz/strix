@@ -1,0 +1,316 @@
+<clerk_security_guide>
+<title>CLERK AUTHENTICATION SECURITY TESTING</title>
+
+<critical>Clerk is a modern authentication platform providing drop-in auth solutions. Security vulnerabilities in Clerk implementations can lead to authentication bypass, session hijacking, and privilege escalation. Testing must cover API key exposure, session token handling, OAuth flows, multi-tenancy boundaries, and organization-level access controls.</critical>
+
+<scope>
+- Session token (JWT) security
+- API key exposure and misuse
+- OAuth/OIDC flow vulnerabilities
+- Organization and role-based access control
+- Multi-tenancy isolation
+- Webhook security
+- Frontend SDK integration issues
+- Backend SDK vulnerabilities
+</scope>
+
+<methodology>
+1. Enumerate Clerk instance configuration and exposed endpoints.
+2. Analyze JWT tokens for algorithm issues and claim manipulation.
+3. Test session management and token validation.
+4. Probe OAuth flows and redirect URI validation.
+5. Test organization-level access controls and multi-tenancy.
+</methodology>
+
+<reconnaissance>
+<instance_discovery>
+{% raw %}
+# Common Clerk endpoints
+https://{clerk-instance}.clerk.accounts.dev/
+https://clerk.{your-domain}.com/
+
+# Frontend API endpoints
+/.well-known/clerk.json
+/v1/client
+/v1/me
+/v1/sessions
+/v1/organizations
+
+# JWT JWKS endpoint
+/.well-known/jwks.json
+/v1/jwks
+
+# OAuth endpoints
+/v1/oauth_authorize
+/v1/oauth_callback
+{% endraw %}
+</instance_discovery>
+
+<api_key_exposure>
+{% raw %}
+# Clerk uses different API keys:
+# pk_test_* - Publishable key (frontend, OK to expose)
+# pk_live_* - Publishable key (frontend, OK to expose)  
+# sk_test_* - Secret key (backend only, NEVER expose)
+# sk_live_* - Secret key (backend only, NEVER expose)
+
+# Search for exposed secret keys in:
+# - Client-side JavaScript
+# - Mobile app decompilation
+# - Git repositories
+# - Environment variable leaks
+# - Error messages
+
+# Patterns to search:
+sk_test_[a-zA-Z0-9]+
+sk_live_[a-zA-Z0-9]+
+CLERK_SECRET_KEY
+{% endraw %}
+</api_key_exposure>
+</reconnaissance>
+
+<session_attacks>
+<jwt_analysis>
+{% raw %}
+# Clerk session tokens are JWTs
+# Decode and analyze structure:
+
+{
+  "azp": "https://your-app.com",
+  "exp": 1234567890,
+  "iat": 1234567890,
+  "iss": "https://clerk.your-app.com",
+  "nbf": 1234567890,
+  "sid": "sess_xxx",
+  "sub": "user_xxx",
+  "org_id": "org_xxx",
+  "org_role": "admin",
+  "org_slug": "my-org"
+}
+
+# Test for:
+# - Algorithm confusion (RS256 -> HS256)
+# - Expired token acceptance
+# - Token reuse across organizations
+# - Missing or weak signature validation
+{% endraw %}
+</jwt_analysis>
+
+<session_manipulation>
+{% raw %}
+# Session fixation test
+1. Create session as attacker
+2. Share session URL/token with victim
+3. Check if victim's auth applies to attacker's session
+
+# Session token theft vectors:
+- XSS to steal __clerk_session cookie
+- Referrer header leakage
+- URL parameter exposure
+
+# Token validation bypass:
+# Test if backend properly validates:
+Authorization: Bearer <modified_token>
+Authorization: Bearer <expired_token>
+Authorization: Bearer <token_from_other_org>
+{% endraw %}
+</session_manipulation>
+</session_attacks>
+
+<organization_security>
+<multi_tenancy>
+{% raw %}
+# Test organization isolation:
+
+# 1. Create user in Org A
+# 2. Try to access Org B resources with Org A token
+GET /api/org/orgB_xxx/data
+Authorization: Bearer <orgA_token>
+
+# 2. Try organization switching without proper membership
+POST /v1/organizations/switch
+{
+  "organization_id": "org_other"
+}
+
+# 3. Role escalation within organization
+PATCH /v1/organizations/org_xxx/memberships/mem_xxx
+{
+  "role": "admin"
+}
+{% endraw %}
+</multi_tenancy>
+
+<role_bypass>
+{% raw %}
+# Test role-based access control:
+
+# Check if org_role claim is validated server-side
+# Modify token claims (if signature bypass exists):
+{
+  "org_role": "admin"  # Changed from "member"
+}
+
+# Test role inheritance and precedence:
+- Organization admin vs member
+- Application-level vs organization-level roles
+- Custom roles and permissions
+
+# API endpoint role checks:
+GET /api/admin-only-endpoint
+Authorization: Bearer <member_token>
+{% endraw %}
+</role_bypass>
+</organization_security>
+
+<oauth_attacks>
+<redirect_uri>
+{% raw %}
+# Test redirect_uri validation:
+/v1/oauth_authorize?
+  client_id=xxx&
+  redirect_uri=https://attacker.com&
+  response_type=code
+
+# Bypass attempts:
+redirect_uri=https://legit.com.attacker.com
+redirect_uri=https://legit.com@attacker.com  
+redirect_uri=https://legit.com/../attacker.com
+redirect_uri=https://legit.com%2F%2Fattacker.com
+{% endraw %}
+</redirect_uri>
+
+<state_validation>
+{% raw %}
+# Missing state parameter
+/v1/oauth_authorize?
+  client_id=xxx&
+  redirect_uri=https://legit.com&
+  response_type=code
+  # No state parameter - CSRF possible
+
+# State fixation
+# Pre-set state value and complete OAuth flow
+{% endraw %}
+</state_validation>
+</oauth_attacks>
+
+<webhook_security>
+<webhook_verification>
+{% raw %}
+# Clerk webhooks should be verified via signature
+# Check for missing verification:
+
+# Webhook headers:
+svix-id: msg_xxx
+svix-timestamp: 1234567890
+svix-signature: v1,xxx
+
+# If signature not verified, send forged webhooks:
+POST /api/webhooks/clerk
+{
+  "type": "user.created",
+  "data": {
+    "id": "user_attacker",
+    "email_addresses": [{"email": "admin@company.com"}]
+  }
+}
+{% endraw %}
+</webhook_verification>
+
+<webhook_replay>
+{% raw %}
+# Test for replay attack protection:
+# Capture valid webhook, resend multiple times
+
+# Test timestamp validation:
+# Send webhook with old timestamp
+svix-timestamp: 1234567890  # Old timestamp
+
+# Test if webhook processing is idempotent
+{% endraw %}
+</webhook_replay>
+</webhook_security>
+
+<frontend_sdk>
+<client_misconfig>
+{% raw %}
+# Check frontend SDK configuration:
+
+# Exposed in JavaScript:
+window.Clerk.publishableKey
+window.Clerk.domain
+
+# Test if sensitive operations exposed to client:
+- User deletion
+- Role modification
+- Organization management
+
+# Check for SDK version vulnerabilities
+{% endraw %}
+</client_misconfig>
+</frontend_sdk>
+
+<common_payloads>
+{% raw %}
+# JWT manipulation
+# Change algorithm to none
+{"alg": "none", "typ": "JWT"}
+
+# Modify user ID
+{"sub": "user_victim"}
+
+# Escalate org role
+{"org_role": "admin"}
+
+# API key abuse (if exposed)
+curl -H "Authorization: Bearer sk_live_xxx" \
+  https://api.clerk.com/v1/users
+
+# Webhook forgery
+POST /webhook
+Content-Type: application/json
+{"type": "user.created", "data": {"id": "user_xxx"}}
+{% endraw %}
+</common_payloads>
+
+<validation>
+1. Demonstrate JWT manipulation leading to privilege escalation.
+2. Show organization isolation bypass with cross-tenant access.
+3. Prove OAuth flow vulnerability (redirect bypass, state issues).
+4. Document exposed secret keys with potential impact.
+5. Provide evidence of webhook verification bypass.
+</validation>
+
+<false_positives>
+- Publishable keys exposed (these are designed to be public)
+- Proper JWT signature validation in place
+- Organization boundaries enforced server-side
+- Webhook signatures properly verified
+- OAuth redirect URIs strictly validated
+</false_positives>
+
+<impact>
+- Account takeover via session manipulation
+- Privilege escalation to admin roles
+- Cross-organization data access
+- Unauthorized user creation via webhook forgery
+- OAuth token theft through redirect bypass
+- Complete authentication bypass if secret keys exposed
+</impact>
+
+<pro_tips>
+1. Focus on organization-level access controls - common misconfiguration.
+2. Check if JWT claims are validated server-side, not just decoded.
+3. Test both frontend SDK and backend API independently.
+4. Webhook verification bypass enables powerful attacks.
+5. Look for secret key exposure in error messages and logs.
+6. Test session handling across organization switches.
+7. Check if expired tokens are properly rejected.
+8. OAuth redirect URI validation is often incomplete.
+9. Multi-tenancy boundaries require explicit testing.
+10. Custom roles may have inconsistent permission checks.
+</pro_tips>
+
+<remember>Clerk security depends on proper implementation by the application developer. While Clerk provides secure primitives, misconfiguration in JWT validation, organization access controls, and webhook verification can lead to serious vulnerabilities. Always validate both Clerk's built-in security and the application's integration.</remember>
+</clerk_security_guide>
