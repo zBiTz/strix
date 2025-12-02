@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<tools>
+  <tool name="cors_scanner">
+    <description>Scan and test for CORS misconfigurations including origin reflection, null origin acceptance, and credential leakage.</description>
+    <details>Common Use Cases:
+      - Generate test origins to probe CORS configuration
+      - Test for origin reflection vulnerabilities
+      - Check if null origin is accepted
+      - Analyze CORS response headers for security issues
+      - Generate exploitation code for confirmed vulnerabilities
+      - Identify cache poisoning via missing Vary header</details>
+    <parameters>
+      <parameter name="action" type="string" required="true">
+        <description>The CORS scanning action to perform:
+          - scan: Generate test origins for manual testing
+          - test_origin: Test if specific origin is reflected
+          - test_null: Generate null origin exploit
+          - generate_report: Full vulnerability analysis report</description>
+      </parameter>
+      <parameter name="target_url" type="string" required="true">
+        <description>The URL to test for CORS vulnerabilities</description>
+      </parameter>
+      <parameter name="test_origin" type="string" required="false">
+        <description>Specific origin to test (required for test_origin action)</description>
+      </parameter>
+      <parameter name="response_headers" type="object" required="false">
+        <description>CORS response headers to analyze (dict of header name to value)</description>
+      </parameter>
+    </parameters>
+    <returns type="Dict[str, Any]">
+      <description>Scan results including test origins, vulnerability analysis, and exploitation code</description>
+    </returns>
+    <examples>
+      # Generate test origins
+      <function=cors_scanner>
+      <parameter=action>scan</parameter>
+      <parameter=target_url>https://api.example.com/user</parameter>
+      </function>
+
+      # Test specific origin
+      <function=cors_scanner>
+      <parameter=action>test_origin</parameter>
+      <parameter=target_url>https://api.example.com/user</parameter>
+      <parameter=test_origin>https://evil.com</parameter>
+      <parameter=response_headers>{"Access-Control-Allow-Origin": "https://evil.com", "Access-Control-Allow-Credentials": "true"}</parameter>
+      </function>
+    </examples>
+  </tool>
+</tools>

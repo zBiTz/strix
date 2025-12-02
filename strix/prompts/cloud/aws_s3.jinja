@@ -1,0 +1,470 @@
+<aws_s3_security_guide>
+<title>AWS S3 SECURITY TESTING</title>
+
+<critical>Amazon S3 is ubiquitous in cloud deployments. Bucket misconfigurations remain one of the most common causes of data breaches. Testing must cover bucket enumeration, ACL analysis, policy evaluation, presigned URL security, and object-level permissions.</critical>
+
+<scope>
+- Bucket enumeration and discovery
+- Bucket ACL misconfiguration
+- Bucket policy vulnerabilities
+- Public access settings
+- Presigned URL attacks
+- Object-level permissions
+- Server-side encryption gaps
+- Access logging and monitoring
+</scope>
+
+<methodology>
+1. Enumerate S3 buckets associated with the target.
+2. Test bucket accessibility (list, read, write).
+3. Analyze bucket policies and ACLs for weaknesses.
+4. Check presigned URL security and expiration.
+5. Test object-level permissions and access controls.
+</methodology>
+
+<bucket_enumeration>
+<naming_patterns>
+{% raw %}
+# Common S3 bucket naming patterns:
+{company}-prod
+{company}-production
+{company}-dev
+{company}-development
+{company}-staging
+{company}-backup
+{company}-backups
+{company}-data
+{company}-assets
+{company}-static
+{company}-logs
+{company}-uploads
+{company}-media
+{company}-images
+{company}-files
+{company}-storage
+
+# Subdomain/path patterns:
+s3.{company}.com
+{company}.s3.amazonaws.com
+assets.{company}.com
+
+# Test with variations:
+# - Hyphens vs underscores
+# - Different environments (dev, staging, prod)
+# - Different regions
+{% endraw %}
+</naming_patterns>
+
+<discovery_methods>
+{% raw %}
+# DNS-based enumeration:
+dig +short {bucket-name}.s3.amazonaws.com
+nslookup {bucket-name}.s3.amazonaws.com
+
+# Google dorks:
+site:s3.amazonaws.com "company"
+site:*.s3.amazonaws.com
+"s3.amazonaws.com" ext:txt
+
+# Certificate transparency logs:
+# Search for *.s3.amazonaws.com in CT logs
+
+# Source code analysis:
+# Search for S3 URLs in:
+# - JavaScript files
+# - Mobile apps
+# - Configuration files
+{% endraw %}
+</discovery_methods>
+
+<verification>
+{% raw %}
+# Verify bucket existence:
+
+# HTTP HEAD request
+curl -I https://{bucket}.s3.amazonaws.com/
+
+# Response codes:
+# 200/403 - Bucket exists
+# 404 - Bucket doesn't exist
+
+# Using AWS CLI:
+aws s3 ls s3://{bucket}/ --no-sign-request
+
+# Region detection:
+curl -I https://{bucket}.s3.amazonaws.com/ 2>&1 | grep -i x-amz-bucket-region
+{% endraw %}
+</verification>
+</bucket_enumeration>
+
+<access_testing>
+<public_access>
+{% raw %}
+# Test public list access:
+aws s3 ls s3://{bucket}/ --no-sign-request
+
+# Test public read access:
+aws s3 cp s3://{bucket}/test.txt ./test.txt --no-sign-request
+
+# Test public write access:
+echo "test" > /tmp/test.txt
+aws s3 cp /tmp/test.txt s3://{bucket}/test-upload.txt --no-sign-request
+
+# Using curl:
+# List bucket (if enabled)
+curl https://{bucket}.s3.amazonaws.com/
+
+# Read object
+curl https://{bucket}.s3.amazonaws.com/path/to/object
+
+# Write object
+curl -X PUT -T file.txt https://{bucket}.s3.amazonaws.com/file.txt
+{% endraw %}
+</public_access>
+
+<authenticated_access>
+{% raw %}
+# Test with AWS credentials:
+aws s3 ls s3://{bucket}/
+aws s3 cp s3://{bucket}/object ./
+
+# List bucket with specific profile:
+aws s3 ls s3://{bucket}/ --profile target-profile
+
+# Test from different AWS accounts:
+# Cross-account access may be configured
+
+# Check bucket policy:
+aws s3api get-bucket-policy --bucket {bucket}
+
+# Check bucket ACL:
+aws s3api get-bucket-acl --bucket {bucket}
+
+# Check public access block:
+aws s3api get-public-access-block --bucket {bucket}
+{% endraw %}
+</authenticated_access>
+
+<object_enumeration>
+{% raw %}
+# Enumerate objects in accessible buckets:
+aws s3 ls s3://{bucket}/ --recursive --no-sign-request
+
+# List with pagination:
+aws s3api list-objects-v2 --bucket {bucket} --max-keys 1000 --no-sign-request
+
+# Look for sensitive files:
+# - .env
+# - config.json
+# - credentials.json
+# - database.sql
+# - backup.tar.gz
+# - .git/
+# - id_rsa
+# - *.pem
+{% endraw %}
+</object_enumeration>
+</access_testing>
+
+<acl_analysis>
+<dangerous_acls>
+{% raw %}
+# Dangerous ACL configurations:
+
+# Public read access:
+{
+  "Grantee": {"URI": "http://acs.amazonaws.com/groups/global/AllUsers"},
+  "Permission": "READ"
+}
+
+# Public write access (CRITICAL):
+{
+  "Grantee": {"URI": "http://acs.amazonaws.com/groups/global/AllUsers"},
+  "Permission": "WRITE"
+}
+
+# Authenticated users (any AWS account):
+{
+  "Grantee": {"URI": "http://acs.amazonaws.com/groups/global/AuthenticatedUsers"},
+  "Permission": "READ"
+}
+
+# Full control to public (CRITICAL):
+{
+  "Grantee": {"URI": "http://acs.amazonaws.com/groups/global/AllUsers"},
+  "Permission": "FULL_CONTROL"
+}
+{% endraw %}
+</dangerous_acls>
+
+<check_acls>
+{% raw %}
+# Get bucket ACL:
+aws s3api get-bucket-acl --bucket {bucket}
+
+# Get object ACL:
+aws s3api get-object-acl --bucket {bucket} --key {object}
+
+# Look for:
+# - AllUsers grants
+# - AuthenticatedUsers grants
+# - Cross-account grants
+# - FULL_CONTROL permissions
+{% endraw %}
+</check_acls>
+</acl_analysis>
+
+<policy_analysis>
+<vulnerable_policies>
+{% raw %}
+# Vulnerable bucket policy patterns:
+
+# 1. Public access to all actions:
+{
+  "Principal": "*",
+  "Effect": "Allow",
+  "Action": "s3:*",
+  "Resource": "arn:aws:s3:::{bucket}/*"
+}
+
+# 2. Public read:
+{
+  "Principal": "*",
+  "Effect": "Allow",
+  "Action": "s3:GetObject",
+  "Resource": "arn:aws:s3:::{bucket}/*"
+}
+
+# 3. Any AWS account access:
+{
+  "Principal": {"AWS": "*"},
+  "Effect": "Allow",
+  "Action": ["s3:GetObject", "s3:PutObject"],
+  "Resource": "arn:aws:s3:::{bucket}/*"
+}
+
+# 4. Weak condition:
+{
+  "Condition": {
+    "StringLike": {"aws:Referer": "https://example.com/*"}
+  }
+}
+# Referer can be spoofed!
+{% endraw %}
+</vulnerable_policies>
+
+<policy_testing>
+{% raw %}
+# Test policy conditions:
+
+# Referer-based access control bypass:
+curl -H "Referer: https://example.com/page" https://{bucket}.s3.amazonaws.com/object
+
+# User-Agent bypass:
+curl -H "User-Agent: Mozilla/5.0" https://{bucket}.s3.amazonaws.com/object
+
+# IP-based restrictions:
+# Check if your IP is in allowed range
+# Use VPN/proxy to test from different IPs
+
+# VPC endpoint restrictions:
+# Can only be tested from within VPC
+{% endraw %}
+</policy_testing>
+</policy_analysis>
+
+<presigned_urls>
+<presigned_vulnerabilities>
+{% raw %}
+# Presigned URL security issues:
+
+# 1. Long expiration times:
+# URLs valid for extended periods
+# Can be shared/leaked
+
+# 2. URL exposure in:
+# - Server logs
+# - Referrer headers
+# - Browser history
+# - Third-party analytics
+
+# 3. Signature version vulnerabilities:
+# v2 signatures may be less secure
+
+# 4. Incorrect permissions:
+# PUT presigned URL allowing arbitrary uploads
+
+# Presigned URL structure:
+https://{bucket}.s3.amazonaws.com/{key}?
+  X-Amz-Algorithm=AWS4-HMAC-SHA256&
+  X-Amz-Credential={access-key}/{date}/us-east-1/s3/aws4_request&
+  X-Amz-Date={timestamp}&
+  X-Amz-Expires={seconds}&
+  X-Amz-SignedHeaders=host&
+  X-Amz-Signature={signature}
+{% endraw %}
+</presigned_vulnerabilities>
+
+<presigned_exploitation>
+{% raw %}
+# Exploit presigned URLs:
+
+# 1. Capture valid presigned URL
+# 2. Check expiration time (X-Amz-Expires)
+# 3. Access the resource
+
+# For PUT presigned URLs:
+# Upload arbitrary content
+curl -X PUT -T malicious.html "https://{presigned-url}"
+
+# Test for presigned POST:
+# Often used for file uploads
+# May allow arbitrary metadata
+{% endraw %}
+</presigned_exploitation>
+</presigned_urls>
+
+<object_level_attacks>
+<object_permissions>
+{% raw %}
+# Object-level permission testing:
+
+# Check if specific objects have different permissions:
+aws s3api get-object-acl --bucket {bucket} --key {object}
+
+# Test access to different object paths:
+/public/
+/private/
+/uploads/
+/backups/
+/logs/
+
+# Look for objects with public ACL in private bucket:
+# Upload may have set ACL to public-read
+{% endraw %}
+</object_permissions>
+
+<path_traversal>
+{% raw %}
+# Path-based access control bypass:
+
+# If policy restricts by prefix:
+s3://{bucket}/user123/*
+
+# Test:
+s3://{bucket}/user123/../user456/
+s3://{bucket}/user123%2F..%2Fuser456/
+
+# URL encoding variations:
+%2e%2e%2f  # ../
+..%252f    # Double encoding
+{% endraw %}
+</path_traversal>
+
+<metadata_exposure>
+{% raw %}
+# Object metadata leakage:
+
+# Check metadata without downloading object:
+curl -I https://{bucket}.s3.amazonaws.com/{object}
+
+# HEAD request returns:
+# - Content-Type
+# - Content-Length
+# - Last-Modified
+# - x-amz-meta-* (custom metadata)
+# - ETag
+
+# Custom metadata may contain sensitive info:
+x-amz-meta-username: admin
+x-amz-meta-internal-id: 12345
+{% endraw %}
+</metadata_exposure>
+</object_level_attacks>
+
+<website_hosting>
+<static_website_attacks>
+{% raw %}
+# S3 static website hosting vulnerabilities:
+
+# Website endpoint:
+http://{bucket}.s3-website-{region}.amazonaws.com
+
+# Index document traversal:
+# If error document is set, may leak info
+
+# CORS on website bucket:
+# Test cross-origin access
+
+# Directory listing:
+# If index.html missing in subdirectory
+{% endraw %}
+</static_website_attacks>
+</website_hosting>
+
+<common_payloads>
+{% raw %}
+# Bucket enumeration:
+aws s3 ls s3://{bucket}/ --no-sign-request
+
+# Read object:
+curl https://{bucket}.s3.amazonaws.com/file.txt
+
+# Write test:
+echo "test" | aws s3 cp - s3://{bucket}/test.txt --no-sign-request
+
+# Policy check:
+aws s3api get-bucket-policy --bucket {bucket}
+
+# ACL check:
+aws s3api get-bucket-acl --bucket {bucket}
+
+# Sensitive file patterns:
+.env
+config.json
+database.sql
+backup.tar.gz
+credentials.json
+{% endraw %}
+</common_payloads>
+
+<validation>
+1. Demonstrate bucket enumeration with discovered buckets.
+2. Show unauthorized read access with downloaded content.
+3. Prove write access with successful upload.
+4. Document exposed sensitive data or configurations.
+5. Provide AWS CLI commands and curl requests for reproduction.
+</validation>
+
+<false_positives>
+- Intentionally public buckets for static content
+- Presigned URLs with short expiration for legitimate access
+- Public access block enabled at account level
+- Bucket policy with proper conditions (VPC, IP)
+- Objects marked public for distribution (CDN integration)
+</false_positives>
+
+<impact>
+- Data breach via publicly accessible sensitive data
+- Data tampering via write access
+- Website defacement through object replacement
+- Ransomware via object deletion/encryption
+- Supply chain attacks via modified software artifacts
+- Compliance violations (GDPR, HIPAA, PCI-DSS)
+</impact>
+
+<pro_tips>
+1. Start with bucket enumeration using company name patterns.
+2. Check both bucket and object-level permissions.
+3. Look for presigned URLs in application traffic.
+4. Test Referer-based access control for bypass.
+5. Check CloudFront distributions pointing to S3.
+6. Look for S3 URLs in JavaScript and mobile apps.
+7. Test authenticated access from any AWS account.
+8. Check for sensitive file patterns in accessible buckets.
+9. Verify if public access block is enabled.
+10. Test object metadata for information disclosure.
+</pro_tips>
+
+<remember>S3 security is layered: bucket policies, ACLs, public access block, and object-level permissions all interact. A bucket may appear secure at one layer but be exposed at another. Always test multiple access methods (anonymous, authenticated, cross-account) and both bucket and object-level controls.</remember>
+</aws_s3_security_guide>

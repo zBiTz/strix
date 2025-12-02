@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<tools>
+  <tool name="jwt_analyzer">
+    <description>Analyze and test JWT tokens for security vulnerabilities including algorithm confusion, none algorithm bypass, and claim validation.</description>
+    <details>Common Use Cases:
+      - Decode and inspect JWT token structure (header, payload, signature)
+      - Detect security vulnerabilities in JWT implementation
+      - Test for none algorithm bypass attacks
+      - Test for RS256 to HS256 algorithm confusion attacks
+      - Validate token claims (expiration, issuer, audience)
+      - Identify sensitive data exposure in token payloads
+      - Analyze JWT headers for dangerous configurations (jku, x5u, kid injection)</details>
+    <parameters>
+      <parameter name="action" type="string" required="true">
+        <description>The JWT analysis action to perform:
+          - decode: Decode and display JWT header, payload, and signature
+          - analyze: Full security analysis with vulnerability detection
+          - test_none_alg: Generate tokens for testing none algorithm bypass
+          - test_alg_confusion: Test for algorithm confusion attacks (RS256->HS256)
+          - validate_claims: Validate token claims against expected values</description>
+      </parameter>
+      <parameter name="token" type="string" required="true">
+        <description>The JWT token to analyze (format: header.payload.signature)</description>
+      </parameter>
+      <parameter name="public_key" type="string" required="false">
+        <description>Public key for algorithm confusion testing. Required for generating HS256 tokens signed with public key in RS256->HS256 attack.</description>
+      </parameter>
+      <parameter name="expected_issuer" type="string" required="false">
+        <description>Expected issuer (iss) claim value for validation.</description>
+      </parameter>
+      <parameter name="expected_audience" type="string" required="false">
+        <description>Expected audience (aud) claim value for validation.</description>
+      </parameter>
+    </parameters>
+    <returns type="Dict[str, Any]">
+      <description>Analysis results including:
+        - Decoded header and payload
+        - Security issues and vulnerabilities found
+        - Test payloads for bypass attempts
+        - Claim validation results
+        - Risk assessment (high/medium/low)</description>
+    </returns>
+    <examples>
+      # Decode a JWT token
+      <function=jwt_analyzer>
+      <parameter=action>decode</parameter>
+      <parameter=token>eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c</parameter>
+      </function>
+
+      # Perform full security analysis
+      <function=jwt_analyzer>
+      <parameter=action>analyze</parameter>
+      <parameter=token>eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9...</parameter>
+      </function>
+
+      # Test for none algorithm bypass
+      <function=jwt_analyzer>
+      <parameter=action>test_none_alg</parameter>
+      <parameter=token>eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...</parameter>
+      </function>
+
+      # Test for algorithm confusion
+      <function=jwt_analyzer>
+      <parameter=action>test_alg_confusion</parameter>
+      <parameter=token>eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9...</parameter>
+      <parameter=public_key>-----BEGIN PUBLIC KEY-----...</parameter>
+      </function>
+
+      # Validate claims
+      <function=jwt_analyzer>
+      <parameter=action>validate_claims</parameter>
+      <parameter=token>eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...</parameter>
+      <parameter=expected_issuer>https://auth.example.com</parameter>
+      <parameter=expected_audience>https://api.example.com</parameter>
+      </function>
+    </examples>
+  </tool>
+</tools>
