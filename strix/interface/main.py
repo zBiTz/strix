@@ -68,6 +68,9 @@ def validate_environment() -> None:  # noqa: PLR0912, PLR0915
     if not os.getenv("PERPLEXITY_API_KEY"):
         missing_optional_vars.append("PERPLEXITY_API_KEY")
 
+    if not os.getenv("LLM_TEMPERATURE"):
+        missing_optional_vars.append("LLM_TEMPERATURE")
+
     if missing_required_vars:
         error_text = Text()
         error_text.append("❌ ", style="bold red")
@@ -122,6 +125,13 @@ def validate_environment() -> None:  # noqa: PLR0912, PLR0915
                         " - API key for Perplexity AI web search (enables real-time research)\n",
                         style="white",
                     )
+                elif var == "LLM_TEMPERATURE":
+                    error_text.append("• ", style="white")
+                    error_text.append("LLM_TEMPERATURE", style="bold cyan")
+                    error_text.append(
+                        " - LLM temperature (0.0-2.0, default: 0.0 for deterministic tool-calling)\n",
+                        style="white",
+                    )
 
         error_text.append("\nExample setup:\n", style="white")
         error_text.append("export STRIX_LLM='openai/gpt-5'\n", style="dim white")
@@ -145,6 +155,11 @@ def validate_environment() -> None:  # noqa: PLR0912, PLR0915
                 elif var == "PERPLEXITY_API_KEY":
                     error_text.append(
                         "export PERPLEXITY_API_KEY='your-perplexity-key-here'\n", style="dim white"
+                    )
+                elif var == "LLM_TEMPERATURE":
+                    error_text.append(
+                        "export LLM_TEMPERATURE='0.0'  # optional, defaults to 0.0\n",
+                        style="dim white",
                     )
 
         panel = Panel(

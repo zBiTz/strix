@@ -204,6 +204,7 @@ export LLM_API_KEY="your-api-key"
 
 # Optional
 export LLM_API_BASE="your-api-base-url"  # if using a local model, e.g. Ollama, LMStudio
+export LLM_TEMPERATURE="0.0"  # LLM temperature (0.0-2.0, default: 0.0 for deterministic tool-calling)
 export PERPLEXITY_API_KEY="your-api-key"  # for search capabilities
 ```
 

@@ -1,11 +1,13 @@
 """Tests for LLM environment variable configuration."""
 
 import os
-from unittest.mock import patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import litellm
+import pytest
 
-from strix.llm.llm import configure_litellm
+from strix.llm.config import LLMConfig
+from strix.llm.llm import LLM, configure_litellm
 
 
 class TestConfigureLitellm:
@@ -141,3 +143,79 @@ class TestConfigureLitellm:
             configure_litellm()
             assert litellm.api_key == "second-key"
             assert litellm.api_base == "http://second-base"
+
+
+class TestLLMTemperature:
+    """Tests for LLM temperature configuration."""
+
+    @pytest.fixture
+    def llm_config(self) -> LLMConfig:
+        """Create a mock LLM config."""
+        config = MagicMock(spec=LLMConfig)
+        config.model_name = "openai/gpt-4"
+        config.enable_prompt_caching = False
+        config.timeout = 60
+        config.prompt_modules = []
+        return config
+
+    @pytest.fixture
+    def llm(self, llm_config: LLMConfig) -> LLM:
+        """Create an LLM instance without loading prompts."""
+        return LLM(config=llm_config, agent_name=None, agent_id=None)
+
+    @pytest.mark.asyncio
+    async def test_temperature_defaults_to_zero(self, llm: LLM) -> None:
+        """Test that temperature defaults to 0.0 when not set."""
+        with patch.dict(os.environ, {}, clear=False):
+            if "LLM_TEMPERATURE" in os.environ:
+                del os.environ["LLM_TEMPERATURE"]
+
+            # Mock the queue's make_request method
+            with patch("strix.llm.llm.get_global_queue") as mock_queue:
+                mock_response = MagicMock()
+                mock_response.choices = []
+                mock_queue.return_value.make_request = AsyncMock(return_value=mock_response)
+
+                messages = [{"role": "user", "content": "test"}]
+                await llm._make_request(messages)
+
+                # Verify temperature was set to 0.0
+                call_args = mock_queue.return_value.make_request.call_args
+                assert call_args[0][0]["temperature"] == 0.0
+
+    @pytest.mark.asyncio
+    async def test_temperature_respects_env_var(self, llm: LLM) -> None:
+        """Test that LLM_TEMPERATURE environment variable is respected."""
+        with patch.dict(os.environ, {"LLM_TEMPERATURE": "0.7"}, clear=False):
+            # Mock the queue's make_request method
+            with patch("strix.llm.llm.get_global_queue") as mock_queue:
+                mock_response = MagicMock()
+                mock_response.choices = []
+                mock_queue.return_value.make_request = AsyncMock(return_value=mock_response)
+
+                messages = [{"role": "user", "content": "test"}]
+                await llm._make_request(messages)
+
+                # Verify temperature was set to 0.7
+                call_args = mock_queue.return_value.make_request.call_args
+                assert call_args[0][0]["temperature"] == 0.7
+
+    @pytest.mark.asyncio
+    async def test_temperature_accepts_float_values(self, llm: LLM) -> None:
+        """Test that temperature accepts various float values."""
+        test_values = ["0.0", "0.5", "1.0", "1.5", "2.0"]
+
+        for temp_str in test_values:
+            with patch.dict(os.environ, {"LLM_TEMPERATURE": temp_str}, clear=False):
+                # Mock the queue's make_request method
+                with patch("strix.llm.llm.get_global_queue") as mock_queue:
+                    mock_response = MagicMock()
+                    mock_response.choices = []
+                    mock_queue.return_value.make_request = AsyncMock(return_value=mock_response)
+
+                    messages = [{"role": "user", "content": "test"}]
+                    await llm._make_request(messages)
+
+                    # Verify temperature was set correctly
+                    call_args = mock_queue.return_value.make_request.call_args
+                    assert call_args[0][0]["temperature"] == float(temp_str)

@@ -433,6 +433,7 @@ class LLM:
             "model": self.config.model_name,
             "messages": messages,
             "timeout": self.config.timeout,
+            "temperature": float(os.getenv("LLM_TEMPERATURE", "0.0")),
         }
 
         if self._should_include_stop_param():
