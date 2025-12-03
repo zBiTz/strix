@@ -239,7 +239,9 @@ class LLM:
 
             if last_text_idx is not None:
                 # Create a copy and add cache_control to the last text block
-                cached_content = [block.copy() if isinstance(block, dict) else block for block in content]
+                cached_content = [
+                    block.copy() if isinstance(block, dict) else block for block in content
+                ]
                 cached_content[last_text_idx] = {
                     **cached_content[last_text_idx],
                     "cache_control": {"type": "ephemeral"},
@@ -429,10 +431,23 @@ class LLM:
         self,
         messages: list[dict[str, Any]],
     ) -> ModelResponse:
+        # Get and validate temperature from environment
+        try:
+            temperature = float(os.getenv("LLM_TEMPERATURE", "0.5"))
+            # Clamp temperature to valid range [0.0, 2.0]
+            temperature = max(0.0, min(2.0, temperature))
+        except (ValueError, TypeError):
+            logger.warning(
+                "Invalid LLM_TEMPERATURE value, defaulting to 0.5. "
+                "Temperature must be a number between 0.0 and 2.0."
+            )
+            temperature = 0.5
+
         completion_args: dict[str, Any] = {
             "model": self.config.model_name,
             "messages": messages,
             "timeout": self.config.timeout,
+            "temperature": temperature,
         }
 
         if self._should_include_stop_param():
