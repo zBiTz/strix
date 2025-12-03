@@ -431,11 +431,23 @@ class LLM:
         self,
         messages: list[dict[str, Any]],
     ) -> ModelResponse:
+        # Get and validate temperature from environment
+        try:
+            temperature = float(os.getenv("LLM_TEMPERATURE", "0.0"))
+            # Clamp temperature to valid range [0.0, 2.0]
+            temperature = max(0.0, min(2.0, temperature))
+        except (ValueError, TypeError):
+            logger.warning(
+                "Invalid LLM_TEMPERATURE value, defaulting to 0.0. "
+                "Temperature must be a number between 0.0 and 2.0."
+            )
+            temperature = 0.0
+
         completion_args: dict[str, Any] = {
             "model": self.config.model_name,
             "messages": messages,
             "timeout": self.config.timeout,
-            "temperature": float(os.getenv("LLM_TEMPERATURE", "0.0")),
+            "temperature": temperature,
         }
 
         if self._should_include_stop_param():

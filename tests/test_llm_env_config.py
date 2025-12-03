@@ -221,3 +221,57 @@ class TestLLMTemperature:
                 # Verify temperature was set correctly
                 call_args = mock_queue.return_value.make_request.call_args
                 assert call_args[0][0]["temperature"] == float(temp_str)
+
+    @pytest.mark.asyncio
+    async def test_temperature_handles_invalid_values(self, llm: LLM) -> None:
+        """Test that invalid temperature values default to 0.0."""
+        invalid_values = ["invalid", "not-a-number", ""]
+
+        for invalid_str in invalid_values:
+            with (
+                patch.dict(os.environ, {"LLM_TEMPERATURE": invalid_str}, clear=False),
+                patch("strix.llm.llm.get_global_queue") as mock_queue,
+            ):
+                mock_response = MagicMock()
+                mock_response.choices = []
+                mock_queue.return_value.make_request = AsyncMock(return_value=mock_response)
+
+                messages = [{"role": "user", "content": "test"}]
+                await llm._make_request(messages)
+
+                # Verify temperature defaulted to 0.0
+                call_args = mock_queue.return_value.make_request.call_args
+                assert call_args[0][0]["temperature"] == 0.0
+
+    @pytest.mark.asyncio
+    async def test_temperature_clamps_out_of_range_values(self, llm: LLM) -> None:
+        """Test that out-of-range temperature values are clamped to valid range."""
+        # Test negative value clamped to 0.0
+        with (
+            patch.dict(os.environ, {"LLM_TEMPERATURE": "-1.0"}, clear=False),
+            patch("strix.llm.llm.get_global_queue") as mock_queue,
+        ):
+            mock_response = MagicMock()
+            mock_response.choices = []
+            mock_queue.return_value.make_request = AsyncMock(return_value=mock_response)
+
+            messages = [{"role": "user", "content": "test"}]
+            await llm._make_request(messages)
+
+            call_args = mock_queue.return_value.make_request.call_args
+            assert call_args[0][0]["temperature"] == 0.0
+
+        # Test value > 2.0 clamped to 2.0
+        with (
+            patch.dict(os.environ, {"LLM_TEMPERATURE": "3.5"}, clear=False),
+            patch("strix.llm.llm.get_global_queue") as mock_queue,
+        ):
+            mock_response = MagicMock()
+            mock_response.choices = []
+            mock_queue.return_value.make_request = AsyncMock(return_value=mock_response)
+
+            messages = [{"role": "user", "content": "test"}]
+            await llm._make_request(messages)
+
+            call_args = mock_queue.return_value.make_request.call_args
+            assert call_args[0][0]["temperature"] == 2.0
