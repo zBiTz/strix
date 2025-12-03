@@ -279,9 +279,7 @@ class TestMinimumAgentRequirements:
     def test_import_error_returns_none(self, mock_agent_state: MagicMock) -> None:
         """Test that ImportError is handled gracefully and returns None."""
         # Simulate ImportError by making the import statement fail
-        import sys
-
-        with patch.dict(sys.modules, {"strix.tools.agents_graph.agents_graph_actions": None}):
+        with patch("strix.tools.finish.finish_actions.__import__", side_effect=ImportError("Module not found")):
             result = _check_minimum_agent_requirements(mock_agent_state)
 
         assert result is None
