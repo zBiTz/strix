@@ -239,7 +239,9 @@ class LLM:
 
             if last_text_idx is not None:
                 # Create a copy and add cache_control to the last text block
-                cached_content = [block.copy() if isinstance(block, dict) else block for block in content]
+                cached_content = [
+                    block.copy() if isinstance(block, dict) else block for block in content
+                ]
                 cached_content[last_text_idx] = {
                     **cached_content[last_text_idx],
                     "cache_control": {"type": "ephemeral"},
