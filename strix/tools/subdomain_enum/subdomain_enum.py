@@ -7,6 +7,12 @@ from typing import Any, Literal
 from urllib.parse import urlparse
 
 from strix.tools.registry import register_tool
+from strix.tools.validation import (
+    generate_usage_hint,
+    validate_action_param,
+    validate_required_param,
+    validate_unknown_params,
+)
 
 
 SubdomainAction = Literal["enumerate", "check", "wordlist"]
@@ -131,6 +137,7 @@ def subdomain_enum(
     subdomain: str | None = None,
     wordlist: list[str] | None = None,
     timeout: int = 2,
+    **kwargs: Any,  # Capture unknown parameters
 ) -> dict[str, Any]:
     """Enumerate subdomains for a target domain.
 
@@ -151,6 +158,36 @@ def subdomain_enum(
     Returns:
         Enumeration results including found subdomains and their IP addresses
     """
+    # Define valid parameters and actions
+    VALID_PARAMS = {"action", "domain", "subdomain", "wordlist", "timeout"}
+    VALID_ACTIONS = ["enumerate", "check", "wordlist"]
+
+    # Check for unknown parameters
+    unknown_error = validate_unknown_params(kwargs, VALID_PARAMS, "subdomain_enum")
+    if unknown_error:
+        unknown_error.update(
+            generate_usage_hint("subdomain_enum", "enumerate", {"domain": "example.com"})
+        )
+        return unknown_error
+
+    # Validate action parameter
+    action_error = validate_action_param(action, VALID_ACTIONS, "subdomain_enum")
+    if action_error:
+        action_error["usage_examples"] = {
+            "enumerate": "subdomain_enum(action='enumerate', domain='example.com')",
+            "check": "subdomain_enum(action='check', domain='example.com', subdomain='www')",
+            "wordlist": "subdomain_enum(action='wordlist', domain='example.com')",
+        }
+        return action_error
+
+    # Validate required parameters
+    domain_error = validate_required_param(domain, "domain", action, "subdomain_enum")
+    if domain_error:
+        domain_error.update(
+            generate_usage_hint("subdomain_enum", action, {"domain": "example.com"})
+        )
+        return domain_error
+
     try:
         # Clean domain input
         domain = domain.lower().strip()

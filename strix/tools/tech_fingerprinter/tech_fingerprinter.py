@@ -6,6 +6,13 @@ import re
 from typing import Any, Literal
 
 from strix.tools.registry import register_tool
+from strix.tools.validation import (
+    add_workflow_hint_for_url_params,
+    detect_url_in_unknown_params,
+    generate_usage_hint,
+    validate_action_param,
+    validate_unknown_params,
+)
 
 
 TechFingerprinterAction = Literal["analyze_headers", "analyze_body", "full_analysis", "identify_framework"]
@@ -225,6 +232,7 @@ def tech_fingerprinter(
     headers: dict[str, str] | None = None,
     body: str | None = None,
     url: str | None = None,
+    **kwargs: Any,  # Capture unknown parameters
 ) -> dict[str, Any]:
     """Identify technologies, frameworks, and versions from HTTP responses.
 
@@ -244,6 +252,40 @@ def tech_fingerprinter(
     Returns:
         Detected technologies with confidence levels and sources
     """
+    # Define valid parameters and actions
+    VALID_PARAMS = {"action", "headers", "body", "url"}
+    VALID_ACTIONS = ["analyze_headers", "analyze_body", "full_analysis", "identify_framework"]
+
+    # Check for unknown parameters
+    unknown_error = validate_unknown_params(kwargs, VALID_PARAMS, "tech_fingerprinter")
+    if unknown_error:
+        unknown_params = list(kwargs.keys())
+        if detect_url_in_unknown_params(unknown_params):
+            workflow_steps = [
+                "1. Use send_request(method='GET', url='https://example.com') to fetch the page",
+                "2. Extract headers and body from the response",
+                "3. Call tech_fingerprinter(action='full_analysis', headers={...}, body='...')",
+            ]
+            unknown_error = add_workflow_hint_for_url_params(unknown_error, workflow_steps)
+        unknown_error.update(
+            generate_usage_hint(
+                "tech_fingerprinter",
+                "full_analysis",
+                {"headers": {"Server": "nginx"}, "body": "<html>...</html>"},
+            )
+        )
+        return unknown_error
+
+    # Validate action parameter
+    action_error = validate_action_param(action, VALID_ACTIONS, "tech_fingerprinter")
+    if action_error:
+        action_error["usage_examples"] = {
+            "analyze_headers": "tech_fingerprinter(action='analyze_headers', headers={'Server': 'nginx'})",
+            "analyze_body": "tech_fingerprinter(action='analyze_body', body='<html>...')",
+            "full_analysis": "tech_fingerprinter(action='full_analysis', headers={...}, body='...')",
+        }
+        return action_error
+
     try:
         detected: list[dict[str, Any]] = []
 

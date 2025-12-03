@@ -9,6 +9,12 @@ from urllib.parse import urlparse
 import requests
 
 from strix.tools.registry import register_tool
+from strix.tools.validation import (
+    generate_usage_hint,
+    validate_action_param,
+    validate_required_param,
+    validate_unknown_params,
+)
 
 
 WaybackAction = Literal["fetch", "search", "snapshots"]
@@ -190,6 +196,7 @@ def wayback_fetcher(
     file_type: str | None = None,
     pattern: str | None = None,
     limit: int = 100,
+    **kwargs: Any,  # Capture unknown parameters
 ) -> dict[str, Any]:
     """Fetch historical URLs from the Wayback Machine.
 
@@ -211,6 +218,35 @@ def wayback_fetcher(
     Returns:
         Discovered URLs, snapshots, and metadata from the Wayback Machine
     """
+    # Define valid parameters and actions
+    VALID_PARAMS = {"action", "domain", "url", "file_type", "pattern", "limit"}
+    VALID_ACTIONS = ["fetch", "search", "snapshots"]
+
+    # Check for unknown parameters
+    unknown_error = validate_unknown_params(kwargs, VALID_PARAMS, "wayback_fetcher")
+    if unknown_error:
+        unknown_params = list(kwargs.keys())
+        # Check if agent used wrong parameter name like 'query'
+        if "query" in unknown_params:
+            unknown_error["hint"] = (
+                "Did you mean 'domain' instead of 'query'? "
+                "Use domain='example.com' not query='example.com'"
+            )
+        unknown_error.update(
+            generate_usage_hint("wayback_fetcher", "fetch", {"domain": "example.com"})
+        )
+        return unknown_error
+
+    # Validate action parameter
+    action_error = validate_action_param(action, VALID_ACTIONS, "wayback_fetcher")
+    if action_error:
+        action_error["usage_examples"] = {
+            "fetch": "wayback_fetcher(action='fetch', domain='example.com')",
+            "search": "wayback_fetcher(action='search', domain='example.com', pattern='api')",
+            "snapshots": "wayback_fetcher(action='snapshots', url='https://example.com/page.html')",
+        }
+        return action_error
+
     try:
         if action == "fetch":
             if not domain:
