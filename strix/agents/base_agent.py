@@ -395,7 +395,6 @@ class BaseAgent(metaclass=AgentMeta):
             "create_agent",
             "view_agent_graph",
             "send_message_to_agent",
-            "read_messages",
             "finish_scan",
             "wait_for_message",
         }
@@ -409,11 +408,19 @@ class BaseAgent(metaclass=AgentMeta):
         for action in actions:
             tool_name = action.get("toolName") if isinstance(action, dict) else None
 
+            # Always record the action for audit trail
+            self.state.add_action(action)
+
+            # Explicitly block actions missing toolName for root agents
+            if is_root_agent and isinstance(action, dict) and not tool_name:
+                logger.warning(f"Action missing toolName and blocked for root agent: {action}")
+                blocked_tools.append("<missing_tool_name>")
+                continue
+
             if is_root_agent and tool_name and tool_name not in coordination_tools:
                 blocked_tools.append(tool_name)
             else:
                 filtered_actions.append(action)
-                self.state.add_action(action)
 
         # Add message about blocked tools if any were filtered
         conversation_history = self.state.get_conversation_history()
