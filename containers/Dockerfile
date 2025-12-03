@@ -178,6 +178,54 @@ COPY strix/tools/python/ /app/strix/tools/python/
 COPY strix/tools/terminal/ /app/strix/tools/terminal/
 COPY strix/tools/proxy/ /app/strix/tools/proxy/
 
+# Security testing tools available in sandbox mode
+COPY strix/tools/api_fuzzer/ /app/strix/tools/api_fuzzer/
+COPY strix/tools/cors_scanner/ /app/strix/tools/cors_scanner/
+COPY strix/tools/graphql_introspection/ /app/strix/tools/graphql_introspection/
+COPY strix/tools/hash_identifier/ /app/strix/tools/hash_identifier/
+COPY strix/tools/header_analyzer/ /app/strix/tools/header_analyzer/
+COPY strix/tools/js_link_extractor/ /app/strix/tools/js_link_extractor/
+COPY strix/tools/jwt_analyzer/ /app/strix/tools/jwt_analyzer/
+COPY strix/tools/oauth_tester/ /app/strix/tools/oauth_tester/
+COPY strix/tools/parameter_miner/ /app/strix/tools/parameter_miner/
+COPY strix/tools/payload_encoder/ /app/strix/tools/payload_encoder/
+COPY strix/tools/poc_generator/ /app/strix/tools/poc_generator/
+COPY strix/tools/request_logger/ /app/strix/tools/request_logger/
+COPY strix/tools/response_diff/ /app/strix/tools/response_diff/
+COPY strix/tools/secret_scanner/ /app/strix/tools/secret_scanner/
+COPY strix/tools/subdomain_enum/ /app/strix/tools/subdomain_enum/
+COPY strix/tools/tech_fingerprinter/ /app/strix/tools/tech_fingerprinter/
+COPY strix/tools/timing_analyzer/ /app/strix/tools/timing_analyzer/
+COPY strix/tools/websocket_client/ /app/strix/tools/websocket_client/
+
+# Reconnaissance tools available in sandbox mode
+COPY strix/tools/asn_lookup/ /app/strix/tools/asn_lookup/
+COPY strix/tools/dns_resolver/ /app/strix/tools/dns_resolver/
+COPY strix/tools/google_dorker/ /app/strix/tools/google_dorker/
+COPY strix/tools/ssl_certificate_analyzer/ /app/strix/tools/ssl_certificate_analyzer/
+COPY strix/tools/wayback_fetcher/ /app/strix/tools/wayback_fetcher/
+COPY strix/tools/whois_lookup/ /app/strix/tools/whois_lookup/
+
+# Testing tools available in sandbox mode
+COPY strix/tools/cookie_analyzer/ /app/strix/tools/cookie_analyzer/
+COPY strix/tools/rate_limit_tester/ /app/strix/tools/rate_limit_tester/
+COPY strix/tools/regex_tester/ /app/strix/tools/regex_tester/
+COPY strix/tools/sqli_tester/ /app/strix/tools/sqli_tester/
+
+# Active testing tools available in sandbox mode
+COPY strix/tools/command_injection_tester/ /app/strix/tools/command_injection_tester/
+COPY strix/tools/http_method_tester/ /app/strix/tools/http_method_tester/
+COPY strix/tools/ssrf_tester/ /app/strix/tools/ssrf_tester/
+COPY strix/tools/ssti_tester/ /app/strix/tools/ssti_tester/
+COPY strix/tools/waf_detector/ /app/strix/tools/waf_detector/
+COPY strix/tools/xxe_tester/ /app/strix/tools/xxe_tester/
+
+# Specialized tools available in sandbox mode
+COPY strix/tools/cve_lookup/ /app/strix/tools/cve_lookup/
+COPY strix/tools/cvss_calculator/ /app/strix/tools/cvss_calculator/
+COPY strix/tools/entropy_analyzer/ /app/strix/tools/entropy_analyzer/
+COPY strix/tools/polyglot_generator/ /app/strix/tools/polyglot_generator/
+
 RUN echo 'export PATH="/home/pentester/go/bin:/home/pentester/.local/bin:/home/pentester/.npm-global/bin:$PATH"' >> /home/pentester/.bashrc && \
     echo 'export PATH="/home/pentester/go/bin:/home/pentester/.local/bin:/home/pentester/.npm-global/bin:$PATH"' >> /home/pentester/.profile
 
