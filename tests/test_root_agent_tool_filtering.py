@@ -264,7 +264,14 @@ class TestRootAgentToolFiltering:
             assert len(recorded_actions) == 3
 
             # Verify the specific actions are in the history
-            action_tool_names = [a.get("action", {}).get("toolName") for a in recorded_actions]
+            action_tool_names = []
+            for record in recorded_actions:
+                action_data = record.get("action", {})
+                if isinstance(action_data, dict):
+                    tool_name = action_data.get("toolName")
+                    if tool_name:
+                        action_tool_names.append(tool_name)
+
             assert "create_agent" in action_tool_names
             assert "terminal_execute" in action_tool_names
             assert "sqli_tester" in action_tool_names

@@ -413,7 +413,10 @@ class BaseAgent(metaclass=AgentMeta):
 
             # Explicitly block actions missing toolName for root agents
             if is_root_agent and isinstance(action, dict) and not tool_name:
-                logger.warning(f"Action missing toolName and blocked for root agent: {action}")
+                logger.warning(
+                    "Action missing toolName and blocked for root agent. "
+                    f"Action keys: {list(action.keys())}"
+                )
                 blocked_tools.append("<missing_tool_name>")
                 continue
 
