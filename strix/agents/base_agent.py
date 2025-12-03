@@ -390,13 +390,60 @@ class BaseAgent(metaclass=AgentMeta):
 
     async def _execute_actions(self, actions: list[Any], tracer: Optional["Tracer"]) -> bool:
         """Execute actions and return True if agent should finish."""
-        for action in actions:
-            self.state.add_action(action)
+        # Define coordination tools allowed for root agent
+        coordination_tools = {
+            "create_agent",
+            "view_agent_graph",
+            "send_message_to_agent",
+            "read_messages",
+            "finish_scan",
+            "wait_for_message",
+        }
 
+        # Filter actions if this is the root agent
+        filtered_actions = []
+        blocked_tools = []
+
+        is_root_agent = self.state.parent_id is None
+
+        for action in actions:
+            tool_name = action.get("toolName") if isinstance(action, dict) else None
+
+            if is_root_agent and tool_name and tool_name not in coordination_tools:
+                blocked_tools.append(tool_name)
+            else:
+                filtered_actions.append(action)
+                self.state.add_action(action)
+
+        # Add message about blocked tools if any were filtered
         conversation_history = self.state.get_conversation_history()
 
+        if blocked_tools:
+            blocked_tools_str = ", ".join(blocked_tools)
+            blocking_message = (
+                f"<tool_execution_blocked>\n"
+                f"The following tool(s) were blocked: {blocked_tools_str}\n\n"
+                f"Reason: You are the root coordination agent and can only use "
+                f"coordination tools.\n\n"
+                f"Available coordination tools:\n"
+                f"- create_agent: Create specialized sub-agents for specific tasks\n"
+                f"- view_agent_graph: View the current agent hierarchy\n"
+                f"- send_message_to_agent: Send messages to sub-agents\n"
+                f"- wait_for_message: Wait for messages from sub-agents or user\n"
+                f"- finish_scan: Complete the scan and generate final report\n\n"
+                f"Action Required: Create a specialized sub-agent using create_agent "
+                f"to handle this task, then delegate the work through that agent.\n"
+                f"</tool_execution_blocked>"
+            )
+            conversation_history.append({"role": "user", "content": blocking_message})
+
+        # If all actions were blocked, return early
+        if not filtered_actions:
+            self.state.messages = conversation_history
+            return False
+
         tool_task = asyncio.create_task(
-            process_tool_invocations(actions, conversation_history, self.state)
+            process_tool_invocations(filtered_actions, conversation_history, self.state)
         )
         self._current_task = tool_task
 
