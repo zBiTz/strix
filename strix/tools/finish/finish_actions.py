@@ -219,16 +219,15 @@ def finish_scan(
         # Check minimum agent requirements (warning only, doesn't block)
         agent_check_result = _check_minimum_agent_requirements(agent_state)
 
-        result = _finalize_with_tracer(content, success)
-
         # Add warning to result if minimum agents not met
         if agent_check_result and "warning" in agent_check_result:
+            result = _finalize_with_tracer(content, success)
             result["agent_coverage_warning"] = agent_check_result["warning"]
             result["agents_created"] = agent_check_result.get("agents_created", 0)
             result["recommended_minimum"] = agent_check_result.get("recommended_minimum", 3)
             return result
 
-        return result  # noqa: TRY300
+        return _finalize_with_tracer(content, success)
 
     except (ValueError, TypeError, KeyError) as e:
         return {"success": False, "message": f"Failed to complete scan: {e!s}"}
