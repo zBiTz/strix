@@ -46,7 +46,7 @@ class TestRootAgentToolFiltering:
         return {
             "llm_config": llm_config,
             "non_interactive": True,
-            "max_iterations": 100,
+            "max_iterations": 2000,
         }
 
     @pytest.mark.asyncio
