@@ -164,7 +164,7 @@ class TestLLMTemperature:
         return LLM(config=llm_config, agent_name=None, agent_id=None)
 
     @pytest.mark.asyncio
-    async def test_temperature_defaults_to_zero(self, llm: LLM) -> None:
+    async def test_temperature_defaults_to_0_5(self, llm: LLM) -> None:
         """Test that temperature defaults to 0.5 when not set."""
         with patch.dict(os.environ, {}, clear=False):
             if "LLM_TEMPERATURE" in os.environ:
