@@ -234,3 +234,125 @@ class TestRootAgentToolFiltering:
 
             # Verify return value is False (agent should not finish)
             assert result is False
+
+    @pytest.mark.asyncio
+    async def test_blocked_actions_recorded_in_history(
+        self, base_agent_config: dict, root_agent_state: AgentState
+    ) -> None:
+        """Test that blocked actions are recorded in action history for audit trail."""
+        base_agent_config["state"] = root_agent_state
+
+        with patch("strix.agents.base_agent.LLM"):
+            agent = BaseAgent(base_agent_config)
+
+        with patch(
+            "strix.agents.base_agent.process_tool_invocations", new_callable=AsyncMock
+        ) as mock_process:
+            mock_process.return_value = False
+
+            # Create actions with both coordination and non-coordination tools
+            actions = [
+                {"toolName": "create_agent", "args": {"agent_type": "test"}},
+                {"toolName": "terminal_execute", "args": {"command": "ls"}},
+                {"toolName": "sqli_tester", "args": {"url": "http://example.com"}},
+            ]
+
+            await agent._execute_actions(actions, None)
+
+            # Verify ALL actions (including blocked ones) were recorded in action history
+            recorded_actions = agent.state.actions_taken
+            assert len(recorded_actions) == 3
+
+            # Verify the specific actions are in the history
+            action_tool_names = []
+            for record in recorded_actions:
+                action_data = record.get("action", {})
+                if isinstance(action_data, dict):
+                    tool_name = action_data.get("toolName")
+                    if tool_name:
+                        action_tool_names.append(tool_name)
+
+            assert "create_agent" in action_tool_names
+            assert "terminal_execute" in action_tool_names
+            assert "sqli_tester" in action_tool_names
+
+    @pytest.mark.asyncio
+    async def test_action_without_toolname_blocked_for_root_agent(
+        self, base_agent_config: dict, root_agent_state: AgentState
+    ) -> None:
+        """Test that actions without toolName are explicitly blocked for root agents."""
+        base_agent_config["state"] = root_agent_state
+
+        with patch("strix.agents.base_agent.LLM"):
+            agent = BaseAgent(base_agent_config)
+
+        with patch(
+            "strix.agents.base_agent.process_tool_invocations", new_callable=AsyncMock
+        ) as mock_process:
+            mock_process.return_value = False
+
+            # Create actions including one without toolName
+            actions = [
+                {"toolName": "create_agent", "args": {"agent_type": "test"}},
+                {"args": {"some": "data"}},  # Missing toolName
+                {"toolName": "view_agent_graph", "args": {}},
+            ]
+
+            with patch("strix.agents.base_agent.logger") as mock_logger:
+                await agent._execute_actions(actions, None)
+
+                # Verify warning was logged for missing toolName
+                assert mock_logger.warning.called
+                warning_call = mock_logger.warning.call_args[0][0]
+                assert "missing toolName" in warning_call
+                assert "blocked for root agent" in warning_call
+
+            # Verify only valid coordination tools were passed through
+            assert mock_process.called
+            filtered_actions = mock_process.call_args[0][0]
+            assert len(filtered_actions) == 2
+            assert filtered_actions[0]["toolName"] == "create_agent"
+            assert filtered_actions[1]["toolName"] == "view_agent_graph"
+
+            # Verify blocking message includes missing_tool_name marker
+            messages = agent.state.get_conversation_history()
+            blocking_messages = [
+                msg for msg in messages if "tool_execution_blocked" in str(msg.get("content", ""))
+            ]
+            assert len(blocking_messages) == 1
+            assert "<missing_tool_name>" in blocking_messages[0]["content"]
+
+    @pytest.mark.asyncio
+    async def test_action_without_toolname_allowed_for_sub_agent(
+        self, base_agent_config: dict, sub_agent_state: AgentState
+    ) -> None:
+        """Test that sub-agents can use actions without toolName (no filtering)."""
+        base_agent_config["state"] = sub_agent_state
+
+        with patch("strix.agents.base_agent.LLM"):
+            agent = BaseAgent(base_agent_config)
+
+        with patch(
+            "strix.agents.base_agent.process_tool_invocations", new_callable=AsyncMock
+        ) as mock_process:
+            mock_process.return_value = False
+
+            # Create actions including one without toolName
+            actions = [
+                {"toolName": "terminal_execute", "args": {"command": "ls"}},
+                {"args": {"some": "data"}},  # Missing toolName - should still pass through
+            ]
+
+            await agent._execute_actions(actions, None)
+
+            # Verify all actions were passed through (no filtering for sub-agents)
+            assert mock_process.called
+            filtered_actions = mock_process.call_args[0][0]
+            assert len(filtered_actions) == len(actions)
+
+            # Verify no blocking message was added
+            messages = agent.state.get_conversation_history()
+            blocking_messages = [
+                msg for msg in messages if "tool_execution_blocked" in str(msg.get("content", ""))
+            ]
+            assert len(blocking_messages) == 0
