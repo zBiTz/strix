@@ -3,6 +3,10 @@ from typing import Any
 from strix.tools.registry import register_tool
 
 
+# Minimum number of specialized agents recommended for thorough security assessment
+MIN_RECOMMENDED_AGENTS = 6
+
+
 def _validate_root_agent(agent_state: Any) -> dict[str, Any] | None:
     if (
         agent_state is not None
@@ -34,35 +38,34 @@ def _check_minimum_agent_requirements(agent_state: Any = None) -> dict[str, Any]
         if agent_state and hasattr(agent_state, "agent_id"):
             current_agent_id = agent_state.agent_id
 
-        # Count total sub-agents created (excluding root agent)
+        # Count total sub-agents created (only those with parent_id)
         total_agents = sum(
             1
             for agent_id, node in _agent_graph.get("nodes", {}).items()
-            if agent_id != current_agent_id
+            if agent_id != current_agent_id and node.get("parent_id") is not None
         )
 
-        # Minimum recommended agents for thorough scan
-        min_agents = 3
-
-        if total_agents < min_agents:
+        if total_agents < MIN_RECOMMENDED_AGENTS:
             import logging
 
             logger = logging.getLogger(__name__)
             logger.warning(
                 f"Only {total_agents} sub-agent(s) were created. "
-                f"Recommended minimum is {min_agents} for thorough vulnerability assessment."
+                f"Recommended minimum is {MIN_RECOMMENDED_AGENTS} "
+                f"for thorough vulnerability assessment."
             )
             # Return warning but don't block - this is guidance, not a hard requirement
             return {
                 "success": True,
                 "warning": (
                     f"Only {total_agents} sub-agent(s) were created during this scan. "
-                    f"For comprehensive coverage, consider creating at least {min_agents} "
-                    f"specialized agents covering different vulnerability categories "
-                    f"(reconnaissance, authentication, input validation, etc.)."
+                    f"For comprehensive coverage, consider creating at least "
+                    f"{MIN_RECOMMENDED_AGENTS} specialized agents covering different "
+                    f"vulnerability categories (reconnaissance, authentication, "
+                    f"input validation, etc.)."
                 ),
                 "agents_created": total_agents,
-                "recommended_minimum": min_agents,
+                "recommended_minimum": MIN_RECOMMENDED_AGENTS,
             }
 
     except ImportError:
@@ -219,15 +222,13 @@ def finish_scan(
         # Check minimum agent requirements (warning only, doesn't block)
         agent_check_result = _check_minimum_agent_requirements(agent_state)
 
-        # Add warning to result if minimum agents not met
+        # Finalize with tracer and augment result if warning exists
+        result = _finalize_with_tracer(content, success)
         if agent_check_result and "warning" in agent_check_result:
-            result = _finalize_with_tracer(content, success)
             result["agent_coverage_warning"] = agent_check_result["warning"]
             result["agents_created"] = agent_check_result.get("agents_created", 0)
-            result["recommended_minimum"] = agent_check_result.get("recommended_minimum", 3)
-            return result
-
-        return _finalize_with_tracer(content, success)
+            result["recommended_minimum"] = MIN_RECOMMENDED_AGENTS
+        return result
 
     except (ValueError, TypeError, KeyError) as e:
         return {"success": False, "message": f"Failed to complete scan: {e!s}"}
