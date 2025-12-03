@@ -25,6 +25,54 @@ def _validate_content(content: str) -> dict[str, Any] | None:
     return None
 
 
+def _check_minimum_agent_requirements(agent_state: Any = None) -> dict[str, Any] | None:
+    """Check if minimum number of agents were created for thorough scan."""
+    try:
+        from strix.tools.agents_graph.agents_graph_actions import _agent_graph
+
+        current_agent_id = None
+        if agent_state and hasattr(agent_state, "agent_id"):
+            current_agent_id = agent_state.agent_id
+
+        # Count total sub-agents created (excluding root agent)
+        total_agents = sum(
+            1
+            for agent_id, node in _agent_graph.get("nodes", {}).items()
+            if agent_id != current_agent_id
+        )
+
+        # Minimum recommended agents for thorough scan
+        min_agents = 3
+
+        if total_agents < min_agents:
+            import logging
+
+            logger = logging.getLogger(__name__)
+            logger.warning(
+                f"Only {total_agents} sub-agent(s) were created. "
+                f"Recommended minimum is {min_agents} for thorough vulnerability assessment."
+            )
+            # Return warning but don't block - this is guidance, not a hard requirement
+            return {
+                "success": True,
+                "warning": (
+                    f"Only {total_agents} sub-agent(s) were created during this scan. "
+                    f"For comprehensive coverage, consider creating at least {min_agents} "
+                    f"specialized agents covering different vulnerability categories "
+                    f"(reconnaissance, authentication, input validation, etc.)."
+                ),
+                "agents_created": total_agents,
+                "recommended_minimum": min_agents,
+            }
+
+    except ImportError:
+        import logging
+
+        logging.warning("Could not check agent count - agents_graph module unavailable")
+
+    return None
+
+
 def _check_active_agents(agent_state: Any = None) -> dict[str, Any] | None:
     try:
         from strix.tools.agents_graph.agents_graph_actions import _agent_graph
@@ -168,7 +216,19 @@ def finish_scan(
         if active_agents_error:
             return active_agents_error
 
-        return _finalize_with_tracer(content, success)
+        # Check minimum agent requirements (warning only, doesn't block)
+        agent_check_result = _check_minimum_agent_requirements(agent_state)
+
+        result = _finalize_with_tracer(content, success)
+
+        # Add warning to result if minimum agents not met
+        if agent_check_result and "warning" in agent_check_result:
+            result["agent_coverage_warning"] = agent_check_result["warning"]
+            result["agents_created"] = agent_check_result.get("agents_created", 0)
+            result["recommended_minimum"] = agent_check_result.get("recommended_minimum", 3)
+            return result
+
+        return result  # noqa: TRY300
 
     except (ValueError, TypeError, KeyError) as e:
         return {"success": False, "message": f"Failed to complete scan: {e!s}"}

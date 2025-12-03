@@ -19,7 +19,7 @@ class AgentState(BaseModel):
 
     task: str = ""
     iteration: int = 0
-    max_iterations: int = 300
+    max_iterations: int = 2000
     completed: bool = False
     stop_requested: bool = False
     waiting_for_input: bool = False
