@@ -129,8 +129,7 @@ def validate_environment() -> None:  # noqa: PLR0912, PLR0915
                     error_text.append("• ", style="white")
                     error_text.append("LLM_TEMPERATURE", style="bold cyan")
                     error_text.append(
-                        " - LLM temperature (0.0-2.0, default: 0.0 for "
-                        "deterministic tool-calling)\n",
+                        " - LLM temperature (0.0-2.0, default: 0.5)\n",
                         style="white",
                     )
 
@@ -159,7 +158,7 @@ def validate_environment() -> None:  # noqa: PLR0912, PLR0915
                     )
                 elif var == "LLM_TEMPERATURE":
                     error_text.append(
-                        "export LLM_TEMPERATURE='0.0'  # optional, defaults to 0.0\n",
+                        "export LLM_TEMPERATURE='0.5'  # optional, defaults to 0.5\n",
                         style="dim white",
                     )
 

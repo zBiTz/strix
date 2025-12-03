@@ -433,15 +433,15 @@ class LLM:
     ) -> ModelResponse:
         # Get and validate temperature from environment
         try:
-            temperature = float(os.getenv("LLM_TEMPERATURE", "0.0"))
+            temperature = float(os.getenv("LLM_TEMPERATURE", "0.5"))
             # Clamp temperature to valid range [0.0, 2.0]
             temperature = max(0.0, min(2.0, temperature))
         except (ValueError, TypeError):
             logger.warning(
-                "Invalid LLM_TEMPERATURE value, defaulting to 0.0. "
+                "Invalid LLM_TEMPERATURE value, defaulting to 0.5. "
                 "Temperature must be a number between 0.0 and 2.0."
             )
-            temperature = 0.0
+            temperature = 0.5
 
         completion_args: dict[str, Any] = {
             "model": self.config.model_name,

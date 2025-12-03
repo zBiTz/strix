@@ -165,7 +165,7 @@ class TestLLMTemperature:
 
     @pytest.mark.asyncio
     async def test_temperature_defaults_to_zero(self, llm: LLM) -> None:
-        """Test that temperature defaults to 0.0 when not set."""
+        """Test that temperature defaults to 0.5 when not set."""
         with patch.dict(os.environ, {}, clear=False):
             if "LLM_TEMPERATURE" in os.environ:
                 del os.environ["LLM_TEMPERATURE"]
@@ -179,9 +179,9 @@ class TestLLMTemperature:
                 messages = [{"role": "user", "content": "test"}]
                 await llm._make_request(messages)
 
-                # Verify temperature was set to 0.0
+                # Verify temperature was set to 0.5
                 call_args = mock_queue.return_value.make_request.call_args
-                assert call_args[0][0]["temperature"] == 0.0
+                assert call_args[0][0]["temperature"] == 0.5
 
     @pytest.mark.asyncio
     async def test_temperature_respects_env_var(self, llm: LLM) -> None:
@@ -224,7 +224,7 @@ class TestLLMTemperature:
 
     @pytest.mark.asyncio
     async def test_temperature_handles_invalid_values(self, llm: LLM) -> None:
-        """Test that invalid temperature values default to 0.0."""
+        """Test that invalid temperature values default to 0.5."""
         invalid_values = ["invalid", "not-a-number", ""]
 
         for invalid_str in invalid_values:
@@ -239,9 +239,9 @@ class TestLLMTemperature:
                 messages = [{"role": "user", "content": "test"}]
                 await llm._make_request(messages)
 
-                # Verify temperature defaulted to 0.0
+                # Verify temperature defaulted to 0.5
                 call_args = mock_queue.return_value.make_request.call_args
-                assert call_args[0][0]["temperature"] == 0.0
+                assert call_args[0][0]["temperature"] == 0.5
 
     @pytest.mark.asyncio
     async def test_temperature_clamps_out_of_range_values(self, llm: LLM) -> None:
