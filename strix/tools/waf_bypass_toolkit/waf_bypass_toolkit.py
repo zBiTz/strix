@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import urllib.parse
 from typing import Any, Literal
 
@@ -118,7 +119,7 @@ def waf_bypass_toolkit(
                 "html_entities": "".join(f"&#{ord(c)};" for c in original),
                 "hex_encoded": "".join(f"\\x{ord(c):02x}" for c in original),
                 "unicode_escaped": "".join(f"\\u{ord(c):04x}" for c in original),
-                "base64": __import__("base64").b64encode(original.encode()).decode(),
+                "base64": base64.b64encode(original.encode()).decode(),
             }
 
             return {
