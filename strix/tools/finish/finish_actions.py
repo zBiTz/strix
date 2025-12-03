@@ -51,16 +51,18 @@ def _check_minimum_agent_requirements(agent_state: Any = None) -> dict[str, Any]
             logger = logging.getLogger(__name__)
             logger.warning(
                 f"Only {total_agents} sub-agent(s) were created. "
-                f"Recommended minimum is {MIN_RECOMMENDED_AGENTS} for thorough vulnerability assessment."
+                f"Recommended minimum is {MIN_RECOMMENDED_AGENTS} "
+                f"for thorough vulnerability assessment."
             )
             # Return warning but don't block - this is guidance, not a hard requirement
             return {
                 "success": True,
                 "warning": (
                     f"Only {total_agents} sub-agent(s) were created during this scan. "
-                    f"For comprehensive coverage, consider creating at least {MIN_RECOMMENDED_AGENTS} "
-                    f"specialized agents covering different vulnerability categories "
-                    f"(reconnaissance, authentication, input validation, etc.)."
+                    f"For comprehensive coverage, consider creating at least "
+                    f"{MIN_RECOMMENDED_AGENTS} specialized agents covering different "
+                    f"vulnerability categories (reconnaissance, authentication, "
+                    f"input validation, etc.)."
                 ),
                 "agents_created": total_agents,
                 "recommended_minimum": MIN_RECOMMENDED_AGENTS,
