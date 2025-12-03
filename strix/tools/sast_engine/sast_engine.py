@@ -134,7 +134,7 @@ def _scan_code_content(
         for pattern in patterns:
             for line_num, line in enumerate(lines, 1):
                 matches = re.finditer(pattern, line)
-                for match in matches:
+                for _ in matches:
                     context_start = max(0, line_num - 3)
                     context_end = min(len(lines), line_num + 2)
                     context_lines = lines[context_start:context_end]
