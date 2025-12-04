@@ -6,7 +6,6 @@ import os
 import queue
 from multiprocessing import Queue
 from typing import Any
-from unittest.mock import MagicMock, patch
 
 import pytest
 

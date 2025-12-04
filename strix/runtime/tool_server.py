@@ -190,7 +190,7 @@ async def execute_tool(
         # Use a timeout wrapper for the blocking queue.get()
         def get_with_timeout() -> dict[str, Any]:
             try:
-                return cast(dict[str, Any], response_queue.get(timeout=TOOL_EXECUTION_TIMEOUT))
+                return cast("dict[str, Any]", response_queue.get(timeout=TOOL_EXECUTION_TIMEOUT))
             except queue.Empty:
                 return {"error": f"Tool execution timed out after {TOOL_EXECUTION_TIMEOUT} seconds"}
 
