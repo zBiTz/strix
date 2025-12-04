@@ -207,11 +207,10 @@ async def execute_tool(
             # Handle both string errors and dict errors
             error_value = response["error"]
             if isinstance(error_value, dict):
-                # Convert dict error to string for response
-                error_str = json.dumps(error_value, indent=2)
+                # Return structured error directly
+                return ToolExecutionResponse(error=error_value, result=None)
             else:
-                error_str = str(error_value)
-            return ToolExecutionResponse(error=error_str, result=None)
+                return ToolExecutionResponse(error=str(error_value), result=None)
         return ToolExecutionResponse(result=response.get("result"))
 
     except (RuntimeError, ValueError, OSError) as e:
