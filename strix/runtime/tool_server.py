@@ -249,8 +249,8 @@ def cleanup_agent(agent_id: str) -> None:
                 process.join(timeout=1)
                 if process.is_alive():
                     process.kill()
-        except (BrokenPipeError, EOFError, OSError):
-            pass
+        except (BrokenPipeError, EOFError, OSError) as e:
+            logging.getLogger(__name__).debug(f"Error during agent {agent_id} cleanup: {e}")
         finally:
             agent_processes.pop(agent_id, None)
             agent_queues.pop(agent_id, None)
