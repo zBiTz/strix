@@ -22,7 +22,15 @@ if not SANDBOX_MODE:
     raise RuntimeError("Tool server should only run in sandbox mode (STRIX_SANDBOX_MODE=true)")
 
 # Configurable timeout for tool execution (default: 5 minutes)
-TOOL_EXECUTION_TIMEOUT = int(os.getenv("STRIX_TOOL_TIMEOUT", "300"))
+try:
+    TOOL_EXECUTION_TIMEOUT = int(os.getenv("STRIX_TOOL_TIMEOUT", "300"))
+    if TOOL_EXECUTION_TIMEOUT <= 0:
+        raise ValueError("Timeout must be positive")
+except ValueError as e:
+    raise RuntimeError(
+        f"Invalid STRIX_TOOL_TIMEOUT value: {os.getenv('STRIX_TOOL_TIMEOUT')}. "
+        f"Must be a positive integer representing seconds. Error: {e}"
+    ) from e
 
 parser = argparse.ArgumentParser(description="Start Strix tool server")
 parser.add_argument("--token", required=True, help="Authentication token")
