@@ -279,6 +279,7 @@ def dns_resolver(
     domain: str | None = None,
     ip_address: str | None = None,
     record_type: str = "A",
+    timeout: int = 10,
     **kwargs: Any,  # Capture unknown parameters
 ) -> dict[str, Any]:
     """Perform DNS record lookups and analysis.
@@ -296,12 +297,13 @@ def dns_resolver(
         domain: Target domain to query
         ip_address: IP address for reverse lookup
         record_type: DNS record type to query (A, AAAA, CNAME, MX, NS, TXT, SOA)
+        timeout: Socket timeout in seconds (default: 10)
 
     Returns:
         DNS resolution results including records and security analysis
     """
     # Define valid parameters and actions
-    VALID_PARAMS = {"action", "domain", "ip_address", "record_type"}
+    VALID_PARAMS = {"action", "domain", "ip_address", "record_type", "timeout"}
     VALID_ACTIONS = ["lookup", "all_records", "reverse", "zone_transfer"]
 
     # Check for unknown parameters
@@ -321,6 +323,10 @@ def dns_resolver(
             "reverse": "dns_resolver(action='reverse', ip_address='8.8.8.8')",
         }
         return action_error
+
+    # Set socket timeout to prevent hanging on DNS operations
+    original_timeout = socket.getdefaulttimeout()
+    socket.setdefaulttimeout(timeout)
 
     try:
         if action == "lookup":
@@ -349,5 +355,9 @@ def dns_resolver(
 
         return {"error": f"Unknown action: {action}"}
 
+    except socket.timeout:
+        return {"error": f"DNS resolution timed out after {timeout} seconds"}
     except (OSError, ValueError) as e:
         return {"error": f"DNS resolution failed: {e!s}"}
+    finally:
+        socket.setdefaulttimeout(original_timeout)

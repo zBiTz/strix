@@ -1,11 +1,15 @@
 import atexit
 import contextlib
+import multiprocessing
 import signal
 import sys
 import threading
 from typing import Any
 
 from .browser_instance import BrowserInstance
+
+# Lock for thread-safe lazy initialization of the singleton
+_manager_init_lock = threading.Lock()
 
 
 class BrowserTabManager:
@@ -322,6 +326,10 @@ class BrowserTabManager:
                 self.browser_instance = None
 
     def _register_cleanup_handlers(self) -> None:
+        # Skip signal handlers in subprocess workers to avoid hanging
+        if multiprocessing.current_process().name != "MainProcess":
+            return
+
         atexit.register(self.close_all)
 
         signal.signal(signal.SIGTERM, self._signal_handler)
@@ -335,8 +343,16 @@ class BrowserTabManager:
         sys.exit(0)
 
 
-_browser_tab_manager = BrowserTabManager()
+# Lazy initialization - singleton created only when first accessed
+_browser_tab_manager: BrowserTabManager | None = None
 
 
 def get_browser_tab_manager() -> BrowserTabManager:
+    """Get the singleton BrowserTabManager instance, creating it if needed."""
+    global _browser_tab_manager
+    if _browser_tab_manager is None:
+        with _manager_init_lock:
+            # Double-check locking pattern
+            if _browser_tab_manager is None:
+                _browser_tab_manager = BrowserTabManager()
     return _browser_tab_manager

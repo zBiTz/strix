@@ -1,11 +1,15 @@
 import atexit
 import contextlib
+import multiprocessing
 import signal
 import sys
 import threading
 from typing import Any
 
 from .python_instance import PythonInstance
+
+# Lock for thread-safe lazy initialization of the singleton
+_manager_init_lock = threading.Lock()
 
 
 class PythonSessionManager:
@@ -111,6 +115,10 @@ class PythonSessionManager:
                 session.close()
 
     def _register_cleanup_handlers(self) -> None:
+        # Skip signal handlers in subprocess workers to avoid hanging
+        if multiprocessing.current_process().name != "MainProcess":
+            return
+
         atexit.register(self.close_all_sessions)
 
         signal.signal(signal.SIGTERM, self._signal_handler)
@@ -124,8 +132,16 @@ class PythonSessionManager:
         sys.exit(0)
 
 
-_python_session_manager = PythonSessionManager()
+# Lazy initialization - singleton created only when first accessed
+_python_session_manager: PythonSessionManager | None = None
 
 
 def get_python_session_manager() -> PythonSessionManager:
+    """Get the singleton PythonSessionManager instance, creating it if needed."""
+    global _python_session_manager
+    if _python_session_manager is None:
+        with _manager_init_lock:
+            # Double-check locking pattern
+            if _python_session_manager is None:
+                _python_session_manager = PythonSessionManager()
     return _python_session_manager

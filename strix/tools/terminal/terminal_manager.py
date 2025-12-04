@@ -2,6 +2,7 @@ import atexit
 import concurrent.futures
 import contextlib
 import logging
+import multiprocessing
 import signal
 import sys
 import threading
@@ -11,6 +12,9 @@ from .terminal_session import TerminalSession
 
 
 logger = logging.getLogger(__name__)
+
+# Lock for thread-safe lazy initialization of the singleton
+_manager_init_lock = threading.Lock()
 
 
 class TerminalManager:
@@ -178,6 +182,10 @@ class TerminalManager:
                 session.close()
 
     def _register_cleanup_handlers(self) -> None:
+        # Skip signal handlers in subprocess workers to avoid hanging
+        if multiprocessing.current_process().name != "MainProcess":
+            return
+
         atexit.register(self.close_all_sessions)
 
         signal.signal(signal.SIGTERM, self._signal_handler)
@@ -191,8 +199,16 @@ class TerminalManager:
         sys.exit(0)
 
 
-_terminal_manager = TerminalManager()
+# Lazy initialization - singleton created only when first accessed
+_terminal_manager: TerminalManager | None = None
 
 
 def get_terminal_manager() -> TerminalManager:
+    """Get the singleton TerminalManager instance, creating it if needed."""
+    global _terminal_manager
+    if _terminal_manager is None:
+        with _manager_init_lock:
+            # Double-check locking pattern
+            if _terminal_manager is None:
+                _terminal_manager = TerminalManager()
     return _terminal_manager

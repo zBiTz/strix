@@ -226,9 +226,20 @@ async def execute_tool(
             try:
                 return cast("dict[str, Any]", response_queue.get(timeout=TOOL_EXECUTION_TIMEOUT))
             except queue.Empty:
-                return {"error": f"Tool execution timed out after {TOOL_EXECUTION_TIMEOUT} seconds"}
+                return {
+                    "error": f"Tool execution timed out after {TOOL_EXECUTION_TIMEOUT} seconds",
+                    "_timeout": True,
+                }
 
         response = await loop.run_in_executor(None, get_with_timeout)
+
+        # Recycle worker after timeout to prevent cascading timeouts
+        if response.get("_timeout"):
+            logger.warning(
+                f"Worker for agent {request.agent_id} timed out, recycling worker process..."
+            )
+            cleanup_agent(request.agent_id)
+            response.pop("_timeout", None)
 
         if "error" in response:
             # Handle both string errors and dict errors
