@@ -80,7 +80,7 @@ class ToolExecutionRequest(BaseModel):
 
 class ToolExecutionResponse(BaseModel):
     result: Any | None = None
-    error: str | None = None
+    error: str | dict[str, Any] | None = None
 
 
 def agent_worker(
