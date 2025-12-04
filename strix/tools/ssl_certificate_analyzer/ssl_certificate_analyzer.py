@@ -9,6 +9,12 @@ from typing import Any, Literal
 from urllib.parse import urlparse
 
 from strix.tools.registry import register_tool
+from strix.tools.validation import (
+    generate_usage_hint,
+    validate_action_param,
+    validate_required_param,
+    validate_unknown_params,
+)
 
 
 SSLAction = Literal["analyze", "chain", "ciphers"]
@@ -286,6 +292,8 @@ def ssl_certificate_analyzer(
     action: SSLAction,
     host: str,
     port: int = 443,
+
+    **kwargs: Any,  # Capture unknown parameters
 ) -> dict[str, Any]:
     """Analyze SSL/TLS certificates for security issues.
 

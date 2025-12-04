@@ -8,6 +8,12 @@ from typing import Any, Literal
 import requests
 
 from strix.tools.registry import register_tool
+from strix.tools.validation import (
+    generate_usage_hint,
+    validate_action_param,
+    validate_required_param,
+    validate_unknown_params,
+)
 
 
 ASNAction = Literal["lookup_ip", "lookup_asn", "prefixes"]
@@ -169,6 +175,7 @@ def asn_lookup(
     ip_address: str | None = None,
     asn: str | None = None,
     domain: str | None = None,
+    **kwargs: Any,  # Capture unknown parameters
 ) -> dict[str, Any]:
     """Lookup ASN and IP range information for network reconnaissance.
 
@@ -188,6 +195,28 @@ def asn_lookup(
     Returns:
         ASN information, IP ranges, and network details
     """
+    # Define valid parameters and actions
+    VALID_PARAMS = {"action", "ip_address", "asn", "domain"}
+    VALID_ACTIONS = ["lookup_ip", "lookup_asn", "prefixes"]
+
+    # Check for unknown parameters
+    unknown_error = validate_unknown_params(kwargs, VALID_PARAMS, "asn_lookup")
+    if unknown_error:
+        unknown_error.update(
+            generate_usage_hint("asn_lookup", "lookup_ip", {"ip_address": "8.8.8.8"})
+        )
+        return unknown_error
+
+    # Validate action parameter
+    action_error = validate_action_param(action, VALID_ACTIONS, "asn_lookup")
+    if action_error:
+        action_error["usage_examples"] = {
+            "lookup_ip": "asn_lookup(action='lookup_ip', ip_address='8.8.8.8')",
+            "lookup_asn": "asn_lookup(action='lookup_asn', asn='AS15169')",
+            "prefixes": "asn_lookup(action='prefixes', asn='AS15169')",
+        }
+        return action_error
+
     try:
         if action == "lookup_ip":
             if domain and not ip_address:

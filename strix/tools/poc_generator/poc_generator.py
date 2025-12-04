@@ -6,6 +6,12 @@ import json
 from typing import Any, Literal
 
 from strix.tools.registry import register_tool
+from strix.tools.validation import (
+    generate_usage_hint,
+    validate_action_param,
+    validate_required_param,
+    validate_unknown_params,
+)
 
 
 PoCFormat = Literal["curl", "python", "javascript", "html", "burp", "httpie"]
@@ -295,6 +301,8 @@ def poc_generator(
     poc_format: PoCFormat | None = None,
     vulnerability_type: str = "generic",
     description: str = "",
+
+    **kwargs: Any,  # Capture unknown parameters
 ) -> dict[str, Any]:
     """Generate Proof of Concept scripts in multiple formats.
 

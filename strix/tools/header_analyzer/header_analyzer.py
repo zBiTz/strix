@@ -5,6 +5,13 @@ from __future__ import annotations
 from typing import Any, Literal
 
 from strix.tools.registry import register_tool
+from strix.tools.validation import (
+    add_workflow_hint_for_url_params,
+    detect_url_in_unknown_params,
+    generate_usage_hint,
+    validate_action_param,
+    validate_unknown_params,
+)
 
 
 HeaderAction = Literal["analyze", "check_csp", "check_hsts", "check_cookies", "recommendations"]
@@ -328,6 +335,7 @@ def header_analyzer(
     csp: str | None = None,
     hsts: str | None = None,
     cookies: list[str] | None = None,
+    **kwargs: Any,  # Capture unknown parameters
 ) -> dict[str, Any]:
     """Analyze HTTP security headers for misconfigurations.
 
@@ -349,6 +357,43 @@ def header_analyzer(
     Returns:
         Analysis results including issues, recommendations, and security score
     """
+    # Define valid parameters and actions
+    VALID_PARAMS = {"action", "headers", "csp", "hsts", "cookies"}
+    VALID_ACTIONS = ["analyze", "check_csp", "check_hsts", "check_cookies", "recommendations"]
+
+    # Check for unknown parameters
+    unknown_error = validate_unknown_params(kwargs, VALID_PARAMS, "header_analyzer")
+    if unknown_error:
+        unknown_params = list(kwargs.keys())
+        # Detect common mistake of passing URL instead of headers
+        if detect_url_in_unknown_params(unknown_params):
+            workflow_steps = [
+                "1. Use send_request(method='GET', url='https://example.com') to fetch the page",
+                "2. Extract headers from the response",
+                "3. Call header_analyzer(action='analyze', headers={...extracted headers...})",
+            ]
+            unknown_error = add_workflow_hint_for_url_params(unknown_error, workflow_steps)
+
+        unknown_error.update(
+            generate_usage_hint(
+                "header_analyzer",
+                "analyze",
+                {"headers": {"Content-Type": "text/html", "Server": "nginx"}},
+            )
+        )
+        return unknown_error
+
+    # Validate action parameter
+    action_error = validate_action_param(action, VALID_ACTIONS, "header_analyzer")
+    if action_error:
+        action_error["usage_examples"] = {
+            "analyze": "header_analyzer(action='analyze', headers={'Content-Type': 'text/html'})",
+            "check_csp": "header_analyzer(action='check_csp', csp='default-src self')",
+            "check_hsts": "header_analyzer(action='check_hsts', hsts='max-age=31536000')",
+            "check_cookies": "header_analyzer(action='check_cookies', cookies=['session=abc; Secure'])",
+        }
+        return action_error
+
     try:
         if action == "analyze":
             if not headers:

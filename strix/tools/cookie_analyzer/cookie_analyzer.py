@@ -8,6 +8,12 @@ from urllib.parse import urlparse
 import requests
 
 from strix.tools.registry import register_tool
+from strix.tools.validation import (
+    generate_usage_hint,
+    validate_action_param,
+    validate_required_param,
+    validate_unknown_params,
+)
 
 
 CookieAction = Literal["analyze", "check_attributes", "list"]
@@ -327,6 +333,7 @@ def cookie_analyzer(
     action: CookieAction,
     url: str,
     cookie_name: str | None = None,
+    **kwargs: Any,  # Capture unknown parameters
 ) -> dict[str, Any]:
     """Analyze cookie security for web applications.
 
@@ -345,6 +352,34 @@ def cookie_analyzer(
     Returns:
         Cookie security analysis with issues and recommendations
     """
+    # Define valid parameters and actions
+    VALID_PARAMS = {"action", "url", "cookie_name"}
+    VALID_ACTIONS = ["analyze", "check_attributes", "list"]
+
+    # Check for unknown parameters
+    unknown_error = validate_unknown_params(kwargs, VALID_PARAMS, "cookie_analyzer")
+    if unknown_error:
+        unknown_error.update(
+            generate_usage_hint("cookie_analyzer", "analyze", {"url": "https://example.com"})
+        )
+        return unknown_error
+
+    # Validate action parameter
+    action_error = validate_action_param(action, VALID_ACTIONS, "cookie_analyzer")
+    if action_error:
+        action_error["usage_examples"] = {
+            "analyze": "cookie_analyzer(action='analyze', url='https://example.com')",
+            "check_attributes": "cookie_analyzer(action='check_attributes', url='https://example.com', cookie_name='session')",
+            "list": "cookie_analyzer(action='list', url='https://example.com')",
+        }
+        return action_error
+
+    # Validate required parameters
+    url_error = validate_required_param(url, "url", action, "cookie_analyzer")
+    if url_error:
+        url_error.update(generate_usage_hint("cookie_analyzer", action, {"url": "https://example.com"}))
+        return url_error
+
     try:
         if action == "analyze":
             return _analyze_url_cookies(url)

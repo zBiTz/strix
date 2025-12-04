@@ -7,6 +7,12 @@ import statistics
 from typing import Any, Literal
 
 from strix.tools.registry import register_tool
+from strix.tools.validation import (
+    generate_usage_hint,
+    validate_action_param,
+    validate_required_param,
+    validate_unknown_params,
+)
 
 
 TimingAnalyzerAction = Literal["analyze", "compare", "detect_difference", "get_statistics"]
@@ -150,6 +156,8 @@ def timing_analyzer(
     times2: list[float] | None = None,
     remove_outliers: bool = True,
     outlier_method: str = "iqr",
+
+    **kwargs: Any,  # Capture unknown parameters
 ) -> dict[str, Any]:
     """Statistical timing analysis for blind vulnerability detection.
 

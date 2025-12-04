@@ -8,6 +8,12 @@ from collections import Counter
 from typing import Any, Literal
 
 from strix.tools.registry import register_tool
+from strix.tools.validation import (
+    generate_usage_hint,
+    validate_action_param,
+    validate_required_param,
+    validate_unknown_params,
+)
 
 
 SecretAction = Literal["scan", "scan_text", "list_patterns"]
@@ -272,6 +278,8 @@ def secret_scanner(
     text: str | None = None,
     include_entropy: bool = True,
     custom_patterns: dict[str, dict[str, Any]] | None = None,
+
+    **kwargs: Any,  # Capture unknown parameters
 ) -> dict[str, Any]:
     """Scan text for exposed secrets, API keys, and credentials.
 

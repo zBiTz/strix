@@ -180,7 +180,28 @@ def _format_tool_result(tool_name: str, result: Any) -> tuple[str, list[dict[str
     else:
         result_str = result
 
-    if result_str is None:
+    # Enhanced error formatting for validation errors
+    if isinstance(result, dict) and "error" in result:
+        error_parts = [f"Error: {result['error']}"]
+
+        if "hint" in result:
+            error_parts.append(f"\nHint: {result['hint']}")
+
+        if "workflow_hint" in result:
+            error_parts.append(f"\nWorkflow: {result['workflow_hint']}")
+
+        if "usage_example" in result:
+            import json
+            example_str = json.dumps(result["usage_example"], indent=2)
+            error_parts.append(f"\nExample usage:\n{example_str}")
+
+        if "correct_workflow" in result:
+            error_parts.append("\nCorrect workflow:")
+            for step in result["correct_workflow"]:
+                error_parts.append(f"  {step}")
+
+        final_result_str = "".join(error_parts)
+    elif result_str is None:
         final_result_str = f"Tool {tool_name} executed successfully"
     else:
         final_result_str = str(result_str)

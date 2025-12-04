@@ -11,6 +11,12 @@ import time
 from typing import Any, Literal
 
 from strix.tools.registry import register_tool
+from strix.tools.validation import (
+    generate_usage_hint,
+    validate_action_param,
+    validate_required_param,
+    validate_unknown_params,
+)
 
 
 JWTAction = Literal["decode", "analyze", "test_none_alg", "test_alg_confusion", "validate_claims"]
@@ -374,6 +380,7 @@ def jwt_analyzer(
     public_key: str | None = None,
     expected_issuer: str | None = None,
     expected_audience: str | None = None,
+    **kwargs: Any,  # Capture unknown parameters
 ) -> dict[str, Any]:
     """Analyze and test JWT tokens for security vulnerabilities.
 
@@ -399,6 +406,37 @@ def jwt_analyzer(
     Returns:
         Analysis results including decoded token, security issues, and test payloads
     """
+    # Define valid parameters and actions
+    VALID_PARAMS = {"action", "token", "public_key", "expected_issuer", "expected_audience"}
+    VALID_ACTIONS = ["decode", "analyze", "test_none_alg", "test_alg_confusion", "validate_claims"]
+
+    # Check for unknown parameters
+    unknown_error = validate_unknown_params(kwargs, VALID_PARAMS, "jwt_analyzer")
+    if unknown_error:
+        unknown_error.update(
+            generate_usage_hint(
+                "jwt_analyzer", "decode", {"token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."}
+            )
+        )
+        return unknown_error
+
+    # Validate action parameter
+    action_error = validate_action_param(action, VALID_ACTIONS, "jwt_analyzer")
+    if action_error:
+        action_error["usage_examples"] = {
+            "decode": "jwt_analyzer(action='decode', token='eyJhbGc...')",
+            "analyze": "jwt_analyzer(action='analyze', token='eyJhbGc...')",
+        }
+        return action_error
+
+    # Validate required parameters
+    token_error = validate_required_param(token, "token", action, "jwt_analyzer")
+    if token_error:
+        token_error.update(
+            generate_usage_hint("jwt_analyzer", action, {"token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."})
+        )
+        return token_error
+
     try:
         if action == "decode":
             header, payload, signature = _decode_jwt_parts(token)

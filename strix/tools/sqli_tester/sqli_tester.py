@@ -10,6 +10,12 @@ from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 import requests
 
 from strix.tools.registry import register_tool
+from strix.tools.validation import (
+    generate_usage_hint,
+    validate_action_param,
+    validate_required_param,
+    validate_unknown_params,
+)
 
 
 SQLiAction = Literal["test", "detect", "fingerprint"]
@@ -370,6 +376,8 @@ def sqli_tester(
     url: str,
     param: str,
     method: str = "GET",
+
+    **kwargs: Any,  # Capture unknown parameters
 ) -> dict[str, Any]:
     """Test for SQL injection vulnerabilities.
 

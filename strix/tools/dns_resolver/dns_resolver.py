@@ -7,6 +7,12 @@ from typing import Any, Literal
 from urllib.parse import urlparse
 
 from strix.tools.registry import register_tool
+from strix.tools.validation import (
+    generate_usage_hint,
+    validate_action_param,
+    validate_required_param,
+    validate_unknown_params,
+)
 
 
 DNSAction = Literal["lookup", "all_records", "reverse", "zone_transfer"]
@@ -273,6 +279,7 @@ def dns_resolver(
     domain: str | None = None,
     ip_address: str | None = None,
     record_type: str = "A",
+    **kwargs: Any,  # Capture unknown parameters
 ) -> dict[str, Any]:
     """Perform DNS record lookups and analysis.
 
@@ -293,6 +300,28 @@ def dns_resolver(
     Returns:
         DNS resolution results including records and security analysis
     """
+    # Define valid parameters and actions
+    VALID_PARAMS = {"action", "domain", "ip_address", "record_type"}
+    VALID_ACTIONS = ["lookup", "all_records", "reverse", "zone_transfer"]
+
+    # Check for unknown parameters
+    unknown_error = validate_unknown_params(kwargs, VALID_PARAMS, "dns_resolver")
+    if unknown_error:
+        unknown_error.update(
+            generate_usage_hint("dns_resolver", "lookup", {"domain": "example.com", "record_type": "A"})
+        )
+        return unknown_error
+
+    # Validate action parameter
+    action_error = validate_action_param(action, VALID_ACTIONS, "dns_resolver")
+    if action_error:
+        action_error["usage_examples"] = {
+            "lookup": "dns_resolver(action='lookup', domain='example.com', record_type='A')",
+            "all_records": "dns_resolver(action='all_records', domain='example.com')",
+            "reverse": "dns_resolver(action='reverse', ip_address='8.8.8.8')",
+        }
+        return action_error
+
     try:
         if action == "lookup":
             if not domain:
