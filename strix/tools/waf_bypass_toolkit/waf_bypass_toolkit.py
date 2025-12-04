@@ -156,8 +156,6 @@ def waf_bypass_toolkit(
             return param_error
 
     try:
-        if not payload and action != "generate_variants":
-            return {"error": "payload required for this action"}
 
         if action == "encode_payload":
             original = payload or ""
