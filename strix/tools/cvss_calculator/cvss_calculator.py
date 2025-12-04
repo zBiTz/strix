@@ -4,8 +4,13 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-
 from strix.tools.registry import register_tool
+from strix.tools.validation import (
+    generate_usage_hint,
+    validate_action_param,
+    validate_required_param,
+    validate_unknown_params,
+)
 
 
 CVSSAction = Literal["calculate_v3", "calculate_v4", "parse_vector"]
@@ -129,7 +134,8 @@ def cvss_calculator(
     s: str | None = None,
     c: str | None = None,
     i: str | None = None,
-    a: str | None = None
+    a: str | None = None,
+    **kwargs: Any,
 ) -> dict[str, Any]:
     """Calculate CVSS scores for vulnerability severity assessment.
     
@@ -169,6 +175,59 @@ def cvss_calculator(
             vector="CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"
         )
     """
+    # Define valid parameters and actions
+    VALID_PARAMS = {
+        "action",
+        "vector",
+        "av",
+        "ac",
+        "pr",
+        "ui",
+        "s",
+        "c",
+        "i",
+        "a",
+    }
+    VALID_ACTIONS = ["calculate_v3", "calculate_v4", "parse_vector"]
+
+    # Check for unknown parameters
+    unknown_error = validate_unknown_params(kwargs, VALID_PARAMS, "cvss_calculator")
+    if unknown_error:
+        unknown_error.update(
+            generate_usage_hint("cvss_calculator", "calculate_v3", {"av": "N", "ac": "L", "pr": "N", "ui": "N", "s": "U", "c": "H", "i": "H", "a": "H"})
+        )
+        return unknown_error
+
+    # Validate action parameter
+    action_error = validate_action_param(action, VALID_ACTIONS, "cvss_calculator")
+    if action_error:
+        action_error["usage_examples"] = {
+            "calculate_v3": "cvss_calculator(action='calculate_v3', av='N', ac='L', pr='N', ui='N', s='U', c='H', i='H', a='H')",
+            "calculate_v4": "cvss_calculator(action='calculate_v4', av='N', ac='L', pr='N', ui='N', s='U', c='H', i='H', a='H')",
+            "parse_vector": "cvss_calculator(action='parse_vector', vector='CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H')",
+        }
+        return action_error
+
+    # Validate required parameters based on action
+    if action == "parse_vector":
+        param_error = validate_required_param(vector, "vector", action, "cvss_calculator")
+        if param_error:
+            param_error.update(
+                generate_usage_hint("cvss_calculator", action, {"vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"})
+            )
+            return param_error
+
+    if action in ["calculate_v3", "calculate_v4"]:
+        required_params = ["av", "ac", "pr", "ui", "s", "c", "i", "a"]
+        for param_name in required_params:
+            param_value = locals()[param_name]
+            param_error = validate_required_param(param_value, param_name, action, "cvss_calculator")
+            if param_error:
+                param_error.update(
+                    generate_usage_hint("cvss_calculator", action, {"av": "N", "ac": "L", "pr": "N", "ui": "N", "s": "U", "c": "H", "i": "H", "a": "H"})
+                )
+                return param_error
+
     try:
         if action == "parse_vector":
             if not vector:

@@ -6,6 +6,12 @@ import re
 from typing import Any, Literal
 
 from strix.tools.registry import register_tool
+from strix.tools.validation import (
+    generate_usage_hint,
+    validate_action_param,
+    validate_required_param,
+    validate_unknown_params,
+)
 
 
 SASTAction = Literal["scan_code", "scan_file", "list_rules"]
@@ -162,6 +168,7 @@ def sast_engine(
     code: str | None = None,
     filename: str | None = None,
     custom_rules: dict[str, dict[str, Any]] | None = None,
+    **kwargs: Any,
 ) -> dict[str, Any]:
     """Static Application Security Testing (SAST) engine for code analysis.
 
@@ -181,6 +188,50 @@ def sast_engine(
     Returns:
         Scan results including vulnerabilities found with severity and location
     """
+    # Define valid parameters and actions
+    VALID_PARAMS = {
+        "action",
+        "code",
+        "filename",
+        "custom_rules",
+    }
+    VALID_ACTIONS = ["scan_code", "scan_file", "list_rules"]
+
+    # Check for unknown parameters
+    unknown_error = validate_unknown_params(kwargs, VALID_PARAMS, "sast_engine")
+    if unknown_error:
+        unknown_error.update(
+            generate_usage_hint("sast_engine", "scan_code", {"code": "import os; os.system(user_input)"})
+        )
+        return unknown_error
+
+    # Validate action parameter
+    action_error = validate_action_param(action, VALID_ACTIONS, "sast_engine")
+    if action_error:
+        action_error["usage_examples"] = {
+            "scan_code": "sast_engine(action='scan_code', code='import os; os.system(user_input)')",
+            "scan_file": "sast_engine(action='scan_file', filename='/path/to/file.py')",
+            "list_rules": "sast_engine(action='list_rules')",
+        }
+        return action_error
+
+    # Validate required parameters based on action
+    if action == "scan_code":
+        param_error = validate_required_param(code, "code", action, "sast_engine")
+        if param_error:
+            param_error.update(
+                generate_usage_hint("sast_engine", action, {"code": "import os; os.system(user_input)"})
+            )
+            return param_error
+
+    if action == "scan_file":
+        param_error = validate_required_param(filename, "filename", action, "sast_engine")
+        if param_error:
+            param_error.update(
+                generate_usage_hint("sast_engine", action, {"filename": "/path/to/file.py"})
+            )
+            return param_error
+
     try:
         if action == "list_rules":
             return {

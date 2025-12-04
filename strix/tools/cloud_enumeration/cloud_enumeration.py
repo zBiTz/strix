@@ -5,6 +5,11 @@ from __future__ import annotations
 from typing import Any, Literal
 
 from strix.tools.registry import register_tool
+from strix.tools.validation import (
+    generate_usage_hint,
+    validate_action_param,
+    validate_unknown_params,
+)
 
 
 CloudAction = Literal["enumerate_s3", "enumerate_azure_blob", "enumerate_gcp_bucket", "generate_wordlist"]
@@ -16,6 +21,7 @@ def cloud_enumeration(
     target: str | None = None,
     company_name: str | None = None,
     region: str | None = None,
+    **kwargs: Any,
 ) -> dict[str, Any]:
     """Cloud Enumeration Suite for discovering cloud resources.
 
@@ -35,6 +41,34 @@ def cloud_enumeration(
     Returns:
         Enumeration results and test URLs
     """
+    # Define valid parameters and actions
+    VALID_PARAMS = {
+        "action",
+        "target",
+        "company_name",
+        "region",
+    }
+    VALID_ACTIONS = ["enumerate_s3", "enumerate_azure_blob", "enumerate_gcp_bucket", "generate_wordlist"]
+
+    # Check for unknown parameters
+    unknown_error = validate_unknown_params(kwargs, VALID_PARAMS, "cloud_enumeration")
+    if unknown_error:
+        unknown_error.update(
+            generate_usage_hint("cloud_enumeration", "enumerate_s3", {"target": "company-data"})
+        )
+        return unknown_error
+
+    # Validate action parameter
+    action_error = validate_action_param(action, VALID_ACTIONS, "cloud_enumeration")
+    if action_error:
+        action_error["usage_examples"] = {
+            "enumerate_s3": "cloud_enumeration(action='enumerate_s3', target='company-data')",
+            "enumerate_azure_blob": "cloud_enumeration(action='enumerate_azure_blob', target='companydata')",
+            "enumerate_gcp_bucket": "cloud_enumeration(action='enumerate_gcp_bucket', target='company-data')",
+            "generate_wordlist": "cloud_enumeration(action='generate_wordlist', company_name='company')",
+        }
+        return action_error
+
     try:
         if action == "enumerate_s3":
             bucket_name = target or company_name or "example"

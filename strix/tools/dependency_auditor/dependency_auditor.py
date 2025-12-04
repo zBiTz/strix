@@ -7,6 +7,12 @@ import re
 from typing import Any, Literal
 
 from strix.tools.registry import register_tool
+from strix.tools.validation import (
+    generate_usage_hint,
+    validate_action_param,
+    validate_required_param,
+    validate_unknown_params,
+)
 
 
 DependencyAction = Literal["audit_package", "audit_file", "check_version", "list_ecosystems"]
@@ -227,6 +233,7 @@ def dependency_auditor(
     version: str | None = None,
     file_content: str | None = None,
     file_type: str | None = None,
+    **kwargs: Any,
 ) -> dict[str, Any]:
     """Audit project dependencies for known security vulnerabilities.
 
@@ -247,6 +254,64 @@ def dependency_auditor(
     Returns:
         Audit results including vulnerabilities found with CVE IDs and severity
     """
+    # Define valid parameters and actions
+    VALID_PARAMS = {
+        "action",
+        "package_name",
+        "version",
+        "file_content",
+        "file_type",
+    }
+    VALID_ACTIONS = ["audit_package", "audit_file", "check_version", "list_ecosystems"]
+
+    # Check for unknown parameters
+    unknown_error = validate_unknown_params(kwargs, VALID_PARAMS, "dependency_auditor")
+    if unknown_error:
+        unknown_error.update(
+            generate_usage_hint("dependency_auditor", "audit_package", {"package_name": "express", "version": "4.17.0"})
+        )
+        return unknown_error
+
+    # Validate action parameter
+    action_error = validate_action_param(action, VALID_ACTIONS, "dependency_auditor")
+    if action_error:
+        action_error["usage_examples"] = {
+            "audit_package": "dependency_auditor(action='audit_package', package_name='express', version='4.17.0')",
+            "audit_file": "dependency_auditor(action='audit_file', file_content='...', file_type='package.json')",
+            "check_version": "dependency_auditor(action='check_version', package_name='lodash', version='4.17.0')",
+            "list_ecosystems": "dependency_auditor(action='list_ecosystems')",
+        }
+        return action_error
+
+    # Validate required parameters based on action
+    if action in ["audit_package", "check_version"]:
+        param_error = validate_required_param(package_name, "package_name", action, "dependency_auditor")
+        if param_error:
+            param_error.update(
+                generate_usage_hint("dependency_auditor", action, {"package_name": "express", "version": "4.17.0"})
+            )
+            return param_error
+        param_error = validate_required_param(version, "version", action, "dependency_auditor")
+        if param_error:
+            param_error.update(
+                generate_usage_hint("dependency_auditor", action, {"package_name": "express", "version": "4.17.0"})
+            )
+            return param_error
+
+    if action == "audit_file":
+        param_error = validate_required_param(file_content, "file_content", action, "dependency_auditor")
+        if param_error:
+            param_error.update(
+                generate_usage_hint("dependency_auditor", action, {"file_content": "...", "file_type": "package.json"})
+            )
+            return param_error
+        param_error = validate_required_param(file_type, "file_type", action, "dependency_auditor")
+        if param_error:
+            param_error.update(
+                generate_usage_hint("dependency_auditor", action, {"file_content": "...", "file_type": "package.json"})
+            )
+            return param_error
+
     try:
         if action == "list_ecosystems":
             return {

@@ -7,6 +7,12 @@ import urllib.parse
 from typing import Any, Literal
 
 from strix.tools.registry import register_tool
+from strix.tools.validation import (
+    generate_usage_hint,
+    validate_action_param,
+    validate_required_param,
+    validate_unknown_params,
+)
 
 
 WAFBypassAction = Literal[
@@ -85,6 +91,7 @@ def waf_bypass_toolkit(
     action: WAFBypassAction,
     payload: str | None = None,
     encoding_type: str | None = None,
+    **kwargs: Any,
 ) -> dict[str, Any]:
     """WAF Bypass Toolkit for evading Web Application Firewall detection.
 
@@ -105,6 +112,49 @@ def waf_bypass_toolkit(
     Returns:
         Transformed payloads for WAF bypass testing
     """
+    # Define valid parameters and actions
+    VALID_PARAMS = {
+        "action",
+        "payload",
+        "encoding_type",
+    }
+    VALID_ACTIONS = [
+        "encode_payload",
+        "generate_variants",
+        "case_manipulation",
+        "comment_injection",
+        "unicode_bypass",
+    ]
+
+    # Check for unknown parameters
+    unknown_error = validate_unknown_params(kwargs, VALID_PARAMS, "waf_bypass_toolkit")
+    if unknown_error:
+        unknown_error.update(
+            generate_usage_hint("waf_bypass_toolkit", "encode_payload", {"payload": "<script>alert(1)</script>"})
+        )
+        return unknown_error
+
+    # Validate action parameter
+    action_error = validate_action_param(action, VALID_ACTIONS, "waf_bypass_toolkit")
+    if action_error:
+        action_error["usage_examples"] = {
+            "encode_payload": "waf_bypass_toolkit(action='encode_payload', payload='<script>alert(1)</script>')",
+            "generate_variants": "waf_bypass_toolkit(action='generate_variants', payload=\"' OR '1'='1\")",
+            "case_manipulation": "waf_bypass_toolkit(action='case_manipulation', payload='SELECT')",
+            "comment_injection": "waf_bypass_toolkit(action='comment_injection', payload='SELECT * FROM users')",
+            "unicode_bypass": "waf_bypass_toolkit(action='unicode_bypass', payload='<script>alert(1)</script>')",
+        }
+        return action_error
+
+    # Validate required parameters for most actions
+    if action not in ["generate_variants"]:
+        param_error = validate_required_param(payload, "payload", action, "waf_bypass_toolkit")
+        if param_error:
+            param_error.update(
+                generate_usage_hint("waf_bypass_toolkit", action, {"payload": "<script>alert(1)</script>"})
+            )
+            return param_error
+
     try:
         if not payload and action != "generate_variants":
             return {"error": "payload required for this action"}
