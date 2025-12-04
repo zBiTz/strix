@@ -2,12 +2,16 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import contextlib
+import json
 import logging
 import os
+import queue
 import signal
 import sys
+import threading
 from multiprocessing import Process, Queue
-from typing import Any
+from typing import Any, cast
 
 import uvicorn
 from fastapi import Depends, FastAPI, HTTPException, status
@@ -18,6 +22,17 @@ from pydantic import BaseModel, ValidationError
 SANDBOX_MODE = os.getenv("STRIX_SANDBOX_MODE", "false").lower() == "true"
 if not SANDBOX_MODE:
     raise RuntimeError("Tool server should only run in sandbox mode (STRIX_SANDBOX_MODE=true)")
+
+# Configurable timeout for tool execution (default: 5 minutes)
+try:
+    TOOL_EXECUTION_TIMEOUT = int(os.getenv("STRIX_TOOL_TIMEOUT", "300"))
+    if TOOL_EXECUTION_TIMEOUT <= 0:
+        raise ValueError("Timeout must be positive")  # noqa: TRY301
+except ValueError as e:
+    raise RuntimeError(
+        f"Invalid STRIX_TOOL_TIMEOUT value: {os.getenv('STRIX_TOOL_TIMEOUT')}. "
+        f"Must be a positive integer representing seconds. Error: {e}"
+    ) from e
 
 parser = argparse.ArgumentParser(description="Start Strix tool server")
 parser.add_argument("--token", required=True, help="Authentication token")
@@ -34,6 +49,9 @@ security_dependency = Depends(security)
 
 agent_processes: dict[str, dict[str, Any]] = {}
 agent_queues: dict[str, dict[str, Queue[Any]]] = {}
+_agent_lock = threading.Lock()
+
+logger = logging.getLogger(__name__)
 
 
 def verify_token(credentials: HTTPAuthorizationCredentials) -> str:
@@ -65,7 +83,9 @@ class ToolExecutionResponse(BaseModel):
     error: str | None = None
 
 
-def agent_worker(_agent_id: str, request_queue: Queue[Any], response_queue: Queue[Any]) -> None:
+def agent_worker(
+    _agent_id: str, request_queue: Queue[Any], response_queue: Queue[Any]
+) -> None:
     null_handler = logging.NullHandler()
 
     root_logger = logging.getLogger()
@@ -87,8 +107,8 @@ def agent_worker(_agent_id: str, request_queue: Queue[Any], response_queue: Queu
             if request is None:
                 break
 
-            tool_name = request["tool_name"]
-            kwargs = request["kwargs"]
+            tool_name = request.get("tool_name", "unknown")
+            kwargs = request.get("kwargs", {})
 
             try:
                 tool_func = get_tool_by_name(tool_name)
@@ -117,6 +137,7 @@ def agent_worker(_agent_id: str, request_queue: Queue[Any], response_queue: Queu
                 error_str = str(e)
                 if "missing" in error_str and "required" in error_str:
                     import re
+
                     match = re.search(r"'(\w+)'", error_str)
                     param_name = match.group(1) if match else "unknown"
                     error_dict = generate_missing_param_error(tool_name, [param_name], kwargs)
@@ -128,25 +149,50 @@ def agent_worker(_agent_id: str, request_queue: Queue[Any], response_queue: Queu
                 response_queue.put({"error": f"Invalid arguments: {e}"})
             except (RuntimeError, ValueError, ImportError) as e:
                 response_queue.put({"error": f"Tool execution error: {e}"})
+            except Exception as e:  # noqa: BLE001
+                # Catch ALL exceptions to ensure response is always sent
+                response_queue.put({"error": f"Unexpected error executing {tool_name}: {e!s}"})
 
-        except (RuntimeError, ValueError, ImportError) as e:
-            response_queue.put({"error": f"Worker error: {e}"})
+        except Exception as e:  # noqa: BLE001
+            # Even if getting request from queue fails, try to send an error response
+            # Use contextlib.suppress for cleaner exception handling
+            with contextlib.suppress(Exception):
+                response_queue.put({"error": f"Worker error: {e!s}"})
+
+
+def cleanup_agent(agent_id: str) -> None:
+    """Clean up a single agent's process and queues."""
+    with _agent_lock:
+        if agent_id in agent_processes:
+            try:
+                process = agent_processes[agent_id]["process"]
+                if process.is_alive():
+                    process.terminate()
+                    process.join(timeout=1)
+                    if process.is_alive():
+                        process.kill()
+            except (BrokenPipeError, EOFError, OSError) as e:
+                logger.debug(f"Error during agent {agent_id} cleanup: {e}")
+            finally:
+                agent_processes.pop(agent_id, None)
+                agent_queues.pop(agent_id, None)
 
 
 def ensure_agent_process(agent_id: str) -> tuple[Queue[Any], Queue[Any]]:
-    if agent_id not in agent_processes:
-        request_queue: Queue[Any] = Queue()
-        response_queue: Queue[Any] = Queue()
+    with _agent_lock:
+        if agent_id not in agent_processes:
+            request_queue: Queue[Any] = Queue()
+            response_queue: Queue[Any] = Queue()
 
-        process = Process(
-            target=agent_worker, args=(agent_id, request_queue, response_queue), daemon=True
-        )
-        process.start()
+            process = Process(
+                target=agent_worker, args=(agent_id, request_queue, response_queue), daemon=True
+            )
+            process.start()
 
-        agent_processes[agent_id] = {"process": process, "pid": process.pid}
-        agent_queues[agent_id] = {"request": request_queue, "response": response_queue}
+            agent_processes[agent_id] = {"process": process, "pid": process.pid}
+            agent_queues[agent_id] = {"request": request_queue, "response": response_queue}
 
-    return agent_queues[agent_id]["request"], agent_queues[agent_id]["response"]
+        return agent_queues[agent_id]["request"], agent_queues[agent_id]["response"]
 
 
 @app.post("/execute", response_model=ToolExecutionResponse)
@@ -155,16 +201,43 @@ async def execute_tool(
 ) -> ToolExecutionResponse:
     verify_token(credentials)
 
-    request_queue, response_queue = ensure_agent_process(request.agent_id)
+    # Get or create agent process
+    try:
+        request_queue, response_queue = ensure_agent_process(request.agent_id)
+
+        # After getting queues, check if process is still alive
+        process_info = agent_processes.get(request.agent_id)
+        if process_info:
+            process = process_info.get("process")
+            if process and not process.is_alive():
+                # Worker died after being created, recreate
+                cleanup_agent(request.agent_id)
+                request_queue, response_queue = ensure_agent_process(request.agent_id)
+    except (RuntimeError, ValueError, OSError) as e:
+        return ToolExecutionResponse(error=f"Failed to ensure worker process: {e}")
 
     request_queue.put({"tool_name": request.tool_name, "kwargs": request.kwargs})
 
     try:
         loop = asyncio.get_event_loop()
-        response = await loop.run_in_executor(None, response_queue.get)
+
+        # Use a timeout wrapper for the blocking queue.get()
+        def get_with_timeout() -> dict[str, Any]:
+            try:
+                return cast("dict[str, Any]", response_queue.get(timeout=TOOL_EXECUTION_TIMEOUT))
+            except queue.Empty:
+                return {"error": f"Tool execution timed out after {TOOL_EXECUTION_TIMEOUT} seconds"}
+
+        response = await loop.run_in_executor(None, get_with_timeout)
 
         if "error" in response:
-            return ToolExecutionResponse(error=response["error"])
+            # Handle both string errors and dict errors
+            error_value = response["error"]
+            if isinstance(error_value, dict):
+                # Return structured error directly
+                return ToolExecutionResponse(error=error_value, result=None)
+            else:
+                return ToolExecutionResponse(error=str(error_value), result=None)
         return ToolExecutionResponse(result=response.get("result"))
 
     except (RuntimeError, ValueError, OSError) as e:
