@@ -167,6 +167,9 @@ class BaseAgent(metaclass=AgentMeta):
             if self.state.should_stop():
                 if self.non_interactive:
                     return self.state.final_result or {}
+                if self.state.stop_requested:  # User explicitly requested stop
+                    self.state.set_completed({"success": False, "stopped_by_user": True})
+                    return self.state.final_result or {}
                 await self._enter_waiting_state(tracer)
                 continue
 
