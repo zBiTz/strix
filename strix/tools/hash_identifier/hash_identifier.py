@@ -385,6 +385,44 @@ def hash_identifier(
     Returns:
         Hash identification results with type matches and cracking suggestions
     """
+    # Define valid parameters and actions
+    VALID_PARAMS = {"action", "hash_value"}
+    VALID_ACTIONS = ["identify", "analyze", "suggest_crack"]
+
+    # Check for unknown parameters
+    unknown_error = validate_unknown_params(kwargs, VALID_PARAMS, "hash_identifier")
+    if unknown_error:
+        unknown_error.update(
+            generate_usage_hint(
+                "hash_identifier",
+                "identify",
+                {"hash_value": "5f4dcc3b5aa765d61d8327deb882cf99"},
+            )
+        )
+        return unknown_error
+
+    # Validate action parameter
+    action_error = validate_action_param(action, VALID_ACTIONS, "hash_identifier")
+    if action_error:
+        action_error["usage_examples"] = {
+            "identify": "hash_identifier(action='identify', hash_value='5f4dcc3b5aa765d61d8327deb882cf99')",
+            "analyze": "hash_identifier(action='analyze', hash_value='$2a$10$...')",
+            "suggest_crack": "hash_identifier(action='suggest_crack', hash_value='$6$...')",
+        }
+        return action_error
+
+    # Validate required parameters
+    hash_error = validate_required_param(hash_value, "hash_value", action, "hash_identifier")
+    if hash_error:
+        hash_error.update(
+            generate_usage_hint(
+                "hash_identifier",
+                action,
+                {"hash_value": "5f4dcc3b5aa765d61d8327deb882cf99"},
+            )
+        )
+        return hash_error
+
     try:
         if not hash_value:
             return {"error": "hash_value parameter required"}

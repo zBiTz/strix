@@ -239,6 +239,45 @@ def js_link_extractor(
     Returns:
         Extracted endpoints, secrets, domains, and analysis summary
     """
+    # Define valid parameters and actions
+    VALID_PARAMS = {"action", "js_content", "include_comments"}
+    VALID_ACTIONS = ["extract_all", "extract_endpoints", "extract_secrets", "extract_domains"]
+
+    # Check for unknown parameters
+    unknown_error = validate_unknown_params(kwargs, VALID_PARAMS, "js_link_extractor")
+    if unknown_error:
+        unknown_error.update(
+            generate_usage_hint(
+                "js_link_extractor",
+                "extract_all",
+                {"js_content": "/* JavaScript code here */"},
+            )
+        )
+        return unknown_error
+
+    # Validate action parameter
+    action_error = validate_action_param(action, VALID_ACTIONS, "js_link_extractor")
+    if action_error:
+        action_error["usage_examples"] = {
+            "extract_all": "js_link_extractor(action='extract_all', js_content='/* code */')",
+            "extract_endpoints": "js_link_extractor(action='extract_endpoints', js_content='/* code */')",
+            "extract_secrets": "js_link_extractor(action='extract_secrets', js_content='/* code */')",
+            "extract_domains": "js_link_extractor(action='extract_domains', js_content='/* code */')",
+        }
+        return action_error
+
+    # Validate required parameters
+    js_error = validate_required_param(js_content, "js_content", action, "js_link_extractor")
+    if js_error:
+        js_error.update(
+            generate_usage_hint(
+                "js_link_extractor",
+                action,
+                {"js_content": "/* JavaScript code here */"},
+            )
+        )
+        return js_error
+
     try:
         # Optionally remove comments
         content = js_content
