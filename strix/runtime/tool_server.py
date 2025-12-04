@@ -72,8 +72,13 @@ def agent_worker(_agent_id: str, request_queue: Queue[Any], response_queue: Queu
     root_logger.handlers = [null_handler]
     root_logger.setLevel(logging.CRITICAL)
 
-    from strix.tools.argument_parser import ArgumentConversionError, convert_arguments
+    from strix.tools.argument_parser import (
+        ArgumentConversionError,
+        convert_arguments,
+        validate_required_args,
+    )
     from strix.tools.registry import get_tool_by_name
+    from strix.tools.validation import generate_missing_param_error
 
     while True:
         try:
@@ -92,10 +97,33 @@ def agent_worker(_agent_id: str, request_queue: Queue[Any], response_queue: Queu
                     continue
 
                 converted_kwargs = convert_arguments(tool_func, kwargs)
+
+                # Pre-validate that all required parameters are present
+                is_valid, missing_params = validate_required_args(tool_func, converted_kwargs)
+                if not is_valid:
+                    # Return helpful error message for missing parameters
+                    error_dict = generate_missing_param_error(
+                        tool_name, missing_params, converted_kwargs
+                    )
+                    response_queue.put({"error": error_dict})
+                    continue
+
                 result = tool_func(**converted_kwargs)
 
                 response_queue.put({"result": result})
 
+            except TypeError as e:
+                # Handle missing required parameters that somehow slipped through
+                error_str = str(e)
+                if "missing" in error_str and "required" in error_str:
+                    import re
+                    match = re.search(r"'(\w+)'", error_str)
+                    param_name = match.group(1) if match else "unknown"
+                    error_dict = generate_missing_param_error(tool_name, [param_name], kwargs)
+                    error_dict["original_error"] = error_str
+                    response_queue.put({"error": error_dict})
+                else:
+                    response_queue.put({"error": f"Type error: {e}"})
             except (ArgumentConversionError, ValidationError) as e:
                 response_queue.put({"error": f"Invalid arguments: {e}"})
             except (RuntimeError, ValueError, ImportError) as e:

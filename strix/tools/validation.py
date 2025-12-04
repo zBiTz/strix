@@ -121,7 +121,7 @@ def generate_workflow_hint(
         Dict with workflow guidance
     """
     result: dict[str, Any] = {
-        "workflow_hint": f"This tool requires pre-fetched data. Follow the correct workflow:",
+        "workflow_hint": "This tool requires pre-fetched data. Follow the correct workflow:",
         "correct_workflow": workflow_steps,
         "tool_name": tool_name,
     }
@@ -162,3 +162,33 @@ def add_workflow_hint_for_url_params(
     )
     error_dict["correct_workflow"] = workflow_steps
     return error_dict
+
+
+def generate_missing_param_error(
+    tool_name: str,
+    missing_params: list[str],
+    provided_params: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Generate a helpful error message for missing required parameters.
+
+    Args:
+        tool_name: Name of the tool
+        missing_params: List of missing parameter names
+        provided_params: Optional dict of parameters that were provided
+
+    Returns:
+        Error dictionary with hint and tool name
+    """
+    error_msg = f"Missing required parameter(s): {missing_params}"
+    hint_msg = f"The {tool_name} tool requires these parameters to be provided"
+
+    result: dict[str, Any] = {
+        "error": error_msg,
+        "hint": hint_msg,
+        "tool_name": tool_name,
+    }
+
+    if provided_params:
+        result["provided_params"] = list(provided_params.keys())
+
+    return result

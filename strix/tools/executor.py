@@ -8,13 +8,14 @@ import httpx
 if os.getenv("STRIX_SANDBOX_MODE", "false").lower() == "false":
     from strix.runtime import get_runtime
 
-from .argument_parser import convert_arguments
+from .argument_parser import convert_arguments, validate_required_args
 from .registry import (
     get_tool_by_name,
     get_tool_names,
     needs_agent_state,
     should_execute_in_sandbox,
 )
+from .validation import generate_missing_param_error
 
 
 async def execute_tool(tool_name: str, agent_state: Any | None = None, **kwargs: Any) -> Any:
@@ -87,6 +88,12 @@ async def _execute_tool_locally(tool_name: str, agent_state: Any | None, **kwarg
 
     converted_kwargs = convert_arguments(tool_func, kwargs)
 
+    # Pre-validate that all required parameters are present
+    is_valid, missing_params = validate_required_args(tool_func, converted_kwargs)
+    if not is_valid:
+        # Return a helpful error message instead of letting TypeError be raised
+        return generate_missing_param_error(tool_name, missing_params, converted_kwargs)
+
     if needs_agent_state(tool_name):
         if agent_state is None:
             raise ValueError(f"Tool '{tool_name}' requires agent_state but none was provided.")
@@ -118,6 +125,20 @@ async def execute_tool_with_validation(
 
     try:
         result = await execute_tool(tool_name, agent_state, **kwargs)
+    except TypeError as e:
+        # Handle missing required parameters that somehow slipped through
+        error_str = str(e)
+        if "missing" in error_str and "required" in error_str:
+            import re
+            match = re.search(r"'(\w+)'", error_str)
+            param_name = match.group(1) if match else "unknown"
+            error_dict = generate_missing_param_error(tool_name, [param_name], kwargs)
+            error_dict["original_error"] = error_str
+            return error_dict
+        # For other TypeErrors, return formatted error
+        if len(error_str) > 500:
+            error_str = error_str[:500] + "... [truncated]"
+        return f"Error executing {tool_name}: {error_str}"
     except Exception as e:  # noqa: BLE001
         error_str = str(e)
         if len(error_str) > 500:
@@ -197,8 +218,7 @@ def _format_tool_result(tool_name: str, result: Any) -> tuple[str, list[dict[str
 
         if "correct_workflow" in result:
             error_parts.append("\nCorrect workflow:")
-            for step in result["correct_workflow"]:
-                error_parts.append(f"  {step}")
+            error_parts.extend(f"  {step}" for step in result["correct_workflow"])
 
         final_result_str = "".join(error_parts)
     elif result_str is None:
