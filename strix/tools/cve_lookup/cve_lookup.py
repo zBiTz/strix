@@ -157,6 +157,69 @@ def cve_lookup(
         # Find CVEs by product:
         cve_lookup(action="by_product", product="Apache Log4j", version="2.14.0")
     """
+    # Define valid parameters and actions
+    VALID_PARAMS = {"action", "cve_id", "query", "product", "version"}
+    VALID_ACTIONS = ["lookup", "search", "by_product"]
+
+    # Check for unknown parameters
+    unknown_error = validate_unknown_params(kwargs, VALID_PARAMS, "cve_lookup")
+    if unknown_error:
+        unknown_error.update(
+            generate_usage_hint(
+                "cve_lookup",
+                "lookup",
+                {"cve_id": "CVE-2021-44228"},
+            )
+        )
+        return unknown_error
+
+    # Validate action parameter
+    action_error = validate_action_param(action, VALID_ACTIONS, "cve_lookup")
+    if action_error:
+        action_error["usage_examples"] = {
+            "lookup": "cve_lookup(action='lookup', cve_id='CVE-2021-44228')",
+            "search": "cve_lookup(action='search', query='log4j')",
+            "by_product": "cve_lookup(action='by_product', product='Apache Log4j', version='2.14.0')",
+        }
+        return action_error
+
+    # Validate required parameters based on action
+    if action == "lookup":
+        cve_id_error = validate_required_param(cve_id, "cve_id", action, "cve_lookup")
+        if cve_id_error:
+            cve_id_error.update(
+                generate_usage_hint(
+                    "cve_lookup",
+                    action,
+                    {"cve_id": "CVE-2021-44228"},
+                )
+            )
+            return cve_id_error
+
+    if action == "search":
+        query_error = validate_required_param(query, "query", action, "cve_lookup")
+        if query_error:
+            query_error.update(
+                generate_usage_hint(
+                    "cve_lookup",
+                    action,
+                    {"query": "log4j"},
+                )
+            )
+            return query_error
+
+    if action == "by_product":
+        product_error = validate_required_param(product, "product", action, "cve_lookup")
+        if product_error:
+            product_error.update(
+                generate_usage_hint(
+                    "cve_lookup",
+                    action,
+                    {"product": "Apache Log4j", "version": "2.14.0"},
+                )
+            )
+            return product_error
+
     try:
         if action == "lookup":
             if not cve_id:

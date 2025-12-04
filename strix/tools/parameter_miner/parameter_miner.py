@@ -199,6 +199,33 @@ def parameter_miner(
     Returns:
         Parameter lists, suggestions, and analysis results
     """
+    # Define valid parameters and actions
+    VALID_PARAMS = {"action", "categories", "existing_params", "context", "include_variations"}
+    VALID_ACTIONS = ["get_wordlist", "analyze_params", "suggest_params", "get_common_params"]
+
+    # Check for unknown parameters
+    unknown_error = validate_unknown_params(kwargs, VALID_PARAMS, "parameter_miner")
+    if unknown_error:
+        unknown_error.update(
+            generate_usage_hint(
+                "parameter_miner",
+                "get_wordlist",
+                {"categories": ["authentication", "user_management"]},
+            )
+        )
+        return unknown_error
+
+    # Validate action parameter
+    action_error = validate_action_param(action, VALID_ACTIONS, "parameter_miner")
+    if action_error:
+        action_error["usage_examples"] = {
+            "get_wordlist": "parameter_miner(action='get_wordlist', categories=['authentication'])",
+            "analyze_params": "parameter_miner(action='analyze_params', existing_params=['id', 'name', 'user_id'])",
+            "suggest_params": "parameter_miner(action='suggest_params', context='api')",
+            "get_common_params": "parameter_miner(action='get_common_params')",
+        }
+        return action_error
+
     try:
         if action == "get_wordlist":
             wordlist = _get_param_wordlist(categories)

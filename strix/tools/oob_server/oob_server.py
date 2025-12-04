@@ -69,6 +69,33 @@ def oob_server(
     Returns:
         OOB payload URLs and interaction status
     """
+    # Define valid parameters and actions
+    VALID_PARAMS = {"action", "payload_id", "base_domain", "base_url", "vulnerability_type", "context"}
+    VALID_ACTIONS = ["generate_payload", "check_interaction", "list_payloads", "get_url"]
+
+    # Check for unknown parameters
+    unknown_error = validate_unknown_params(kwargs, VALID_PARAMS, "oob_server")
+    if unknown_error:
+        unknown_error.update(
+            generate_usage_hint(
+                "oob_server",
+                "generate_payload",
+                {"base_domain": "oob.example.com"},
+            )
+        )
+        return unknown_error
+
+    # Validate action parameter
+    action_error = validate_action_param(action, VALID_ACTIONS, "oob_server")
+    if action_error:
+        action_error["usage_examples"] = {
+            "generate_payload": "oob_server(action='generate_payload', base_domain='oob.example.com')",
+            "check_interaction": "oob_server(action='check_interaction', payload_id='abc123def')",
+            "list_payloads": "oob_server(action='list_payloads')",
+            "get_url": "oob_server(action='get_url', payload_id='abc123def')",
+        }
+        return action_error
+
     try:
         if action == "generate_payload":
             payload_id = _generate_unique_id()

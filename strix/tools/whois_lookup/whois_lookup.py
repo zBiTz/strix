@@ -257,6 +257,44 @@ def whois_lookup(
     Returns:
         WHOIS information including registration details and dates
     """
+    # Define valid parameters and actions
+    VALID_PARAMS = {"action", "domain"}
+    VALID_ACTIONS = ["lookup", "registrar", "dates"]
+
+    # Check for unknown parameters
+    unknown_error = validate_unknown_params(kwargs, VALID_PARAMS, "whois_lookup")
+    if unknown_error:
+        unknown_error.update(
+            generate_usage_hint(
+                "whois_lookup",
+                "lookup",
+                {"domain": "example.com"},
+            )
+        )
+        return unknown_error
+
+    # Validate action parameter
+    action_error = validate_action_param(action, VALID_ACTIONS, "whois_lookup")
+    if action_error:
+        action_error["usage_examples"] = {
+            "lookup": "whois_lookup(action='lookup', domain='example.com')",
+            "registrar": "whois_lookup(action='registrar', domain='example.com')",
+            "dates": "whois_lookup(action='dates', domain='example.com')",
+        }
+        return action_error
+
+    # Validate required parameters
+    domain_error = validate_required_param(domain, "domain", action, "whois_lookup")
+    if domain_error:
+        domain_error.update(
+            generate_usage_hint(
+                "whois_lookup",
+                action,
+                {"domain": "example.com"},
+            )
+        )
+        return domain_error
+
     try:
         if action == "lookup":
             return _lookup_domain(domain)

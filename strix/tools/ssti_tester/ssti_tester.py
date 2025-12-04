@@ -154,8 +154,9 @@ def ssti_tester(
     param_name: str = "name",
     engine: str = "jinja2",
     command: str = "id",
-    timeout: int = 10
-) -> str:
+    timeout: int = 10,
+    **kwargs: Any,  # Capture unknown parameters
+) -> str | dict[str, Any]:
     """Test for SSTI (Server-Side Template Injection) vulnerabilities.
     
     Tests various template engines including Jinja2, Twig, Freemarker,
@@ -176,9 +177,47 @@ def ssti_tester(
     Returns:
         Test results or generated payload
     """
+    # Define valid parameters and actions
+    VALID_PARAMS = {"action", "url", "param_name", "engine", "command", "timeout"}
+    VALID_ACTIONS = ["detect_engine", "test_basic", "generate_payload", "test_endpoint"]
+
+    # Check for unknown parameters
+    unknown_error = validate_unknown_params(kwargs, VALID_PARAMS, "ssti_tester")
+    if unknown_error:
+        unknown_error.update(
+            generate_usage_hint(
+                "ssti_tester",
+                "detect_engine",
+                {"url": "https://example.com/render", "param_name": "template"},
+            )
+        )
+        return unknown_error
+
+    # Validate action parameter
+    action_error = validate_action_param(action, VALID_ACTIONS, "ssti_tester")
+    if action_error:
+        action_error["usage_examples"] = {
+            "detect_engine": "ssti_tester(action='detect_engine', url='https://example.com/render', param_name='template')",
+            "test_basic": "ssti_tester(action='test_basic', url='https://example.com/render')",
+            "generate_payload": "ssti_tester(action='generate_payload', engine='jinja2', command='whoami')",
+            "test_endpoint": "ssti_tester(action='test_endpoint', url='https://example.com/render', engine='jinja2')",
+        }
+        return action_error
+
+    # Validate required parameters based on action
+    if action in ["detect_engine", "test_basic", "test_endpoint"]:
+        url_error = validate_required_param(url, "url", action, "ssti_tester")
+        if url_error:
+            url_error.update(
+                generate_usage_hint(
+                    "ssti_tester",
+                    action,
+                    {"url": "https://example.com/render", "param_name": "template"},
+                )
+            )
+            return url_error
+
     if action == "detect_engine":
-        if not url:
-            return "Error: URL required for detection"
         
         results = _detect_template_engine(url, param_name, timeout)
         

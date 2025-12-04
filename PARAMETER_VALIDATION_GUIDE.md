@@ -36,9 +36,9 @@ The executor now formats validation errors with:
 
 ### 3. Updated Tools
 
-#### Fully Updated Tools (10 tools with complete validation logic)
+#### Fully Updated Tools (27 tools with complete validation logic) ✅
 
-**Security Analysis (6/6)**
+**Security Analysis (6/6)** ✅
 - ✅ `header_analyzer` - With workflow hints for URL confusion
 - ✅ `tech_fingerprinter` - With workflow hints
 - ✅ `jwt_analyzer` - Full validation
@@ -46,59 +46,66 @@ The executor now formats validation errors with:
 - ✅ `cors_scanner` - With workflow hints
 - ✅ `graphql_introspection` - Full validation
 
-**Reconnaissance (4/8)**
+**Reconnaissance (7/7)** ✅
 - ✅ `subdomain_enum` - Full validation with examples
 - ✅ `wayback_fetcher` - Detects 'query' parameter mistake
 - ✅ `dns_resolver` - Full validation
 - ✅ `asn_lookup` - Full validation
+- ✅ `whois_lookup` - Full validation
+- ✅ `google_dorker` - Full validation
+- ✅ `ssl_certificate_analyzer` - Full validation
 
-#### Partially Updated Tools (25 tools with imports + **kwargs)
+**Vulnerability Testing (6/6)** ✅
+- ✅ `sqli_tester` - Full validation
+- ✅ `ssti_tester` - Full validation
+- ✅ `ssrf_tester` - Full validation
+- ✅ `xxe_tester` - Full validation
+- ✅ `command_injection_tester` - Full validation
+- ✅ `http_method_tester` - Full validation
+
+**Utility (8/24)** - IN PROGRESS
+- ✅ `api_fuzzer` - Full validation
+- ✅ `cve_lookup` - Full validation
+- ✅ `parameter_miner` - Full validation
+- ✅ `secret_scanner` - Full validation
+- ✅ `waf_detector` - Full validation
+- ✅ `oob_server` - Full validation
+- ✅ `hash_identifier` - Full validation
+- ✅ `js_link_extractor` - Full validation
+
+#### Partially Updated Tools (8 utility tools with imports + **kwargs)
 
 These tools have:
 - ✅ Validation imports added
 - ✅ `**kwargs` parameter to capture unknown params
-- ⚠️ Need validation logic implementation
+- ⚠️ **NEED**: Validation logic implementation (follow pattern in guide)
 
-**Reconnaissance (3 tools)**
-- `whois_lookup`
-- `google_dorker`
-- `ssl_certificate_analyzer`
+**Utility Tools Needing Validation Logic (8 tools)**
+1. `oauth_tester` - Has imports + **kwargs, needs validation
+2. `payload_encoder` - Has imports + **kwargs, needs validation
+3. `timing_analyzer` - Has imports + **kwargs, needs validation
+4. `response_diff` - Has imports + **kwargs, needs validation
+5. `poc_generator` - Has imports + **kwargs, needs validation
+6. `polyglot_generator` - Has imports + **kwargs, needs validation
+7. `rate_limit_tester` - Has imports + **kwargs, needs validation
+8. `dns_rebinding_server` - Has imports + **kwargs, needs validation
 
-**Vulnerability Testing (6 tools)**
-- `sqli_tester`
-- `ssti_tester`
-- `ssrf_tester`
-- `xxe_tester`
-- `command_injection_tester`
-- `http_method_tester`
+#### Not Yet Updated (8 tools needing full implementation)
 
-**Utility (16 tools)**
-- `api_fuzzer`
-- `cve_lookup`
-- `parameter_miner`
-- `secret_scanner`
-- `waf_detector`
-- `oauth_tester`
-- `oob_server`
-- `payload_encoder`
-- `hash_identifier`
-- `timing_analyzer`
-- `response_diff`
-- `js_link_extractor`
-- `poc_generator`
-- `polyglot_generator`
-- `rate_limit_tester`
+These tools need:
+- ⚠️ Validation imports
+- ⚠️ `**kwargs` parameter
+- ⚠️ Validation logic
 
-#### Not Yet Updated (remaining tools)
-
-- `entropy_analyzer`
-- `regex_tester`
-- `websocket_client`
-- `cloud_enumeration`
-- `cvss_calculator`
-- `sast_engine`
-- `dependency_auditor`
-- `waf_bypass_toolkit`
+**Tools Needing Full Implementation (8 tools)**
+1. `entropy_analyzer` - VALID_ACTIONS: ["analyze", "compare", "batch_analyze"]
+2. `regex_tester` - Check file for actions
+3. `websocket_client` - VALID_ACTIONS: ["connect_info", "generate_payloads", "test_origin", "generate_exploit"]
+4. `cloud_enumeration` - VALID_ACTIONS: ["enumerate_s3", "enumerate_azure_blob", "enumerate_gcp_bucket", "generate_wordlist"]
+5. `cvss_calculator` - VALID_ACTIONS: ["calculate_v3", "calculate_v4", "parse_vector"]
+6. `sast_engine` - VALID_ACTIONS: ["scan_code", "scan_file", "list_rules"]
+7. `dependency_auditor` - Check file for actions
+8. `waf_bypass_toolkit` - Check file for actions
 
 ## Implementation Pattern
 
@@ -269,18 +276,40 @@ Example usage:
 
 ## Completion Checklist
 
-To complete parameter validation for remaining tools:
+**Overall Progress: 27/43 tools complete (63%)** 🎯
 
-1. ✅ Security Analysis: 6/6 complete
-2. ⚠️ Reconnaissance: 4/8 complete (need 4 more)
-3. ⚠️ Vulnerability Testing: 0/6 with full validation (6 have structure)
-4. ⚠️ Utility: 0/25 with full validation (16 have structure)
+### Completed Categories ✅
+1. ✅ **Security Analysis: 6/6 complete (100%)**
+2. ✅ **Reconnaissance: 7/7 complete (100%)**
+3. ✅ **Vulnerability Testing: 6/6 complete (100%)**
 
-Priority for completion:
-1. High-traffic vulnerability testing tools (sqli_tester, ssrf_tester, etc.)
-2. Frequently-used utility tools (api_fuzzer, cve_lookup, secret_scanner)
-3. Remaining reconnaissance tools
-4. Nice-to-have utility tools
+### In Progress Categories 🚧
+4. ⚠️ **Utility: 8/24 complete (33%)**
+   - 8 tools need only validation logic (have imports + **kwargs)
+   - 8 tools need full implementation (imports + **kwargs + validation)
+
+### Remaining Work
+**Priority 1: Add Validation Logic to 8 Utility Tools (Partially Updated)**
+These tools already have imports and **kwargs, just need validation logic added:
+1. `oauth_tester`
+2. `payload_encoder`
+3. `timing_analyzer`
+4. `response_diff`
+5. `poc_generator`
+6. `polyglot_generator`
+7. `rate_limit_tester`
+8. `dns_rebinding_server`
+
+**Priority 2: Full Implementation for 8 Tools (Not Yet Updated)**
+These tools need imports, **kwargs, AND validation logic:
+1. `entropy_analyzer`
+2. `regex_tester`
+3. `websocket_client`
+4. `cloud_enumeration`
+5. `cvss_calculator`
+6. `sast_engine`
+7. `dependency_auditor`
+8. `waf_bypass_toolkit`
 
 ## Related Files
 

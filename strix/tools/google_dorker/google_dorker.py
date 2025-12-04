@@ -298,6 +298,45 @@ def google_dorker(
     Returns:
         Generated dork queries with search URLs
     """
+    # Define valid parameters and actions
+    VALID_PARAMS = {"action", "domain", "categories", "keywords", "file_types", "inurl", "intitle", "exclude"}
+    VALID_ACTIONS = ["generate", "build_query", "list_templates"]
+
+    # Check for unknown parameters
+    unknown_error = validate_unknown_params(kwargs, VALID_PARAMS, "google_dorker")
+    if unknown_error:
+        unknown_error.update(
+            generate_usage_hint(
+                "google_dorker",
+                "generate",
+                {"domain": "example.com"},
+            )
+        )
+        return unknown_error
+
+    # Validate action parameter
+    action_error = validate_action_param(action, VALID_ACTIONS, "google_dorker")
+    if action_error:
+        action_error["usage_examples"] = {
+            "generate": "google_dorker(action='generate', domain='example.com')",
+            "build_query": "google_dorker(action='build_query', domain='example.com', keywords=['api', 'key'])",
+            "list_templates": "google_dorker(action='list_templates')",
+        }
+        return action_error
+
+    # Validate required parameters based on action
+    if action == "generate":
+        domain_error = validate_required_param(domain, "domain", action, "google_dorker")
+        if domain_error:
+            domain_error.update(
+                generate_usage_hint(
+                    "google_dorker",
+                    action,
+                    {"domain": "example.com"},
+                )
+            )
+            return domain_error
+
     try:
         if action == "generate":
             if not domain:

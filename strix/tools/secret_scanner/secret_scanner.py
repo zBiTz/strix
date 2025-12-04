@@ -303,6 +303,45 @@ def secret_scanner(
     Returns:
         Scan results including found secrets, severity, and recommendations
     """
+    # Define valid parameters and actions
+    VALID_PARAMS = {"action", "text", "include_entropy", "custom_patterns"}
+    VALID_ACTIONS = ["scan", "scan_text", "list_patterns"]
+
+    # Check for unknown parameters
+    unknown_error = validate_unknown_params(kwargs, VALID_PARAMS, "secret_scanner")
+    if unknown_error:
+        unknown_error.update(
+            generate_usage_hint(
+                "secret_scanner",
+                "scan",
+                {"text": "Some text with potential secrets..."},
+            )
+        )
+        return unknown_error
+
+    # Validate action parameter
+    action_error = validate_action_param(action, VALID_ACTIONS, "secret_scanner")
+    if action_error:
+        action_error["usage_examples"] = {
+            "scan": "secret_scanner(action='scan', text='Some text with secrets...')",
+            "scan_text": "secret_scanner(action='scan_text', text='Code content here...')",
+            "list_patterns": "secret_scanner(action='list_patterns')",
+        }
+        return action_error
+
+    # Validate required parameters based on action
+    if action in ("scan", "scan_text"):
+        text_error = validate_required_param(text, "text", action, "secret_scanner")
+        if text_error:
+            text_error.update(
+                generate_usage_hint(
+                    "secret_scanner",
+                    action,
+                    {"text": "Some text with potential secrets..."},
+                )
+            )
+            return text_error
+
     try:
         if action in ("scan", "scan_text"):
             if not text:

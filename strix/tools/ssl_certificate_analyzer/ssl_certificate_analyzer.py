@@ -312,6 +312,44 @@ def ssl_certificate_analyzer(
     Returns:
         Certificate details, security analysis, and recommendations
     """
+    # Define valid parameters and actions
+    VALID_PARAMS = {"action", "host", "port"}
+    VALID_ACTIONS = ["analyze", "chain", "ciphers"]
+
+    # Check for unknown parameters
+    unknown_error = validate_unknown_params(kwargs, VALID_PARAMS, "ssl_certificate_analyzer")
+    if unknown_error:
+        unknown_error.update(
+            generate_usage_hint(
+                "ssl_certificate_analyzer",
+                "analyze",
+                {"host": "example.com"},
+            )
+        )
+        return unknown_error
+
+    # Validate action parameter
+    action_error = validate_action_param(action, VALID_ACTIONS, "ssl_certificate_analyzer")
+    if action_error:
+        action_error["usage_examples"] = {
+            "analyze": "ssl_certificate_analyzer(action='analyze', host='example.com')",
+            "chain": "ssl_certificate_analyzer(action='chain', host='example.com')",
+            "ciphers": "ssl_certificate_analyzer(action='ciphers', host='example.com', port=443)",
+        }
+        return action_error
+
+    # Validate required parameters
+    host_error = validate_required_param(host, "host", action, "ssl_certificate_analyzer")
+    if host_error:
+        host_error.update(
+            generate_usage_hint(
+                "ssl_certificate_analyzer",
+                action,
+                {"host": "example.com"},
+            )
+        )
+        return host_error
+
     try:
         normalized_host, normalized_port = _normalize_host(host)
         if port != 443:

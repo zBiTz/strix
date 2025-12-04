@@ -397,6 +397,55 @@ def sqli_tester(
     Returns:
         SQL injection test results with findings and recommendations
     """
+    # Define valid parameters and actions
+    VALID_PARAMS = {"action", "url", "param", "method"}
+    VALID_ACTIONS = ["test", "detect", "fingerprint"]
+
+    # Check for unknown parameters
+    unknown_error = validate_unknown_params(kwargs, VALID_PARAMS, "sqli_tester")
+    if unknown_error:
+        unknown_error.update(
+            generate_usage_hint(
+                "sqli_tester",
+                "test",
+                {"url": "https://example.com/page?id=1", "param": "id"},
+            )
+        )
+        return unknown_error
+
+    # Validate action parameter
+    action_error = validate_action_param(action, VALID_ACTIONS, "sqli_tester")
+    if action_error:
+        action_error["usage_examples"] = {
+            "test": "sqli_tester(action='test', url='https://example.com/page?id=1', param='id')",
+            "detect": "sqli_tester(action='detect', url='https://example.com/page?id=1', param='id')",
+            "fingerprint": "sqli_tester(action='fingerprint', url='https://example.com/page?id=1', param='id')",
+        }
+        return action_error
+
+    # Validate required parameters
+    url_error = validate_required_param(url, "url", action, "sqli_tester")
+    if url_error:
+        url_error.update(
+            generate_usage_hint(
+                "sqli_tester",
+                action,
+                {"url": "https://example.com/page?id=1", "param": "id"},
+            )
+        )
+        return url_error
+
+    param_error = validate_required_param(param, "param", action, "sqli_tester")
+    if param_error:
+        param_error.update(
+            generate_usage_hint(
+                "sqli_tester",
+                action,
+                {"url": "https://example.com/page?id=1", "param": "id"},
+            )
+        )
+        return param_error
+
     try:
         if action == "test":
             return _test_sqli(url, param, method)
