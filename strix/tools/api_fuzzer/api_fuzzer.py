@@ -188,6 +188,58 @@ def api_fuzzer(
     Returns:
         Fuzzing payloads and test cases for security testing
     """
+    # Define valid parameters and actions
+    VALID_PARAMS = {"action", "params", "endpoint", "categories"}
+    VALID_ACTIONS = ["generate_payloads", "fuzz_params", "fuzz_headers", "fuzz_methods"]
+
+    # Check for unknown parameters
+    unknown_error = validate_unknown_params(kwargs, VALID_PARAMS, "api_fuzzer")
+    if unknown_error:
+        unknown_error.update(
+            generate_usage_hint(
+                "api_fuzzer",
+                "generate_payloads",
+                {"categories": ["sql_injection", "xss"]},
+            )
+        )
+        return unknown_error
+
+    # Validate action parameter
+    action_error = validate_action_param(action, VALID_ACTIONS, "api_fuzzer")
+    if action_error:
+        action_error["usage_examples"] = {
+            "generate_payloads": "api_fuzzer(action='generate_payloads', categories=['sql_injection'])",
+            "fuzz_params": "api_fuzzer(action='fuzz_params', params={'id': '1', 'name': 'test'})",
+            "fuzz_headers": "api_fuzzer(action='fuzz_headers')",
+            "fuzz_methods": "api_fuzzer(action='fuzz_methods', endpoint='https://api.example.com/users')",
+        }
+        return action_error
+
+    # Validate required parameters based on action
+    if action == "fuzz_params":
+        params_error = validate_required_param(params, "params", action, "api_fuzzer")
+        if params_error:
+            params_error.update(
+                generate_usage_hint(
+                    "api_fuzzer",
+                    action,
+                    {"params": {"id": "1", "name": "test"}},
+                )
+            )
+            return params_error
+
+    if action == "fuzz_methods":
+        endpoint_error = validate_required_param(endpoint, "endpoint", action, "api_fuzzer")
+        if endpoint_error:
+            endpoint_error.update(
+                generate_usage_hint(
+                    "api_fuzzer",
+                    action,
+                    {"endpoint": "https://api.example.com/users"},
+                )
+            )
+            return endpoint_error
+
     try:
         if action == "generate_payloads":
             return _generate_payloads(categories)
