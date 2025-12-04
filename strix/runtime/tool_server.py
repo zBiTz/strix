@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import contextlib
 import json
 import logging
 import os
 import queue
 import signal
 import sys
+import threading
 from multiprocessing import Process, Queue
 from typing import Any, cast
 
@@ -25,7 +27,7 @@ if not SANDBOX_MODE:
 try:
     TOOL_EXECUTION_TIMEOUT = int(os.getenv("STRIX_TOOL_TIMEOUT", "300"))
     if TOOL_EXECUTION_TIMEOUT <= 0:
-        raise ValueError("Timeout must be positive")
+        raise ValueError("Timeout must be positive")  # noqa: TRY301
 except ValueError as e:
     raise RuntimeError(
         f"Invalid STRIX_TOOL_TIMEOUT value: {os.getenv('STRIX_TOOL_TIMEOUT')}. "
@@ -47,6 +49,9 @@ security_dependency = Depends(security)
 
 agent_processes: dict[str, dict[str, Any]] = {}
 agent_queues: dict[str, dict[str, Queue[Any]]] = {}
+_agent_lock = threading.Lock()
+
+logger = logging.getLogger(__name__)
 
 
 def verify_token(credentials: HTTPAuthorizationCredentials) -> str:
@@ -151,26 +156,43 @@ def agent_worker(
         except Exception as e:  # noqa: BLE001
             # Even if getting request from queue fails, try to send an error response
             # Use contextlib.suppress for cleaner exception handling
-            from contextlib import suppress
-
-            with suppress(Exception):
+            with contextlib.suppress(Exception):
                 response_queue.put({"error": f"Worker error: {e!s}"})
 
 
+def cleanup_agent(agent_id: str) -> None:
+    """Clean up a single agent's process and queues."""
+    with _agent_lock:
+        if agent_id in agent_processes:
+            try:
+                process = agent_processes[agent_id]["process"]
+                if process.is_alive():
+                    process.terminate()
+                    process.join(timeout=1)
+                    if process.is_alive():
+                        process.kill()
+            except (BrokenPipeError, EOFError, OSError) as e:
+                logger.debug(f"Error during agent {agent_id} cleanup: {e}")
+            finally:
+                agent_processes.pop(agent_id, None)
+                agent_queues.pop(agent_id, None)
+
+
 def ensure_agent_process(agent_id: str) -> tuple[Queue[Any], Queue[Any]]:
-    if agent_id not in agent_processes:
-        request_queue: Queue[Any] = Queue()
-        response_queue: Queue[Any] = Queue()
+    with _agent_lock:
+        if agent_id not in agent_processes:
+            request_queue: Queue[Any] = Queue()
+            response_queue: Queue[Any] = Queue()
 
-        process = Process(
-            target=agent_worker, args=(agent_id, request_queue, response_queue), daemon=True
-        )
-        process.start()
+            process = Process(
+                target=agent_worker, args=(agent_id, request_queue, response_queue), daemon=True
+            )
+            process.start()
 
-        agent_processes[agent_id] = {"process": process, "pid": process.pid}
-        agent_queues[agent_id] = {"request": request_queue, "response": response_queue}
+            agent_processes[agent_id] = {"process": process, "pid": process.pid}
+            agent_queues[agent_id] = {"request": request_queue, "response": response_queue}
 
-    return agent_queues[agent_id]["request"], agent_queues[agent_id]["response"]
+        return agent_queues[agent_id]["request"], agent_queues[agent_id]["response"]
 
 
 @app.post("/execute", response_model=ToolExecutionResponse)
@@ -179,15 +201,20 @@ async def execute_tool(
 ) -> ToolExecutionResponse:
     verify_token(credentials)
 
-    # Check if worker process is still alive
-    process_info = agent_processes.get(request.agent_id)
-    if process_info:
-        process = process_info.get("process")
-        if process and not process.is_alive():
-            # Worker died, clean up and recreate
-            cleanup_agent(request.agent_id)
+    # Get or create agent process
+    try:
+        request_queue, response_queue = ensure_agent_process(request.agent_id)
 
-    request_queue, response_queue = ensure_agent_process(request.agent_id)
+        # After getting queues, check if process is still alive
+        process_info = agent_processes.get(request.agent_id)
+        if process_info:
+            process = process_info.get("process")
+            if process and not process.is_alive():
+                # Worker died after being created, recreate
+                cleanup_agent(request.agent_id)
+                request_queue, response_queue = ensure_agent_process(request.agent_id)
+    except (RuntimeError, ValueError, OSError) as e:
+        return ToolExecutionResponse(error=f"Failed to ensure worker process: {e}")
 
     request_queue.put({"tool_name": request.tool_name, "kwargs": request.kwargs})
 
@@ -238,23 +265,6 @@ async def health_check() -> dict[str, Any]:
         "active_agents": len(agent_processes),
         "agents": list(agent_processes.keys()),
     }
-
-
-def cleanup_agent(agent_id: str) -> None:
-    """Clean up a single agent's process and queues."""
-    if agent_id in agent_processes:
-        try:
-            process = agent_processes[agent_id]["process"]
-            if process.is_alive():
-                process.terminate()
-                process.join(timeout=1)
-                if process.is_alive():
-                    process.kill()
-        except (BrokenPipeError, EOFError, OSError):
-            pass
-        finally:
-            agent_processes.pop(agent_id, None)
-            agent_queues.pop(agent_id, None)
 
 
 def cleanup_all_agents() -> None:
