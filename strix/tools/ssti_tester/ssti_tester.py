@@ -218,8 +218,6 @@ def ssti_tester(
             return url_error
 
     if action == "detect_engine":
-        if not url:
-            return "Error: URL required for detection"
         
         results = _detect_template_engine(url, param_name, timeout)
         

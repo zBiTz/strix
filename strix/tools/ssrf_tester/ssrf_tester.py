@@ -246,10 +246,6 @@ def ssrf_tester(
             return callback_error
 
     if action == "test_basic":
-        if not url:
-            return "Error: URL required for testing"
-        if not callback_url:
-            return "Error: callback_url required for basic SSRF testing"
         
         results = _test_ssrf_basic(param_name, url, callback_url, timeout)
         

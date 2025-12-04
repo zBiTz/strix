@@ -235,9 +235,6 @@ def xxe_tester(
             return callback_error
 
     if action == "test_basic":
-        if not url:
-            return "Error: URL required for testing"
-        
         results = _test_xxe_basic(url, timeout)
         
         output = ["XXE Testing Results", "=" * 50, ""]

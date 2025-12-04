@@ -266,9 +266,6 @@ def waf_detector(
             )
         )
         return url_error
-
-    if not url:
-        return "Error: URL required for WAF detection"
     
     if action == "detect":
         results = _detect_waf(url, timeout)

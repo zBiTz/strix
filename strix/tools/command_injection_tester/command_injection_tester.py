@@ -282,8 +282,6 @@ def command_injection_tester(
             return url_error
 
     if action == "test_basic":
-        if not url:
-            return "Error: URL required for testing"
         
         results = _test_basic_injection(url, param_name, timeout)
         

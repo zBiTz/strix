@@ -208,9 +208,6 @@ def http_method_tester(
             )
         )
         return url_error
-
-    if not url:
-        return "Error: URL required for testing"
     
     if action == "test_all":
         results = _test_all_methods(url, timeout)
