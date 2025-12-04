@@ -167,8 +167,9 @@ def ssrf_tester(
     payload_type: str = "aws_metadata",
     target: str | None = None,
     callback_url: str | None = None,
-    timeout: int = 10
-) -> str:
+    timeout: int = 10,
+    **kwargs: Any,  # Capture unknown parameters
+) -> str | dict[str, Any]:
     """Test for SSRF (Server-Side Request Forgery) vulnerabilities.
     
     Tests various SSRF attack vectors including cloud metadata access,
@@ -191,6 +192,59 @@ def ssrf_tester(
     Returns:
         Test results or generated payload
     """
+    # Define valid parameters and actions
+    VALID_PARAMS = {"action", "url", "param_name", "payload_type", "target", "callback_url", "timeout"}
+    VALID_ACTIONS = ["test_basic", "test_cloud_metadata", "test_internal", "generate_payload", "test_endpoint"]
+
+    # Check for unknown parameters
+    unknown_error = validate_unknown_params(kwargs, VALID_PARAMS, "ssrf_tester")
+    if unknown_error:
+        unknown_error.update(
+            generate_usage_hint(
+                "ssrf_tester",
+                "test_cloud_metadata",
+                {"url": "https://example.com/fetch", "param_name": "url"},
+            )
+        )
+        return unknown_error
+
+    # Validate action parameter
+    action_error = validate_action_param(action, VALID_ACTIONS, "ssrf_tester")
+    if action_error:
+        action_error["usage_examples"] = {
+            "test_basic": "ssrf_tester(action='test_basic', url='https://example.com/fetch', callback_url='https://callback.com')",
+            "test_cloud_metadata": "ssrf_tester(action='test_cloud_metadata', url='https://example.com/fetch')",
+            "test_internal": "ssrf_tester(action='test_internal', url='https://example.com/fetch')",
+            "generate_payload": "ssrf_tester(action='generate_payload', payload_type='aws_metadata')",
+            "test_endpoint": "ssrf_tester(action='test_endpoint', url='https://example.com/fetch', target='http://169.254.169.254')",
+        }
+        return action_error
+
+    # Validate required parameters based on action
+    if action in ["test_basic", "test_cloud_metadata", "test_internal", "test_endpoint"]:
+        url_error = validate_required_param(url, "url", action, "ssrf_tester")
+        if url_error:
+            url_error.update(
+                generate_usage_hint(
+                    "ssrf_tester",
+                    action,
+                    {"url": "https://example.com/fetch", "param_name": "url"},
+                )
+            )
+            return url_error
+
+    if action == "test_basic":
+        callback_error = validate_required_param(callback_url, "callback_url", action, "ssrf_tester")
+        if callback_error:
+            callback_error.update(
+                generate_usage_hint(
+                    "ssrf_tester",
+                    action,
+                    {"url": "https://example.com/fetch", "callback_url": "https://callback.com"},
+                )
+            )
+            return callback_error
+
     if action == "test_basic":
         if not url:
             return "Error: URL required for testing"

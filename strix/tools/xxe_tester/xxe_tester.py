@@ -159,8 +159,9 @@ def xxe_tester(
     payload_type: str = "basic_file",
     target_file: str = "/etc/passwd",
     callback_url: str | None = None,
-    timeout: int = 10
-) -> str:
+    timeout: int = 10,
+    **kwargs: Any,  # Capture unknown parameters
+) -> str | dict[str, Any]:
     """Test for XXE (XML External Entity) injection vulnerabilities.
     
     Tests various XXE attack vectors including basic file disclosure,
@@ -181,6 +182,58 @@ def xxe_tester(
     Returns:
         Test results or generated payload
     """
+    # Define valid parameters and actions
+    VALID_PARAMS = {"action", "url", "payload_type", "target_file", "callback_url", "timeout"}
+    VALID_ACTIONS = ["test_basic", "test_oob", "generate_payload", "test_endpoint"]
+
+    # Check for unknown parameters
+    unknown_error = validate_unknown_params(kwargs, VALID_PARAMS, "xxe_tester")
+    if unknown_error:
+        unknown_error.update(
+            generate_usage_hint(
+                "xxe_tester",
+                "test_basic",
+                {"url": "https://example.com/api/xml"},
+            )
+        )
+        return unknown_error
+
+    # Validate action parameter
+    action_error = validate_action_param(action, VALID_ACTIONS, "xxe_tester")
+    if action_error:
+        action_error["usage_examples"] = {
+            "test_basic": "xxe_tester(action='test_basic', url='https://example.com/api/xml')",
+            "test_oob": "xxe_tester(action='test_oob', callback_url='https://callback.com')",
+            "generate_payload": "xxe_tester(action='generate_payload', payload_type='basic_file', target_file='/etc/passwd')",
+            "test_endpoint": "xxe_tester(action='test_endpoint', url='https://example.com/api/xml', payload_type='xinclude')",
+        }
+        return action_error
+
+    # Validate required parameters based on action
+    if action in ["test_basic", "test_endpoint"]:
+        url_error = validate_required_param(url, "url", action, "xxe_tester")
+        if url_error:
+            url_error.update(
+                generate_usage_hint(
+                    "xxe_tester",
+                    action,
+                    {"url": "https://example.com/api/xml"},
+                )
+            )
+            return url_error
+
+    if action == "test_oob":
+        callback_error = validate_required_param(callback_url, "callback_url", action, "xxe_tester")
+        if callback_error:
+            callback_error.update(
+                generate_usage_hint(
+                    "xxe_tester",
+                    action,
+                    {"callback_url": "https://callback.com"},
+                )
+            )
+            return callback_error
+
     if action == "test_basic":
         if not url:
             return "Error: URL required for testing"

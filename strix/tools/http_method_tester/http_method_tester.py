@@ -150,8 +150,9 @@ def http_method_tester(
     url: str,
     method: str = "GET",
     target_method: str = "DELETE",
-    timeout: int = 10
-) -> str:
+    timeout: int = 10,
+    **kwargs: Any,  # Capture unknown parameters
+) -> str | dict[str, Any]:
     """Test HTTP methods for security enumeration.
     
     Tests all HTTP methods including standard and WebDAV methods,
@@ -170,6 +171,44 @@ def http_method_tester(
     Returns:
         Test results showing allowed methods and findings
     """
+    # Define valid parameters and actions
+    VALID_PARAMS = {"action", "url", "method", "target_method", "timeout"}
+    VALID_ACTIONS = ["test_all", "test_method", "test_override"]
+
+    # Check for unknown parameters
+    unknown_error = validate_unknown_params(kwargs, VALID_PARAMS, "http_method_tester")
+    if unknown_error:
+        unknown_error.update(
+            generate_usage_hint(
+                "http_method_tester",
+                "test_all",
+                {"url": "https://example.com/api/resource"},
+            )
+        )
+        return unknown_error
+
+    # Validate action parameter
+    action_error = validate_action_param(action, VALID_ACTIONS, "http_method_tester")
+    if action_error:
+        action_error["usage_examples"] = {
+            "test_all": "http_method_tester(action='test_all', url='https://example.com/api/resource')",
+            "test_method": "http_method_tester(action='test_method', url='https://example.com/api/resource', method='PUT')",
+            "test_override": "http_method_tester(action='test_override', url='https://example.com/api/resource', target_method='DELETE')",
+        }
+        return action_error
+
+    # Validate required parameters
+    url_error = validate_required_param(url, "url", action, "http_method_tester")
+    if url_error:
+        url_error.update(
+            generate_usage_hint(
+                "http_method_tester",
+                action,
+                {"url": "https://example.com/api/resource"},
+            )
+        )
+        return url_error
+
     if not url:
         return "Error: URL required for testing"
     
