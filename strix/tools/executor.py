@@ -139,6 +139,7 @@ async def execute_tool_with_validation(
         error_str = str(e)
         if "missing" in error_str and "required" in error_str:
             import re
+
             match = re.search(r"'(\w+)'", error_str)
             param_name = match.group(1) if match else "unknown"
             error_dict = generate_missing_param_error(tool_name, [param_name], kwargs)
@@ -222,6 +223,7 @@ def _format_tool_result(tool_name: str, result: Any) -> tuple[str, list[dict[str
 
         if "usage_example" in result:
             import json
+
             example_str = json.dumps(result["usage_example"], indent=2)
             error_parts.append(f"\nExample usage:\n{example_str}")
 
