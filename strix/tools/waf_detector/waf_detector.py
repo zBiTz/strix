@@ -210,8 +210,9 @@ def _test_bypass_techniques(url: str, timeout: int = 10) -> dict[str, Any]:
 def waf_detector(
     action: WAFAction,
     url: str,
-    timeout: int = 10
-) -> str:
+    timeout: int = 10,
+    **kwargs: Any,  # Capture unknown parameters
+) -> str | dict[str, Any]:
     """Detect and fingerprint Web Application Firewalls (WAF).
     
     Identifies presence of WAF and attempts to fingerprint the specific
@@ -228,6 +229,44 @@ def waf_detector(
     Returns:
         Detection results and WAF fingerprint information
     """
+    # Define valid parameters and actions
+    VALID_PARAMS = {"action", "url", "timeout"}
+    VALID_ACTIONS = ["detect", "fingerprint", "test_bypass"]
+
+    # Check for unknown parameters
+    unknown_error = validate_unknown_params(kwargs, VALID_PARAMS, "waf_detector")
+    if unknown_error:
+        unknown_error.update(
+            generate_usage_hint(
+                "waf_detector",
+                "detect",
+                {"url": "https://example.com"},
+            )
+        )
+        return unknown_error
+
+    # Validate action parameter
+    action_error = validate_action_param(action, VALID_ACTIONS, "waf_detector")
+    if action_error:
+        action_error["usage_examples"] = {
+            "detect": "waf_detector(action='detect', url='https://example.com')",
+            "fingerprint": "waf_detector(action='fingerprint', url='https://example.com')",
+            "test_bypass": "waf_detector(action='test_bypass', url='https://example.com')",
+        }
+        return action_error
+
+    # Validate required parameters
+    url_error = validate_required_param(url, "url", action, "waf_detector")
+    if url_error:
+        url_error.update(
+            generate_usage_hint(
+                "waf_detector",
+                action,
+                {"url": "https://example.com"},
+            )
+        )
+        return url_error
+
     if not url:
         return "Error: URL required for WAF detection"
     
