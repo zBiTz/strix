@@ -5,6 +5,11 @@ from __future__ import annotations
 from typing import Any, Literal
 
 from strix.tools.registry import register_tool
+from strix.tools.validation import (
+    generate_usage_hint,
+    validate_action_param,
+    validate_unknown_params,
+)
 
 
 GraphQLAction = Literal["introspection_query", "parse_schema", "generate_queries", "security_analysis"]
@@ -338,6 +343,7 @@ def graphql_introspection(
     action: GraphQLAction,
     schema_data: dict[str, Any] | None = None,
     endpoint: str | None = None,
+    **kwargs: Any,  # Capture unknown parameters
 ) -> dict[str, Any]:
     """GraphQL introspection and security analysis tool.
 
@@ -357,6 +363,27 @@ def graphql_introspection(
     Returns:
         Introspection queries, parsed schema, or security analysis
     """
+    # Define valid parameters and actions
+    VALID_PARAMS = {"action", "schema_data", "endpoint"}
+    VALID_ACTIONS = ["introspection_query", "parse_schema", "generate_queries", "security_analysis"]
+
+    # Check for unknown parameters
+    unknown_error = validate_unknown_params(kwargs, VALID_PARAMS, "graphql_introspection")
+    if unknown_error:
+        unknown_error.update(
+            generate_usage_hint("graphql_introspection", "introspection_query", {"endpoint": "https://api.example.com/graphql"})
+        )
+        return unknown_error
+
+    # Validate action parameter
+    action_error = validate_action_param(action, VALID_ACTIONS, "graphql_introspection")
+    if action_error:
+        action_error["usage_examples"] = {
+            "introspection_query": "graphql_introspection(action='introspection_query', endpoint='https://api.example.com/graphql')",
+            "parse_schema": "graphql_introspection(action='parse_schema', schema_data={...introspection result...})",
+        }
+        return action_error
+
     try:
         if action == "introspection_query":
             return {

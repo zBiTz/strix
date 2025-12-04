@@ -6,6 +6,13 @@ import urllib.parse
 from typing import Any, Literal
 
 from strix.tools.registry import register_tool
+from strix.tools.validation import (
+    add_workflow_hint_for_url_params,
+    detect_url_in_unknown_params,
+    generate_usage_hint,
+    validate_action_param,
+    validate_unknown_params,
+)
 
 
 CORSAction = Literal["scan", "test_origin", "test_null", "generate_report"]
@@ -232,6 +239,7 @@ def cors_scanner(
     target_url: str,
     test_origin: str | None = None,
     response_headers: dict[str, str] | None = None,
+    **kwargs: Any,  # Capture unknown parameters
 ) -> dict[str, Any]:
     """Scan and test for CORS misconfigurations.
 
@@ -253,6 +261,35 @@ def cors_scanner(
         Scan results including test origins, vulnerability analysis,
         and exploitation code
     """
+    # Define valid parameters and actions
+    VALID_PARAMS = {"action", "target_url", "test_origin", "response_headers"}
+    VALID_ACTIONS = ["scan", "test_origin", "test_null", "generate_report"]
+
+    # Check for unknown parameters
+    unknown_error = validate_unknown_params(kwargs, VALID_PARAMS, "cors_scanner")
+    if unknown_error:
+        unknown_params = list(kwargs.keys())
+        if detect_url_in_unknown_params(unknown_params):
+            workflow_steps = [
+                "1. Use send_request(method='GET', url='https://example.com', headers={'Origin': 'https://evil.com'})",
+                "2. Extract response headers from the response",
+                "3. Call cors_scanner(action='generate_report', target_url='https://example.com', response_headers={...})",
+            ]
+            unknown_error = add_workflow_hint_for_url_params(unknown_error, workflow_steps)
+        unknown_error.update(
+            generate_usage_hint("cors_scanner", "scan", {"target_url": "https://example.com"})
+        )
+        return unknown_error
+
+    # Validate action parameter
+    action_error = validate_action_param(action, VALID_ACTIONS, "cors_scanner")
+    if action_error:
+        action_error["usage_examples"] = {
+            "scan": "cors_scanner(action='scan', target_url='https://example.com')",
+            "test_origin": "cors_scanner(action='test_origin', target_url='https://example.com', test_origin='https://evil.com')",
+        }
+        return action_error
+
     try:
         if action == "scan":
             # Parse target URL
