@@ -373,8 +373,6 @@ def poc_generator(
             return param_error
 
     try:
-        if not url:
-            return {"error": "url parameter required"}
 
         headers = headers or {}
         cookies = cookies or {}
