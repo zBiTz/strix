@@ -108,6 +108,7 @@ class TerminalSession:
                 return  # PS1 is working
 
             # Try to reset the prompt
+            # PS1 is a controlled class property, not user input, so no escaping needed
             if self.pane:
                 self.pane.send_keys(f'export PS1="{self.PS1}"')
             time.sleep(0.3)
@@ -391,6 +392,7 @@ class TerminalSession:
 
         # Add iteration counter as backup safety
         # Calculate expected iterations + buffer to handle edge cases
+        # POLL_INTERVAL is guaranteed positive and non-zero by class design
         max_iterations = int(effective_timeout / self.POLL_INTERVAL) + self.ITERATION_BUFFER
         iteration = 0
 

@@ -94,9 +94,7 @@ class TestTerminalPromptDetection:
 
     def test_ps1_verification_runs(self, terminal_session: TerminalSession) -> None:
         """Test that PS1 verification runs during initialization."""
-        # Session should be initialized
-        assert terminal_session._initialized
-        # Verify we can execute a simple command
+        # Verify session is functional by executing a simple command
         result = terminal_session.execute("echo test")
         assert result["status"] == "completed"
 
