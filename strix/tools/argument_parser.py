@@ -119,3 +119,39 @@ def _convert_to_dict(value: str) -> dict[str, Any]:
         return {}
     else:
         return {}
+
+
+def validate_required_args(
+    func: Callable[..., Any], provided_args: dict[str, Any]
+) -> tuple[bool, list[str]]:
+    """Check if all required parameters are provided.
+
+    Args:
+        func: The function to validate arguments for
+        provided_args: Dictionary of arguments that were provided
+
+    Returns:
+        Tuple of (is_valid, missing_params_list)
+        - is_valid: True if all required params are present
+        - missing_params_list: List of missing parameter names (empty if all present)
+    """
+    try:
+        sig = inspect.signature(func)
+        missing = []
+
+        for param_name, param in sig.parameters.items():
+            # Skip special parameters
+            if param_name in ("kwargs", "agent_state"):
+                continue
+
+            # Check if parameter is required (no default value and not VAR_KEYWORD)
+            if (param.default is inspect.Parameter.empty and
+                param.kind != inspect.Parameter.VAR_KEYWORD and
+                param_name not in provided_args):
+                missing.append(param_name)
+
+        return len(missing) == 0, missing
+
+    except (ValueError, TypeError, AttributeError):
+        # If we can't introspect, assume valid and let the tool call fail naturally
+        return True, []
