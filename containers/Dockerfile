@@ -169,7 +169,7 @@ RUN echo "# Sandbox Environment" > README.md
 COPY strix/__init__.py strix/
 COPY strix/runtime/tool_server.py strix/runtime/__init__.py strix/runtime/runtime.py /app/strix/runtime/
 
-COPY strix/tools/__init__.py strix/tools/registry.py strix/tools/executor.py strix/tools/argument_parser.py /app/strix/tools/
+COPY strix/tools/__init__.py strix/tools/registry.py strix/tools/executor.py strix/tools/argument_parser.py strix/tools/validation.py /app/strix/tools/
 
 COPY strix/tools/browser/ /app/strix/tools/browser/
 COPY strix/tools/file_edit/ /app/strix/tools/file_edit/
