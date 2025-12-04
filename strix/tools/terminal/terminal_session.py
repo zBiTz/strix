@@ -27,6 +27,7 @@ class TerminalSession:
     POLL_INTERVAL = 0.5
     HISTORY_LIMIT = 10_000
     PS1_END = "]$ "
+    MAX_COMMAND_TIMEOUT = 300.0  # 5 minutes absolute maximum
 
     def __init__(self, session_id: str, work_dir: str = "/workspace") -> None:
         self.session_id = session_id
@@ -92,6 +93,62 @@ class TerminalSession:
         assert self.session is not None
         assert self.window is not None
         assert self.pane is not None
+
+        # Verify PS1 prompt is working
+        self._verify_prompt_setup()
+
+    def _verify_prompt_setup(self, max_attempts: int = 3) -> None:
+        """Verify the PS1 prompt is properly set up."""
+        for attempt in range(max_attempts):
+            time.sleep(0.2)
+            content = self._get_pane_content()
+            if self._matches_ps1_metadata(content):
+                logger.debug("PS1 prompt verified successfully on attempt %d", attempt + 1)
+                return  # PS1 is working
+
+            # Try to reset the prompt
+            if self.pane:
+                self.pane.send_keys(f'export PS1="{self.PS1}"')
+            time.sleep(0.3)
+
+        # If we get here, PS1 setup may have failed - log warning but continue
+        logger.warning("PS1 prompt setup may have failed for session %s", self.session_id)
+
+    def _try_recover_session(self) -> bool:
+        """Attempt to recover a session that may be in a bad state."""
+        if not self.pane:
+            return False
+
+        # Send an empty enter to try to get a prompt
+        self.pane.send_keys("", enter=True)
+        time.sleep(0.5)
+
+        content = self._get_pane_content()
+        if self._matches_ps1_metadata(content) or content.rstrip().endswith(self.PS1_END.rstrip()):
+            self._clear_screen()
+            logger.info("Session %s recovered successfully", self.session_id)
+            return True
+
+        logger.warning("Failed to recover session %s", self.session_id)
+        return False
+
+    def _detect_command_completion(self, cur_pane_output: str, initial_output: str) -> bool:
+        """Detect if a command has completed using multiple methods."""
+        ps1_matches = self._matches_ps1_metadata(cur_pane_output)
+
+        # Method 1: Custom PS1 pattern (preferred)
+        if len(ps1_matches) > 0:
+            return True
+
+        # Method 2: Check for common shell prompt endings
+        common_prompts = ["$ ", "# ", "> ", "% "]
+        stripped = cur_pane_output.rstrip()
+        for prompt in common_prompts:
+            if stripped.endswith(prompt) and stripped != initial_output.rstrip():
+                logger.debug("Command completion detected via fallback prompt: %s", prompt)
+                return True
+
+        return False
 
     def _get_pane_content(self) -> str:
         if not self.pane:
@@ -309,6 +366,9 @@ class TerminalSession:
         if not self.pane:
             raise RuntimeError("Terminal session not properly initialized")
 
+        # Clamp timeout to maximum
+        effective_timeout = min(timeout, self.MAX_COMMAND_TIMEOUT)
+
         initial_pane_output = self._get_pane_content()
         initial_ps1_matches = self._matches_ps1_metadata(initial_pane_output)
         initial_ps1_count = len(initial_ps1_matches)
@@ -316,11 +376,35 @@ class TerminalSession:
         start_time = time.time()
         last_pane_output = initial_pane_output
 
+        # Add iteration counter as backup safety
+        max_iterations = int(effective_timeout / self.POLL_INTERVAL) + 10
+        iteration = 0
+
         is_special_key = self._is_special_key(command)
         should_add_enter = not is_special_key and not no_enter
         self.pane.send_keys(command, enter=should_add_enter)
 
         while True:
+            iteration += 1
+
+            # Hard stop if we've exceeded max iterations (backup safety)
+            if iteration > max_iterations:
+                logger.warning(
+                    "Command exceeded maximum iterations (%d) after %.2fs for session %s",
+                    max_iterations,
+                    effective_timeout,
+                    self.session_id,
+                )
+                timeout_content = (
+                    f"[Command exceeded maximum iterations - "
+                    f"forcing timeout after {effective_timeout}s]"
+                )
+                return {
+                    "content": timeout_content,
+                    "status": "timeout",
+                    "exit_code": None,
+                    "working_dir": self._cwd,
+                }
             cur_pane_output = self._get_pane_content()
             ps1_matches = self._matches_ps1_metadata(cur_pane_output)
             current_ps1_count = len(ps1_matches)
@@ -353,7 +437,7 @@ class TerminalSession:
                 }
 
             elapsed_time = time.time() - start_time
-            if elapsed_time >= timeout:
+            if elapsed_time >= effective_timeout:
                 raw_command_output = self._combine_outputs_between_matches(
                     cur_pane_output, ps1_matches
                 )
@@ -365,7 +449,7 @@ class TerminalSession:
                 self.prev_status = BashCommandStatus.CONTINUE
 
                 timeout_msg = (
-                    f"\n[Command still running after {timeout}s - showing output so far. "
+                    f"\n[Command still running after {effective_timeout}s - showing output so far. "
                     "Use C-c to interrupt if needed.]"
                 )
                 return {
@@ -388,6 +472,17 @@ class TerminalSession:
         is_command_running = not (
             cur_pane_output.rstrip().endswith(self.PS1_END.rstrip()) or len(ps1_matches) > 0
         )
+
+        # If we think a command is running but haven't tracked one,
+        # the session may be in a bad state
+        if is_command_running and self.prev_status != BashCommandStatus.CONTINUE:
+            logger.debug(
+                "Detected command running without tracking - attempting recovery for session %s",
+                self.session_id,
+            )
+            # Try to recover by checking if we can detect any prompt
+            if self._try_recover_session():
+                is_command_running = False
 
         if command.strip() == "":
             return self._handle_empty_command(

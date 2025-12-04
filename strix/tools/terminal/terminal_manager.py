@@ -1,11 +1,16 @@
 import atexit
+import concurrent.futures
 import contextlib
+import logging
 import signal
 import sys
 import threading
 from typing import Any
 
 from .terminal_session import TerminalSession
+
+
+logger = logging.getLogger(__name__)
 
 
 class TerminalManager:
@@ -25,13 +30,53 @@ class TerminalManager:
         terminal_id: str | None = None,
         no_enter: bool = False,
     ) -> dict[str, Any]:
+        effective_timeout = timeout or self.default_timeout
+
+        # Add 5 seconds buffer for the outer timeout
+        outer_timeout = effective_timeout + 5
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(
+                self._execute_command_internal,
+                command,
+                is_input,
+                effective_timeout,
+                terminal_id,
+                no_enter,
+            )
+            try:
+                return future.result(timeout=outer_timeout)
+            except concurrent.futures.TimeoutError:
+                logger.warning(
+                    "Command execution hard timeout after %.2fs for terminal %s",
+                    outer_timeout,
+                    terminal_id or self.default_terminal_id,
+                )
+                return {
+                    "error": f"Command execution timed out after {outer_timeout}s (hard timeout)",
+                    "command": command,
+                    "terminal_id": terminal_id or self.default_terminal_id,
+                    "content": "",
+                    "status": "hard_timeout",
+                    "exit_code": None,
+                    "working_dir": None,
+                }
+
+    def _execute_command_internal(
+        self,
+        command: str,
+        is_input: bool,
+        timeout: float,
+        terminal_id: str | None,
+        no_enter: bool,
+    ) -> dict[str, Any]:
         if terminal_id is None:
             terminal_id = self.default_terminal_id
 
         session = self._get_or_create_session(terminal_id)
 
         try:
-            result = session.execute(command, is_input, timeout or self.default_timeout, no_enter)
+            result = session.execute(command, is_input, timeout, no_enter)
 
             return {
                 "content": result["content"],
