@@ -19,9 +19,15 @@ from .validation import generate_missing_param_error
 
 
 # HTTP timeout for sandbox requests (tool timeout + buffer for network/processing)
-SANDBOX_HTTP_TIMEOUT = int(os.getenv("STRIX_TOOL_TIMEOUT", "300")) + 30
-
-
+try:
+    SANDBOX_HTTP_TIMEOUT = int(os.getenv("STRIX_TOOL_TIMEOUT", "300")) + 30
+    if SANDBOX_HTTP_TIMEOUT <= 30:  # Must be positive after adding buffer
+        raise ValueError("Timeout must be positive")
+except ValueError as e:
+    raise RuntimeError(
+        f"Invalid STRIX_TOOL_TIMEOUT value: {os.getenv('STRIX_TOOL_TIMEOUT')}. "
+        f"Must be a positive integer representing seconds. Error: {e}"
+    ) from e
 async def execute_tool(tool_name: str, agent_state: Any | None = None, **kwargs: Any) -> Any:
     execute_in_sandbox = should_execute_in_sandbox(tool_name)
     sandbox_mode = os.getenv("STRIX_SANDBOX_MODE", "false").lower() == "true"
