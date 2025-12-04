@@ -6,6 +6,12 @@ import re
 from typing import Any, Literal
 
 from strix.tools.registry import register_tool
+from strix.tools.validation import (
+    generate_usage_hint,
+    validate_action_param,
+    validate_required_param,
+    validate_unknown_params,
+)
 
 
 CVEAction = Literal["lookup", "search", "by_product"]
@@ -118,7 +124,8 @@ def cve_lookup(
     cve_id: str | None = None,
     query: str | None = None,
     product: str | None = None,
-    version: str | None = None
+    version: str | None = None,
+    **kwargs: Any,  # Capture unknown parameters
 ) -> dict[str, Any]:
     """Query CVE databases and match vulnerabilities against technologies.
     

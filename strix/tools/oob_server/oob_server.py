@@ -7,6 +7,12 @@ from datetime import datetime
 from typing import Any, Literal
 
 from strix.tools.registry import register_tool
+from strix.tools.validation import (
+    generate_usage_hint,
+    validate_action_param,
+    validate_required_param,
+    validate_unknown_params,
+)
 
 
 OOBAction = Literal["generate_payload", "check_interaction", "list_payloads", "get_url"]
@@ -40,6 +46,8 @@ def oob_server(
     base_url: str = "https://oob.example.com",
     vulnerability_type: str | None = None,
     context: str | None = None,
+
+    **kwargs: Any,  # Capture unknown parameters
 ) -> dict[str, Any]:
     """Out-of-Band Interaction Server for blind vulnerability detection.
 

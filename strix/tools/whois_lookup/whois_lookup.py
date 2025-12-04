@@ -7,6 +7,12 @@ from typing import Any, Literal
 from urllib.parse import urlparse
 
 from strix.tools.registry import register_tool
+from strix.tools.validation import (
+    generate_usage_hint,
+    validate_action_param,
+    validate_required_param,
+    validate_unknown_params,
+)
 
 
 WhoisAction = Literal["lookup", "registrar", "dates"]
@@ -232,6 +238,8 @@ def _get_dates(domain: str) -> dict[str, Any]:
 def whois_lookup(
     action: WhoisAction,
     domain: str,
+
+    **kwargs: Any,  # Capture unknown parameters
 ) -> dict[str, Any]:
     """Perform WHOIS lookups for domain information gathering.
 

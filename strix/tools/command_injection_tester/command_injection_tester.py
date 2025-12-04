@@ -8,6 +8,12 @@ from typing import Any, Literal
 import requests
 
 from strix.tools.registry import register_tool
+from strix.tools.validation import (
+    generate_usage_hint,
+    validate_action_param,
+    validate_required_param,
+    validate_unknown_params,
+)
 
 
 CommandInjectionAction = Literal["test_basic", "test_blind", "generate_payload", "test_endpoint"]

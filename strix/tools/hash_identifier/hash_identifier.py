@@ -6,6 +6,12 @@ import re
 from typing import Any, Literal
 
 from strix.tools.registry import register_tool
+from strix.tools.validation import (
+    generate_usage_hint,
+    validate_action_param,
+    validate_required_param,
+    validate_unknown_params,
+)
 
 
 HashIdentifierAction = Literal["identify", "analyze", "suggest_crack"]
@@ -361,6 +367,8 @@ def _get_crack_suggestions(hash_type: str, security: str) -> dict[str, Any]:
 def hash_identifier(
     action: HashIdentifierAction,
     hash_value: str,
+
+    **kwargs: Any,  # Capture unknown parameters
 ) -> dict[str, Any]:
     """Identify hash types and suggest cracking approaches.
 

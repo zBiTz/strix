@@ -7,6 +7,12 @@ import string
 from typing import Any, Literal
 
 from strix.tools.registry import register_tool
+from strix.tools.validation import (
+    generate_usage_hint,
+    validate_action_param,
+    validate_required_param,
+    validate_unknown_params,
+)
 
 
 APIFuzzAction = Literal["generate_payloads", "fuzz_params", "fuzz_headers", "fuzz_methods"]
@@ -161,6 +167,8 @@ def api_fuzzer(
     params: dict[str, str] | None = None,
     endpoint: str | None = None,
     categories: list[str] | None = None,
+
+    **kwargs: Any,  # Capture unknown parameters
 ) -> dict[str, Any]:
     """Generate fuzzing payloads and test cases for API security testing.
 

@@ -6,6 +6,12 @@ import re
 from typing import Any, Literal
 
 from strix.tools.registry import register_tool
+from strix.tools.validation import (
+    generate_usage_hint,
+    validate_action_param,
+    validate_required_param,
+    validate_unknown_params,
+)
 
 
 JSExtractorAction = Literal["extract_all", "extract_endpoints", "extract_secrets", "extract_domains"]
@@ -213,6 +219,8 @@ def js_link_extractor(
     action: JSExtractorAction,
     js_content: str,
     include_comments: bool = False,
+
+    **kwargs: Any,  # Capture unknown parameters
 ) -> dict[str, Any]:
     """Extract API endpoints, secrets, and sensitive data from JavaScript files.
 

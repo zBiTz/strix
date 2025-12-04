@@ -5,6 +5,12 @@ from __future__ import annotations
 from typing import Any, Literal
 
 from strix.tools.registry import register_tool
+from strix.tools.validation import (
+    generate_usage_hint,
+    validate_action_param,
+    validate_required_param,
+    validate_unknown_params,
+)
 
 
 ParameterMinerAction = Literal["get_wordlist", "analyze_params", "suggest_params", "get_common_params"]
@@ -171,6 +177,8 @@ def parameter_miner(
     existing_params: list[str] | None = None,
     context: str | None = None,
     include_variations: bool = True,
+
+    **kwargs: Any,  # Capture unknown parameters
 ) -> dict[str, Any]:
     """Discover hidden and undocumented parameters through analysis.
 

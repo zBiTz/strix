@@ -9,6 +9,12 @@ from urllib.parse import urlparse
 import requests
 
 from strix.tools.registry import register_tool
+from strix.tools.validation import (
+    generate_usage_hint,
+    validate_action_param,
+    validate_required_param,
+    validate_unknown_params,
+)
 
 
 RateLimitAction = Literal["detect", "test_bypass", "analyze"]
@@ -284,6 +290,8 @@ def rate_limit_tester(
     url: str,
     method: str = "GET",
     num_requests: int = 20,
+
+    **kwargs: Any,  # Capture unknown parameters
 ) -> dict[str, Any]:
     """Test and analyze API rate limiting implementation.
 

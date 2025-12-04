@@ -8,6 +8,12 @@ import urllib.parse
 from typing import Any, Literal
 
 from strix.tools.registry import register_tool
+from strix.tools.validation import (
+    generate_usage_hint,
+    validate_action_param,
+    validate_required_param,
+    validate_unknown_params,
+)
 
 
 PayloadEncoderAction = Literal["encode", "decode", "multi_encode", "generate_bypass"]
@@ -164,6 +170,8 @@ def payload_encoder(
     encoding: str | None = None,
     encodings: list[str] | None = None,
     decode: bool = False,
+
+    **kwargs: Any,  # Capture unknown parameters
 ) -> dict[str, Any]:
     """Multi-layer encoding with WAF bypass transformations.
 

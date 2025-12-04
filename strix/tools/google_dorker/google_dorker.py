@@ -6,6 +6,12 @@ from typing import Any, Literal
 from urllib.parse import quote_plus, urlparse
 
 from strix.tools.registry import register_tool
+from strix.tools.validation import (
+    generate_usage_hint,
+    validate_action_param,
+    validate_required_param,
+    validate_unknown_params,
+)
 
 
 DorkAction = Literal["generate", "build_query", "list_templates"]
@@ -267,6 +273,8 @@ def google_dorker(
     inurl: list[str] | None = None,
     intitle: list[str] | None = None,
     exclude: list[str] | None = None,
+
+    **kwargs: Any,  # Capture unknown parameters
 ) -> dict[str, Any]:
     """Generate Google dork queries for security reconnaissance.
 

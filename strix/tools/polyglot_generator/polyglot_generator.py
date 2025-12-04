@@ -5,6 +5,12 @@ from __future__ import annotations
 from typing import Any, Literal
 
 from strix.tools.registry import register_tool
+from strix.tools.validation import (
+    generate_usage_hint,
+    validate_action_param,
+    validate_required_param,
+    validate_unknown_params,
+)
 
 
 PolyglotAction = Literal["generate", "list_types", "custom"]
@@ -180,7 +186,8 @@ def polyglot_generator(
     action: PolyglotAction,
     payload_type: str | None = None,
     encoding: str | None = None,
-    custom_template: str | None = None
+    custom_template: str | None = None,
+    **kwargs: Any,  # Capture unknown parameters
 ) -> dict[str, Any]:
     """Generate polyglot payloads for multi-context exploitation.
     

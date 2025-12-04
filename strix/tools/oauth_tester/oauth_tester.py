@@ -10,6 +10,12 @@ from typing import Any, Literal
 from urllib.parse import parse_qs, urlparse
 
 from strix.tools.registry import register_tool
+from strix.tools.validation import (
+    generate_usage_hint,
+    validate_action_param,
+    validate_required_param,
+    validate_unknown_params,
+)
 
 
 OAuthTesterAction = Literal[
@@ -200,6 +206,8 @@ def oauth_tester(
     code_challenge: str | None = None,
     code_challenge_method: str | None = None,
     token: str | None = None,
+
+    **kwargs: Any,  # Capture unknown parameters
 ) -> dict[str, Any]:
     """Automated OAuth flow testing for security vulnerabilities.
 
