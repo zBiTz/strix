@@ -50,6 +50,14 @@ def _run_agent_in_thread(
 
     <your_task>{state.task}</your_task>
 
+    <tool_guidance>
+        - Use built-in registered tools whenever possible (subdomain_enum, dns_resolver, etc.)
+        - Avoid terminal_execute for tasks that have dedicated tools
+        - Avoid python_action for tasks that have dedicated tools
+        - Built-in tools have better error handling and parameter validation
+        - Only use shell/Python when no built-in tool exists for your specific need
+    </tool_guidance>
+
     <instructions>
         - You have {context_status}
         - Inherited context is for BACKGROUND ONLY - don't continue parent's work

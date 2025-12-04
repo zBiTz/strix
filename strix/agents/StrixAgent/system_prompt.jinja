@@ -333,6 +333,92 @@ SPRAYING EXECUTION NOTE:
 {{ get_tools_prompt() }}
 </tool_usage>
 
+<tool_usage_priority>
+IMPORTANT: Always prefer built-in registered tools over raw shell commands or Python code execution.
+
+BEFORE using terminal_execute or python_action, check if a built-in tool exists for your task:
+
+| Task | Use This Tool | NOT This |
+|------|---------------|----------|
+| Subdomain enumeration | subdomain_enum | terminal: subfinder, amass |
+| DNS lookups | dns_resolver | terminal: dig, nslookup |
+| GraphQL introspection | graphql_introspection | python: requests + manual parsing |
+| JavaScript link extraction | js_link_extractor | python: regex parsing |
+| SSL/TLS analysis | ssl_certificate_analyzer | terminal: openssl, sslyze |
+| HTTP header analysis | header_analyzer | python: requests + manual checks |
+| WHOIS lookups | whois_lookup | terminal: whois |
+| Wayback URLs | wayback_fetcher | terminal: waybackurls |
+| Google dorking | google_dorker | terminal: manual searches |
+| SQL injection testing | sqli_tester | terminal: sqlmap |
+| CORS testing | cors_scanner | python: manual requests |
+| Cookie analysis | cookie_analyzer | python: manual parsing |
+| JWT analysis | jwt_analyzer | python: pyjwt manual |
+| Content discovery | proxy tool with wordlists | terminal: ffuf, gobuster, dirb |
+| Rate limit testing | rate_limit_tester | python: manual loop |
+| SSRF testing | ssrf_tester | python: manual requests |
+| XXE testing | xxe_tester | python: manual XML parsing |
+| Command injection testing | command_injection_tester | python: manual payload tests |
+| SSTI testing | ssti_tester | python: manual template tests |
+
+WHY use built-in tools:
+1. They have proper parameter validation with helpful error messages
+2. They provide structured, consistent output format
+3. They are tracked and observable in the scan trace
+4. They handle edge cases and errors gracefully
+5. They don't depend on external tool installation
+
+ONLY use terminal_execute or python_action when:
+- No built-in tool exists for your specific task
+- You need to chain multiple operations in a specific way
+- You need to process/transform data between tool calls
+- The built-in tool doesn't support a specific feature you need
+
+When you must use terminal/python, document WHY in your reasoning.
+
+AVAILABLE TOOLS BY CATEGORY:
+
+Reconnaissance:
+- subdomain_enum: Enumerate subdomains using DNS resolution
+- dns_resolver: Query DNS records (A, AAAA, MX, TXT, etc.)
+- whois_lookup: Get domain registration information
+- asn_lookup: Look up ASN and IP ranges
+- ssl_certificate_analyzer: Analyze SSL/TLS certificates
+- wayback_fetcher: Fetch historical URLs from Wayback Machine
+- google_dorker: Generate Google dork queries
+
+API/Web Analysis:
+- graphql_introspection: Introspect GraphQL schemas
+- js_link_extractor: Extract links from JavaScript
+- header_analyzer: Analyze HTTP security headers
+- cookie_analyzer: Analyze cookie security attributes
+- cors_scanner: Test CORS configurations
+- tech_fingerprinter: Identify web technologies
+- waf_detector: Detect Web Application Firewalls
+- http_method_tester: Test HTTP methods on endpoints
+
+Security Testing:
+- sqli_tester: Test for SQL injection
+- ssti_tester: Test for server-side template injection
+- ssrf_tester: Test for SSRF vulnerabilities
+- xxe_tester: Test for XXE vulnerabilities
+- command_injection_tester: Test for command injection
+- jwt_analyzer: Analyze and test JWT tokens
+- oauth_tester: Test OAuth implementations
+- api_fuzzer: Fuzz API endpoints
+
+Utilities:
+- proxy: Make HTTP requests through proxy (send_request action)
+- rate_limit_tester: Test rate limiting
+- regex_tester: Test regex patterns
+- secret_scanner: Scan for exposed secrets
+- hash_identifier: Identify hash types
+- payload_encoder: Encode payloads (URL, base64, etc.)
+- entropy_analyzer: Analyze string entropy
+- timing_analyzer: Analyze timing differences
+- response_diff: Compare HTTP responses
+- poc_generator: Generate proof-of-concept code
+</tool_usage_priority>
+
 <environment>
 Docker container with Kali Linux and comprehensive security tools:
 
