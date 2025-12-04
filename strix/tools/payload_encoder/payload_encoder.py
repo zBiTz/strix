@@ -192,6 +192,59 @@ def payload_encoder(
     Returns:
         Encoded payload(s) and transformation details
     """
+    # Define valid parameters and actions
+    VALID_PARAMS = {
+        "action",
+        "payload",
+        "encoding",
+        "encodings",
+        "decode",
+    }
+    VALID_ACTIONS = ["encode", "decode", "multi_encode", "generate_bypass"]
+
+    # Check for unknown parameters
+    unknown_error = validate_unknown_params(kwargs, VALID_PARAMS, "payload_encoder")
+    if unknown_error:
+        unknown_error.update(
+            generate_usage_hint("payload_encoder", "encode", {"payload": "<script>alert(1)</script>", "encoding": "url"})
+        )
+        return unknown_error
+
+    # Validate action parameter
+    action_error = validate_action_param(action, VALID_ACTIONS, "payload_encoder")
+    if action_error:
+        action_error["usage_examples"] = {
+            "encode": "payload_encoder(action='encode', payload='<script>alert(1)</script>', encoding='url')",
+            "decode": "payload_encoder(action='decode', payload='%3Cscript%3E', encoding='url')",
+            "multi_encode": "payload_encoder(action='multi_encode', payload='alert(1)', encodings=['url', 'base64'])",
+            "generate_bypass": "payload_encoder(action='generate_bypass', payload='<script>alert(1)</script>')",
+        }
+        return action_error
+
+    # Validate required parameters
+    param_error = validate_required_param(payload, "payload", action, "payload_encoder")
+    if param_error:
+        param_error.update(
+            generate_usage_hint("payload_encoder", action, {"payload": "<script>alert(1)</script>"})
+        )
+        return param_error
+
+    if action in ["encode", "decode"]:
+        param_error = validate_required_param(encoding, "encoding", action, "payload_encoder")
+        if param_error:
+            param_error.update(
+                generate_usage_hint("payload_encoder", action, {"payload": "<script>alert(1)</script>", "encoding": "url"})
+            )
+            return param_error
+
+    if action == "multi_encode":
+        param_error = validate_required_param(encodings, "encodings", action, "payload_encoder")
+        if param_error:
+            param_error.update(
+                generate_usage_hint("payload_encoder", action, {"payload": "alert(1)", "encodings": ["url", "base64"]})
+            )
+            return param_error
+
     try:
         if action == "encode":
             if not encoding:

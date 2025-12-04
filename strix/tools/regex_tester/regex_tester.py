@@ -8,6 +8,12 @@ import time
 from typing import Any, Literal
 
 from strix.tools.registry import register_tool
+from strix.tools.validation import (
+    generate_usage_hint,
+    validate_action_param,
+    validate_required_param,
+    validate_unknown_params,
+)
 
 
 RegexAction = Literal["test", "analyze", "benchmark"]
@@ -294,6 +300,7 @@ def regex_tester(
     pattern: str,
     test_input: str | None = None,
     max_length: int = 30,
+    **kwargs: Any,
 ) -> dict[str, Any]:
     """Test regex patterns for ReDoS vulnerabilities.
 
@@ -313,6 +320,41 @@ def regex_tester(
     Returns:
         ReDoS vulnerability analysis and recommendations
     """
+    # Define valid parameters and actions
+    VALID_PARAMS = {
+        "action",
+        "pattern",
+        "test_input",
+        "max_length",
+    }
+    VALID_ACTIONS = ["test", "analyze", "benchmark"]
+
+    # Check for unknown parameters
+    unknown_error = validate_unknown_params(kwargs, VALID_PARAMS, "regex_tester")
+    if unknown_error:
+        unknown_error.update(
+            generate_usage_hint("regex_tester", "analyze", {"pattern": r"(a+)+"})
+        )
+        return unknown_error
+
+    # Validate action parameter
+    action_error = validate_action_param(action, VALID_ACTIONS, "regex_tester")
+    if action_error:
+        action_error["usage_examples"] = {
+            "test": "regex_tester(action='test', pattern=r'(a+)+', test_input='aaaa')",
+            "analyze": "regex_tester(action='analyze', pattern=r'(a+)+')",
+            "benchmark": "regex_tester(action='benchmark', pattern=r'(a+)+', max_length=25)",
+        }
+        return action_error
+
+    # Validate required parameters
+    param_error = validate_required_param(pattern, "pattern", action, "regex_tester")
+    if param_error:
+        param_error.update(
+            generate_usage_hint("regex_tester", action, {"pattern": r"(a+)+"})
+        )
+        return param_error
+
     try:
         if action == "test":
             safety = _test_regex_safety(pattern)

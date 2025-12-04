@@ -178,6 +178,51 @@ def timing_analyzer(
     Returns:
         Statistical analysis results including significance tests
     """
+    # Define valid parameters and actions
+    VALID_PARAMS = {
+        "action",
+        "times1",
+        "times2",
+        "remove_outliers",
+        "outlier_method",
+    }
+    VALID_ACTIONS = ["analyze", "compare", "detect_difference", "get_statistics"]
+
+    # Check for unknown parameters
+    unknown_error = validate_unknown_params(kwargs, VALID_PARAMS, "timing_analyzer")
+    if unknown_error:
+        unknown_error.update(
+            generate_usage_hint("timing_analyzer", "analyze", {"times1": [0.123, 0.145, 0.132, 0.156]})
+        )
+        return unknown_error
+
+    # Validate action parameter
+    action_error = validate_action_param(action, VALID_ACTIONS, "timing_analyzer")
+    if action_error:
+        action_error["usage_examples"] = {
+            "analyze": "timing_analyzer(action='analyze', times1=[0.123, 0.145, 0.132])",
+            "compare": "timing_analyzer(action='compare', times1=[0.1, 0.2], times2=[0.5, 0.6])",
+            "detect_difference": "timing_analyzer(action='detect_difference', times1=[0.1, 0.2], times2=[0.5, 0.6])",
+            "get_statistics": "timing_analyzer(action='get_statistics', times1=[0.123, 0.145, 0.132])",
+        }
+        return action_error
+
+    # Validate required parameters
+    param_error = validate_required_param(times1, "times1", action, "timing_analyzer")
+    if param_error:
+        param_error.update(
+            generate_usage_hint("timing_analyzer", action, {"times1": [0.123, 0.145, 0.132, 0.156]})
+        )
+        return param_error
+
+    if action in ["compare", "detect_difference"]:
+        param_error = validate_required_param(times2, "times2", action, "timing_analyzer")
+        if param_error:
+            param_error.update(
+                generate_usage_hint("timing_analyzer", action, {"times1": [0.1, 0.2], "times2": [0.5, 0.6]})
+            )
+            return param_error
+
     try:
         # Validate input
         if not times1 or len(times1) == 0:

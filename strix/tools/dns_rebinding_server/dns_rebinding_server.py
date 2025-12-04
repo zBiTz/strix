@@ -5,6 +5,11 @@ from __future__ import annotations
 from typing import Any, Literal
 
 from strix.tools.registry import register_tool
+from strix.tools.validation import (
+    generate_usage_hint,
+    validate_action_param,
+    validate_unknown_params,
+)
 
 
 DNSRebindingAction = Literal["generate_domain", "info", "test_scenarios"]
@@ -16,6 +21,7 @@ def dns_rebinding_server(
     target_ip: str | None = None,
     attacker_ip: str | None = None,
     ttl: int = 0,
+    **kwargs: Any,
 ) -> dict[str, Any]:
     """DNS Rebinding Server for SSRF and localhost bypass attacks.
 
@@ -34,6 +40,33 @@ def dns_rebinding_server(
     Returns:
         DNS rebinding configuration and test scenarios
     """
+    # Define valid parameters and actions
+    VALID_PARAMS = {
+        "action",
+        "target_ip",
+        "attacker_ip",
+        "ttl",
+    }
+    VALID_ACTIONS = ["generate_domain", "info", "test_scenarios"]
+
+    # Check for unknown parameters
+    unknown_error = validate_unknown_params(kwargs, VALID_PARAMS, "dns_rebinding_server")
+    if unknown_error:
+        unknown_error.update(
+            generate_usage_hint("dns_rebinding_server", "generate_domain", {"target_ip": "127.0.0.1"})
+        )
+        return unknown_error
+
+    # Validate action parameter
+    action_error = validate_action_param(action, VALID_ACTIONS, "dns_rebinding_server")
+    if action_error:
+        action_error["usage_examples"] = {
+            "generate_domain": "dns_rebinding_server(action='generate_domain', target_ip='127.0.0.1', attacker_ip='1.2.3.4')",
+            "info": "dns_rebinding_server(action='info')",
+            "test_scenarios": "dns_rebinding_server(action='test_scenarios')",
+        }
+        return action_error
+
     try:
         if action == "generate_domain":
             target = target_ip or "127.0.0.1"

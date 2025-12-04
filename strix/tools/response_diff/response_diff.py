@@ -143,6 +143,52 @@ def response_diff(
     Returns:
         Comparison results including differences, similarity scores, and analysis
     """
+    # Define valid parameters and actions
+    VALID_PARAMS = {
+        "action",
+        "response1",
+        "response2",
+        "normalize",
+        "ignore_patterns",
+        "context_lines",
+    }
+    VALID_ACTIONS = ["compare", "diff_text", "analyze_similarity", "find_changes"]
+
+    # Check for unknown parameters
+    unknown_error = validate_unknown_params(kwargs, VALID_PARAMS, "response_diff")
+    if unknown_error:
+        unknown_error.update(
+            generate_usage_hint("response_diff", "compare", {"response1": "...", "response2": "..."})
+        )
+        return unknown_error
+
+    # Validate action parameter
+    action_error = validate_action_param(action, VALID_ACTIONS, "response_diff")
+    if action_error:
+        action_error["usage_examples"] = {
+            "compare": "response_diff(action='compare', response1='...', response2='...')",
+            "diff_text": "response_diff(action='diff_text', response1='...', response2='...')",
+            "analyze_similarity": "response_diff(action='analyze_similarity', response1='...', response2='...')",
+            "find_changes": "response_diff(action='find_changes', response1='...', response2='...')",
+        }
+        return action_error
+
+    # Validate required parameters
+    param_error = validate_required_param(response1, "response1", action, "response_diff")
+    if param_error:
+        param_error.update(
+            generate_usage_hint("response_diff", action, {"response1": "...", "response2": "..."})
+        )
+        return param_error
+
+    if action in ["compare", "diff_text", "analyze_similarity", "find_changes"]:
+        param_error = validate_required_param(response2, "response2", action, "response_diff")
+        if param_error:
+            param_error.update(
+                generate_usage_hint("response_diff", action, {"response1": "...", "response2": "..."})
+            )
+            return param_error
+
     try:
         if action == "compare":
             if not response2:
