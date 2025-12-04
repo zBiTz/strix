@@ -1,0 +1,464 @@
+<asn_lookup_guide>
+<title>ASN AND BGP RECONNAISSANCE</title>
+
+<critical>ASN (Autonomous System Number) analysis reveals an organization's complete IP infrastructure, peering relationships, and network topology. Large organizations operate their own ASNs; others use hosting providers whose ASNs indicate shared infrastructure. BGP data exposes IP ranges, geographic presence, upstream providers, and network architecture invisible to application-layer scanning.</critical>
+
+<scope>
+- ASN ownership and allocation research
+- IP prefix enumeration per ASN
+- BGP peering relationship analysis
+- Network topology mapping
+- Cloud provider ASN identification
+- Geographic presence determination
+- Upstream and downstream provider analysis
+- IP range to organization correlation
+- Historical BGP announcement tracking
+- Network infrastructure fingerprinting
+</scope>
+
+<methodology>
+1. Identify target organization's ASN(s).
+2. Enumerate all IP prefixes announced by each ASN.
+3. Map geographic distribution of announced prefixes.
+4. Identify upstream providers and peering relationships.
+5. Correlate ASN with cloud provider usage.
+6. Analyze historical BGP data for infrastructure changes.
+7. Cross-reference with reverse DNS and WHOIS.
+8. Identify related ASNs through organizational links.
+9. Map complete network topology and attack surface.
+10. Document IP ranges for subsequent scanning.
+</methodology>
+
+<testing_techniques>
+<asn_discovery>
+{% raw %}
+# ASN Discovery Methods
+
+# 1. From known IP address
+# Cymru WHOIS
+whois -h whois.cymru.com " -v 93.184.216.34"
+# AS | IP | BGP Prefix | Country | Registry | Allocated | AS Name
+# 15133 | 93.184.216.34 | 93.184.216.0/24 | US | arin | 2008-06-02 | EDGECAST
+
+# BGPView API
+curl -s "https://api.bgpview.io/ip/93.184.216.34" | jq '.data.prefixes[].asn'
+
+# 2. From domain name
+# Get IP, then ASN
+IP=$(dig +short A example.com | head -1)
+whois -h whois.cymru.com " -v $IP"
+
+# 3. From organization name
+# PeeringDB search
+curl -s "https://www.peeringdb.com/api/net?name__contains=Microsoft" | jq
+
+# 4. Direct ASN search
+# ARIN (Americas)
+whois -h whois.arin.net "o Company Name"
+
+# RIPE (Europe)
+whois -h whois.ripe.net -T aut-num "Company Name"
+
+# APNIC (Asia-Pacific)
+whois -h whois.apnic.net "Company Name"
+
+# 5. ASN Range lookup
+# Major tech companies often have multiple ASNs
+# Google: AS15169, AS396982, etc.
+# Microsoft: AS8075, AS3598, etc.
+# Amazon: AS16509, AS14618, etc.
+{% endraw %}
+</asn_discovery>
+
+<prefix_enumeration>
+{% raw %}
+# IP Prefix Enumeration per ASN
+
+# RADB (Routing Arbiter Database)
+whois -h whois.radb.net -- '-i origin AS15169'
+# Returns all prefixes announced by Google's main ASN
+
+# BGPView API
+curl -s "https://api.bgpview.io/asn/15169/prefixes" | jq '.data.ipv4_prefixes[].prefix'
+
+# RIPE RIS
+curl -s "https://stat.ripe.net/data/announced-prefixes/data.json?resource=AS15169" | jq
+
+# Hurricane Electric BGP Toolkit
+# https://bgp.he.net/AS15169#_prefixes
+
+# Combine IPv4 and IPv6
+curl -s "https://api.bgpview.io/asn/15169/prefixes" | jq -r '
+  (.data.ipv4_prefixes[].prefix),
+  (.data.ipv6_prefixes[].prefix)
+'
+
+# Aggregate overlapping prefixes
+# Use aggregate6 or similar tools
+curl -s "https://api.bgpview.io/asn/15169/prefixes" | \
+    jq -r '.data.ipv4_prefixes[].prefix' | \
+    aggregate6
+
+# Output example for large ASN:
+# 8.8.4.0/24
+# 8.8.8.0/24
+# 8.34.208.0/20
+# ...hundreds of prefixes
+{% endraw %}
+</prefix_enumeration>
+
+<peering_analysis>
+{% raw %}
+# BGP Peering and Upstream Analysis
+
+# Get peers and upstreams
+curl -s "https://api.bgpview.io/asn/15169/peers" | jq
+
+# RIPE RIS peers data
+curl -s "https://stat.ripe.net/data/asn-neighbours/data.json?resource=AS15169" | jq
+
+# PeeringDB (peering policy and locations)
+curl -s "https://www.peeringdb.com/api/net?asn=15169" | jq
+
+# Upstream vs Peer vs Downstream
+# Upstreams: Providers (transit)
+# Peers: Direct connections (settlement-free)
+# Downstreams: Customers
+
+# BGPView relationships
+curl -s "https://api.bgpview.io/asn/15169/upstreams" | jq
+curl -s "https://api.bgpview.io/asn/15169/downstreams" | jq
+
+# AS Path analysis
+# Trace how routes propagate
+# Identifies transit providers
+
+# Hurricane Electric BGP
+# https://bgp.he.net/AS15169#_graph
+# Visual AS relationship graph
+
+# Key indicators:
+# Single upstream = Single point of failure
+# Many peers = Well-connected organization
+# Tier-1 upstreams = Global reach
+{% endraw %}
+</peering_analysis>
+
+<cloud_provider_asns>
+{% raw %}
+# Cloud Provider ASN Identification
+
+# Amazon Web Services (AWS)
+AS16509  # Amazon.com, Inc. (primary)
+AS14618  # Amazon.com
+AS7224   # Amazon.com Data Services
+
+# Microsoft Azure
+AS8075   # Microsoft Corporation (primary)
+AS8068   # Microsoft Corporation
+AS3598   # Microsoft Corporation
+
+# Google Cloud Platform (GCP)
+AS15169  # Google LLC (primary)
+AS396982 # Google LLC
+AS36040  # Google Fiber
+
+# Cloudflare
+AS13335  # Cloudflare, Inc.
+
+# Akamai
+AS20940  # Akamai International
+AS16625  # Akamai Technologies
+
+# DigitalOcean
+AS14061  # DigitalOcean, LLC
+
+# Oracle Cloud
+AS31898  # Oracle Corporation
+
+# Check if target IP is cloud-hosted
+IP="1.2.3.4"
+ASN=$(whois -h whois.cymru.com " -v $IP" | tail -1 | awk '{print $1}')
+echo "IP $IP is in AS$ASN"
+# Compare ASN against known cloud provider ASNs
+
+# AWS IP ranges (official)
+curl -s https://ip-ranges.amazonaws.com/ip-ranges.json | jq
+
+# Azure IP ranges
+curl -s https://www.microsoft.com/en-us/download/confirmation.aspx?id=56519
+
+# GCP IP ranges
+dig TXT _cloud-netblocks.googleusercontent.com
+{% endraw %}
+</cloud_provider_asns>
+
+<geographic_analysis>
+{% raw %}
+# Geographic Distribution Analysis
+
+# Get country for prefix
+curl -s "https://api.bgpview.io/asn/15169/prefixes" | \
+    jq -r '.data.ipv4_prefixes[] | "\(.prefix) - \(.country_code)"'
+
+# RIPE RIS geolocation
+curl -s "https://stat.ripe.net/data/maxmind-geo-lite-prefix-only/data.json?resource=AS15169" | jq
+
+# PeeringDB facility locations
+curl -s "https://www.peeringdb.com/api/net?asn=15169" | \
+    jq '.data[].netfac_set[].fac_id'
+
+# Map presence by facility
+# Shows physical datacenter locations
+# Useful for:
+# - Understanding geographic scope
+# - Identifying potential jurisdictions
+# - Physical security assessment
+
+# Common geographic patterns:
+# Global enterprise: Prefixes in US, EU, APAC
+# Regional business: Single country/region
+# CDN: Many small prefixes globally
+# Cloud: Massive prefix lists in each region
+{% endraw %}
+</geographic_analysis>
+
+<historical_bgp>
+{% raw %}
+# Historical BGP Analysis
+
+# RIPE RIS BGP history
+curl -s "https://stat.ripe.net/data/bgp-update-activity/data.json?resource=AS15169&starttime=2023-01-01" | jq
+
+# RouteViews archives
+# http://archive.routeviews.org/
+
+# BGPStream historical queries
+# Analyze BGP events over time
+
+# What to look for in history:
+# 1. Prefix announcements/withdrawals
+#    - New infrastructure deployment
+#    - Decommissioned ranges
+# 2. Origin AS changes
+#    - Acquisitions
+#    - Provider changes
+# 3. Path changes
+#    - Network topology shifts
+#    - Outages
+
+# BGP hijack detection
+# - Unexpected origin AS for prefix
+# - Route leak indicators
+# - Anomalous path changes
+
+# RIPE RIS real-time feed
+# wss://ris-live.ripe.net/v1/ws/
+{% endraw %}
+</historical_bgp>
+
+<organization_mapping>
+{% raw %}
+# Organization to ASN Mapping
+
+# Large organizations often have:
+# 1. Primary corporate ASN
+# 2. Acquisition ASNs (legacy)
+# 3. Regional ASNs
+# 4. Product-specific ASNs
+
+# Example: Microsoft
+AS8075   # Main corporate
+AS8068   # Azure
+AS6182   # LinkedIn (acquisition)
+AS14365  # GitHub (acquisition)
+
+# Discovery techniques:
+
+# 1. Search ARIN/RIPE by organization
+whois -h whois.arin.net "o Microsoft"
+
+# 2. Check subsidiaries
+# Each acquisition may maintain separate ASN
+
+# 3. PeeringDB organization search
+curl -s "https://www.peeringdb.com/api/org?name__contains=Microsoft" | jq
+
+# 4. BGPView AS search
+curl -s "https://api.bgpview.io/search?query_term=Microsoft" | jq
+
+# 5. Cross-reference with SEC filings
+# Subsidiary list from annual reports
+
+# 6. LinkedIn company relationships
+# Parent/subsidiary links
+
+# Track all ASNs for complete IP coverage
+{% endraw %}
+</organization_mapping>
+
+<attack_surface_mapping>
+{% raw %}
+# ASN to Attack Surface Mapping
+
+# Complete IP enumeration workflow
+
+# Step 1: Get all prefixes
+ASN="15169"
+curl -s "https://api.bgpview.io/asn/$ASN/prefixes" | \
+    jq -r '.data.ipv4_prefixes[].prefix' > prefixes.txt
+
+# Step 2: Expand to individual IPs (for small ranges)
+cat prefixes.txt | while read prefix; do
+    nmap -sL -n $prefix | grep "Nmap scan" | awk '{print $5}'
+done > ips.txt
+
+# Step 3: Reverse DNS lookup
+cat prefixes.txt | while read prefix; do
+    dnsrecon -r $prefix
+done
+
+# Step 4: Identify live hosts
+masscan -iL prefixes.txt -p80,443,22,21 --rate 10000
+
+# Step 5: Service fingerprinting
+# On discovered live hosts
+
+# Output data structure:
+# ASN → Prefixes → Live IPs → Services → Vulnerabilities
+
+# Automation tools:
+# - Amass (includes ASN discovery)
+amass intel -asn 15169 -o asn_intel.txt
+
+# - Spyse/SecurityTrails API
+# - Shodan (indexed by ASN)
+{% endraw %}
+</attack_surface_mapping>
+
+<bgp_security>
+{% raw %}
+# BGP Security Analysis
+
+# RPKI validation
+# Check if prefixes are RPKI signed
+curl -s "https://stat.ripe.net/data/rpki-validation/data.json?resource=AS15169&prefix=8.8.8.0/24" | jq
+
+# RPKI status meanings:
+# valid:   ROA exists and matches
+# invalid: ROA exists but doesn't match (potential hijack)
+# unknown: No ROA exists
+
+# Route origin validation
+# Check if announced origin matches expected
+curl -s "https://stat.ripe.net/data/routing-history/data.json?resource=8.8.8.0/24" | jq
+
+# BGP hijack indicators:
+# 1. Multiple origins for same prefix
+# 2. Unexpected AS in path
+# 3. More specific prefix announcement
+# 4. Sudden path changes
+
+# AS path analysis for security
+# Short path = direct connection
+# Long path = multiple transits (more exposure)
+
+# MANRS participation
+# https://www.manrs.org/isps/participants/
+# Organizations following routing security best practices
+
+# BGP security tools:
+# - RIPE RIPEstat
+# - BGPStream
+# - Cisco BGP monitoring
+# - Cloudflare Radar
+{% endraw %}
+</bgp_security>
+
+<asn_tools>
+{% raw %}
+# ASN Analysis Tools and APIs
+
+# Command-line
+whois -h whois.cymru.com " -v IP"      # IP to ASN
+whois -h whois.radb.net -- '-i origin ASXXXX'  # ASN to prefixes
+nc whois.cymru.com 43 < ips.txt        # Bulk IP to ASN
+
+# Web interfaces
+# Hurricane Electric: https://bgp.he.net/
+# BGPView: https://bgpview.io/
+# RIPE Stat: https://stat.ripe.net/
+# PeeringDB: https://www.peeringdb.com/
+
+# APIs
+# BGPView API: https://bgpview.io/api
+# RIPE RIPEstat: https://stat.ripe.net/data/
+# PeeringDB API: https://www.peeringdb.com/api
+# Team Cymru: whois.cymru.com
+
+# Python libraries
+from ipwhois import IPWhois
+from ipwhois.asn import IPASN
+
+obj = IPWhois('8.8.8.8')
+results = obj.lookup_rdap()
+print(results['asn'])
+print(results['asn_description'])
+print(results['network']['cidr'])
+
+# Integration tools
+# Amass: Comprehensive ASN intel
+# Spiderfoot: OSINT automation
+# Recon-ng: ASN modules
+{% endraw %}
+</asn_tools>
+</testing_techniques>
+
+<validation>
+1. Verify ASN ownership matches target organization.
+2. Confirm enumerated prefixes are actively announced (BGP visible).
+3. Validate cloud provider identification against known ASN ranges.
+4. Cross-reference geographic presence with known office locations.
+5. Verify peering relationships align with organizational structure.
+6. Confirm historical BGP data shows consistent ownership.
+7. Check RPKI status for route origin validation.
+8. Validate IP ranges against reverse DNS and WHOIS data.
+</validation>
+
+<false_positives>
+- Shared hosting ASN containing many unrelated organizations
+- CDN ASN showing as origin when target uses CDN in front
+- Cloud provider ASN indicating infrastructure, not target ownership
+- Acquired company's legacy ASN still in use but not primary
+- Transit provider appearing in AS path but not target infrastructure
+- Announced prefix not actively used (reserved but not routed)
+- Geographic data from MaxMind/GeoIP can be inaccurate
+- Historical BGP events from testing/maintenance, not real changes
+</false_positives>
+
+<impact>
+- Complete IP range enumeration for scanning scope
+- Infrastructure topology reveals network architecture
+- Peering relationships expose connectivity dependencies
+- Geographic mapping identifies regulatory jurisdictions
+- Cloud provider usage reveals deployment patterns
+- Historical analysis shows infrastructure changes over time
+- ASN ownership reveals corporate structure and acquisitions
+- RPKI gaps indicate routing security weaknesses
+</impact>
+
+<pro_tips>
+1. Start with known IPs/domains to discover ASN, then enumerate all prefixes.
+2. Large organizations often have multiple ASNs—check acquisitions.
+3. Cloud provider ASNs don't belong to target—filter appropriately.
+4. PeeringDB shows physical facility locations for physical security scope.
+5. RPKI invalid status may indicate potential hijacking or misconfiguration.
+6. Historical BGP analysis reveals infrastructure changes and expansions.
+7. Same-day prefix announcements often indicate related infrastructure.
+8. Transit provider ASNs in path reveal network topology.
+9. IPv6 prefixes often overlooked—enumerate both address families.
+10. Correlate ASN data with WHOIS, reverse DNS, and certificate transparency.
+</pro_tips>
+
+<remember>ASN analysis reveals the complete network infrastructure invisible to application scanning. Map all ASNs owned by the organization, enumerate every IP prefix, and understand peering relationships. This defines the true attack surface boundary for comprehensive security testing.</remember>
+</asn_lookup_guide>

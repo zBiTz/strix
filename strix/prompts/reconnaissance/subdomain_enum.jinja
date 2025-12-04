@@ -1,0 +1,316 @@
+<subdomain_enumeration_guide>
+<title>SUBDOMAIN ENUMERATION AND TAKEOVER</title>
+
+<critical>Subdomain enumeration reveals the full attack surface of a target organization. Hidden subdomains often host development environments, admin panels, legacy applications, and forgotten services with weaker security. Subdomain takeover vulnerabilities occur when DNS records point to deprovisioned cloud resources, enabling complete domain hijacking for phishing, credential theft, or malware distribution.</critical>
+
+<scope>
+- Passive subdomain discovery (no direct target interaction)
+- Active subdomain enumeration (DNS bruteforcing)
+- Certificate transparency log mining
+- Subdomain takeover detection and exploitation
+- Cloud provider pattern recognition (AWS, Azure, GCP)
+- Virtual host discovery
+- Related domain identification
+- Permutation and mutation techniques
+</scope>
+
+<methodology>
+1. Gather passive intelligence from public sources.
+2. Query certificate transparency logs for issued certificates.
+3. Perform DNS bruteforcing with targeted wordlists.
+4. Check discovered subdomains for takeover vulnerabilities.
+5. Identify cloud-hosted resources and their status.
+6. Map relationships between domains and organizations.
+7. Validate findings and assess security implications.
+8. Document attack surface expansion opportunities.
+</methodology>
+
+<testing_techniques>
+<passive_enumeration>
+{% raw %}
+# Passive Subdomain Discovery (No Direct Contact)
+
+# 1. Certificate Transparency Logs
+# crt.sh - most comprehensive
+curl -s "https://crt.sh/?q=%.example.com&output=json" | jq -r '.[].name_value' | sort -u
+
+# censys.io certificates
+curl -s "https://search.censys.io/api/v1/search/certificates" \
+  -H "Authorization: Basic $CENSYS_API" \
+  -d '{"query":"parsed.names:example.com"}'
+
+# 2. Search Engine Enumeration
+# Google
+site:example.com -www
+
+# Bing
+site:example.com
+
+# DuckDuckGo
+site:example.com
+
+# 3. Public DNS Datasets
+# SecurityTrails
+curl -s "https://api.securitytrails.com/v1/domain/example.com/subdomains" \
+  -H "APIKEY: $SECURITYTRAILS_API"
+
+# VirusTotal
+curl -s "https://www.virustotal.com/vtapi/v2/domain/report?apikey=$VT_API&domain=example.com"
+
+# 4. Archive Sources
+# Wayback Machine
+curl -s "http://web.archive.org/cdx/search/cdx?url=*.example.com&output=json&fl=original" | jq -r '.[1:][] | .[0]' | sort -u
+
+# Common Crawl
+curl -s "https://index.commoncrawl.org/CC-MAIN-2023-40-index?url=*.example.com&output=json"
+
+# 5. GitHub/GitLab Leaks
+# Search for subdomains in code repositories
+# Keywords: example.com, api.example.com, internal.example.com
+
+# 6. Threat Intelligence Feeds
+# AlienVault OTX
+curl -s "https://otx.alienvault.com/api/v1/indicators/domain/example.com/passive_dns"
+{% endraw %}
+</passive_enumeration>
+
+<active_enumeration>
+{% raw %}
+# Active DNS Bruteforcing
+
+# 1. Standard Bruteforce with wordlist
+# Fast DNS resolver
+massdns -r resolvers.txt -t A -o S -w results.txt subdomains.txt
+
+# Amass active enumeration
+amass enum -active -d example.com -o amass_results.txt
+
+# 2. Permutation-based discovery
+# Altdns - generate permutations
+altdns -i known_subdomains.txt -o permutations.txt -w words.txt
+massdns -r resolvers.txt -t A permutations.txt -o S -w permuted_results.txt
+
+# 3. Common subdomain patterns
+# Development: dev, staging, test, uat, qa, sandbox
+# Infrastructure: vpn, mail, smtp, pop, imap, ftp, sftp
+# Admin: admin, administrator, manage, portal, dashboard
+# API: api, api-v1, api-v2, graphql, rest
+# Internal: internal, intranet, corp, private
+# Cloud: aws, azure, gcp, s3, cdn, static
+# Regional: us, eu, asia, prod-us, prod-eu
+
+# 4. DNS record types to query
+dig +short A sub.example.com
+dig +short AAAA sub.example.com
+dig +short CNAME sub.example.com
+dig +short MX sub.example.com
+dig +short TXT sub.example.com
+dig +short NS sub.example.com
+
+# 5. Virtual host discovery
+# Brute force Host header
+ffuf -w subdomains.txt -u http://TARGET_IP -H "Host: FUZZ.example.com" -fc 404
+
+# 6. Recursive enumeration
+# If ns1.example.com found, enumerate *.ns1.example.com
+{% endraw %}
+</active_enumeration>
+
+<subdomain_takeover>
+{% raw %}
+# Subdomain Takeover Detection
+
+# 1. Identify dangling DNS records
+# CNAME pointing to non-existent resources
+
+# Check CNAME targets
+dig +short CNAME sub.example.com
+# Returns: sub.example.com.s3.amazonaws.com
+
+# Verify target is claimable
+curl -I https://sub.example.com.s3.amazonaws.com
+# 404 or NoSuchBucket = potentially vulnerable
+
+# 2. Cloud Provider Signatures
+
+# AWS S3
+# CNAME: *.s3.amazonaws.com, *.s3-*.amazonaws.com
+# Error: "NoSuchBucket"
+
+# AWS CloudFront
+# CNAME: *.cloudfront.net
+# Error: "Bad Request" or distribution not found
+
+# AWS Elastic Beanstalk
+# CNAME: *.elasticbeanstalk.com
+# Error: "NXDOMAIN" on the target
+
+# Azure
+# CNAME: *.azurewebsites.net, *.cloudapp.azure.com
+# Error: "404 - Web Site not found"
+
+# GitHub Pages
+# CNAME: *.github.io
+# Error: "There isn't a GitHub Pages site here"
+
+# Heroku
+# CNAME: *.herokuapp.com
+# Error: "No such app"
+
+# Shopify
+# CNAME: *.myshopify.com
+# Error: "Only one step left" or store not found
+
+# Fastly
+# CNAME: *.fastly.net
+# Error: "Fastly error: unknown domain"
+
+# 3. Automated takeover checking
+# Subjack
+subjack -w subdomains.txt -t 100 -timeout 30 -o results.txt -ssl
+
+# Nuclei with takeover templates
+nuclei -l subdomains.txt -t takeovers/
+
+# Can-I-Take-Over-XYZ reference
+# https://github.com/EdOverflow/can-i-take-over-xyz
+
+# 4. Exploitation (after confirming vulnerability)
+# AWS S3: Create bucket with exact name
+# GitHub: Create repository and enable Pages
+# Heroku: Create app with matching name
+# Azure: Create web app with matching name
+{% endraw %}
+</subdomain_takeover>
+
+<cloud_patterns>
+{% raw %}
+# Cloud Provider Subdomain Patterns
+
+# AWS Patterns
+*.s3.amazonaws.com
+*.s3-REGION.amazonaws.com
+*.execute-api.REGION.amazonaws.com  # API Gateway
+*.elb.amazonaws.com                 # Load Balancer
+*.cloudfront.net                    # CloudFront
+*.elasticbeanstalk.com              # Elastic Beanstalk
+*.awsapps.com                       # WorkSpaces
+
+# Azure Patterns
+*.azurewebsites.net                 # App Service
+*.blob.core.windows.net             # Blob Storage
+*.azureedge.net                     # CDN
+*.cloudapp.azure.com                # Cloud Services
+*.database.windows.net              # SQL Database
+*.redis.cache.windows.net           # Redis Cache
+
+# GCP Patterns
+*.appspot.com                       # App Engine
+*.cloudfunctions.net                # Cloud Functions
+*.run.app                           # Cloud Run
+*.storage.googleapis.com            # Cloud Storage
+*.firebaseapp.com                   # Firebase
+
+# Other Providers
+*.netlify.app                       # Netlify
+*.vercel.app                        # Vercel
+*.pages.dev                         # Cloudflare Pages
+*.fly.dev                           # Fly.io
+*.onrender.com                      # Render
+
+# Detection approach
+for sub in $(cat subdomains.txt); do
+    cname=$(dig +short CNAME $sub)
+    if [[ $cname == *"amazonaws.com"* ]]; then
+        echo "AWS: $sub -> $cname"
+    elif [[ $cname == *"azure"* ]]; then
+        echo "Azure: $sub -> $cname"
+    elif [[ $cname == *"google"* || $cname == *"appspot"* ]]; then
+        echo "GCP: $sub -> $cname"
+    fi
+done
+{% endraw %}
+</cloud_patterns>
+
+<certificate_transparency>
+{% raw %}
+# Certificate Transparency Deep Dive
+
+# 1. Historical certificate search
+# Find all certificates ever issued for domain
+curl -s "https://crt.sh/?q=%.example.com&output=json" | \
+  jq -r '.[].name_value' | sed 's/\*\.//g' | sort -u
+
+# 2. Wildcard certificate detection
+# Wildcards may hide subdomains
+curl -s "https://crt.sh/?q=example.com&output=json" | \
+  jq -r '.[] | select(.name_value | contains("*"))'
+
+# 3. Certificate organization info
+# May reveal related domains
+curl -s "https://crt.sh/?q=example.com&output=json" | \
+  jq -r '.[].issuer_name'
+
+# 4. Real-time CT monitoring
+# certstream for live certificate issuance
+certstream --json | grep example.com
+
+# 5. Pre-certificate vs Certificate
+# Pre-certificates appear before actual deployment
+# Can reveal upcoming infrastructure
+
+# 6. SAN (Subject Alternative Names)
+# Certificates often include multiple domains
+openssl s_client -connect example.com:443 </dev/null 2>/dev/null | \
+  openssl x509 -noout -text | grep -A1 "Subject Alternative Name"
+{% endraw %}
+</certificate_transparency>
+</testing_techniques>
+
+<validation>
+1. Verify subdomain resolves to IP address or valid CNAME.
+2. Confirm HTTP/HTTPS response from discovered subdomain.
+3. Check for takeover by attempting resource claim in cloud provider.
+4. Validate organization ownership through WHOIS or certificate info.
+5. Cross-reference findings across multiple enumeration sources.
+6. Test virtual host discovery against known IP addresses.
+7. Document response differences between environments (dev/staging/prod).
+</validation>
+
+<false_positives>
+- Wildcard DNS returning same IP for all subdomains (not actual services)
+- Parked domains or placeholder pages (no real content)
+- CDN/WAF IPs that don't directly host content
+- Expired certificates in CT logs for decommissioned subdomains
+- Internal subdomains resolvable only from internal networks
+- Subdomain takeover signatures present but cloud resource still active
+- Historical DNS data showing subdomains that no longer exist
+- Load balancer health check endpoints (not actual applications)
+</false_positives>
+
+<impact>
+- Expanded attack surface discovery for comprehensive testing
+- Identification of development/staging environments with weaker controls
+- Subdomain takeover enabling phishing and credential theft
+- Discovery of legacy applications with known vulnerabilities
+- Internal service exposure through misconfigured DNS
+- Cloud resource misconfigurations and data exposure
+- Brand reputation damage through hijacked subdomains
+- Session hijacking via cookie scope on parent domain
+</impact>
+
+<pro_tips>
+1. Always start passive before active—avoid detection and gather maximum intel first.
+2. Certificate transparency logs often reveal subdomains before they're publicly accessible.
+3. Combine multiple tools and sources—each has blind spots the others may cover.
+4. Check historical DNS records (SecurityTrails, DNSDumpster) for decommissioned but still resolving hosts.
+5. Subdomain takeover on any subdomain can set cookies for the entire parent domain.
+6. Permutation wordlists should include company-specific terms (products, projects, acquisitions).
+7. Look for patterns: if you find dev.app.example.com, try staging.app.example.com.
+8. Cloud takeovers often require quick action—vulnerable resources get claimed fast.
+9. Virtual host enumeration against IP addresses may reveal hidden subdomains not in DNS.
+10. Monitor CT logs continuously during engagements—new certificates = new targets.
+</pro_tips>
+
+<remember>Subdomain enumeration is the foundation of external reconnaissance. Combine passive (CT logs, archives, threat intel) with active (DNS bruteforce, permutations) techniques. Always check for subdomain takeover—it's high impact with straightforward exploitation. The goal is to map the complete external attack surface before testing begins.</remember>
+</subdomain_enumeration_guide>

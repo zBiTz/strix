@@ -1,0 +1,483 @@
+<google_dorking_guide>
+<title>GOOGLE DORKING AND ADVANCED SEARCH RECONNAISSANCE</title>
+
+<critical>Google dorking leverages advanced search operators to discover sensitive information, exposed files, login panels, and vulnerable systems indexed by search engines. This passive reconnaissance technique reveals configuration files, backup data, admin interfaces, and security misconfigurations without direct target interaction. Search engines index what should remain hidden—exploit this asymmetry.</critical>
+
+<scope>
+- Advanced search operator mastery
+- Sensitive file and directory discovery
+- Login and admin panel enumeration
+- Database and backup file exposure
+- Error message and stack trace discovery
+- Source code and configuration leakage
+- Subdomain and infrastructure mapping
+- Vulnerable application fingerprinting
+- API key and credential exposure
+- Cloud storage misconfiguration detection
+</scope>
+
+<methodology>
+1. Identify target domains and related assets.
+2. Enumerate subdomains and related infrastructure via search.
+3. Discover exposed sensitive files and directories.
+4. Find login panels, admin interfaces, and dashboards.
+5. Locate error messages revealing technology stack.
+6. Search for exposed credentials and API keys.
+7. Identify vulnerable application versions.
+8. Map cloud storage and third-party integrations.
+9. Document findings and assess exposure severity.
+10. Verify discoveries without triggering alerts.
+</methodology>
+
+<testing_techniques>
+<core_operators>
+{% raw %}
+# Essential Google Search Operators
+
+# Site-specific search
+site:example.com                    # All indexed pages on domain
+site:*.example.com                  # Include subdomains
+site:example.com -www               # Exclude www subdomain
+
+# File type discovery
+filetype:pdf site:example.com       # PDF documents
+filetype:doc OR filetype:docx       # Word documents
+filetype:xls OR filetype:xlsx       # Excel spreadsheets
+filetype:sql                        # SQL database dumps
+filetype:log                        # Log files
+filetype:bak OR filetype:backup     # Backup files
+filetype:env                        # Environment files
+filetype:config                     # Configuration files
+
+# URL structure
+inurl:admin site:example.com        # Admin in URL path
+inurl:login site:example.com        # Login pages
+inurl:wp-admin                      # WordPress admin
+inurl:phpmyadmin                    # phpMyAdmin instances
+inurl:api site:example.com          # API endpoints
+allinurl:admin login                # Multiple terms in URL
+
+# Page content
+intitle:"index of"                  # Directory listings
+intitle:"Dashboard"                 # Dashboard pages
+allintitle:admin panel login        # Multiple title terms
+intext:"sql syntax error"           # Error messages in body
+
+# Combining operators
+site:example.com filetype:pdf inurl:confidential
+site:example.com intitle:admin -inurl:blog
+site:*.example.com -site:www.example.com
+
+# Exclusions
+site:example.com -filetype:html     # Exclude HTML
+site:example.com -inurl:news        # Exclude news section
+
+# Cache and related
+cache:example.com                   # Cached version
+related:example.com                 # Similar sites
+link:example.com                    # Pages linking to target
+{% endraw %}
+</core_operators>
+
+<sensitive_files>
+{% raw %}
+# Sensitive File Discovery
+
+# Configuration files
+site:example.com filetype:env
+site:example.com filetype:ini
+site:example.com filetype:conf
+site:example.com filetype:config
+site:example.com "config.php"
+site:example.com "wp-config.php"
+site:example.com "settings.py"
+site:example.com ".htaccess"
+site:example.com "web.config"
+
+# Database files
+site:example.com filetype:sql
+site:example.com filetype:db
+site:example.com filetype:sqlite
+site:example.com filetype:mdb
+site:example.com "database.yml"
+site:example.com "db.php"
+
+# Backup files
+site:example.com filetype:bak
+site:example.com filetype:backup
+site:example.com filetype:old
+site:example.com filetype:orig
+site:example.com inurl:backup
+site:example.com inurl:.bak
+
+# Log files
+site:example.com filetype:log
+site:example.com inurl:logs
+site:example.com "error.log"
+site:example.com "access.log"
+site:example.com "debug.log"
+
+# Source code
+site:example.com filetype:git
+site:example.com "/.git/"
+site:example.com filetype:svn
+site:example.com "/.svn/"
+site:example.com filetype:java
+site:example.com filetype:py
+site:example.com filetype:rb
+
+# Private keys and certificates
+site:example.com filetype:pem
+site:example.com filetype:key
+site:example.com filetype:ppk
+site:example.com "BEGIN RSA PRIVATE KEY"
+site:example.com "BEGIN PRIVATE KEY"
+{% endraw %}
+</sensitive_files>
+
+<admin_panels>
+{% raw %}
+# Admin and Login Panel Discovery
+
+# Generic admin pages
+site:example.com inurl:admin
+site:example.com inurl:administrator
+site:example.com inurl:adminpanel
+site:example.com inurl:admin/login
+site:example.com intitle:"admin" intitle:"login"
+site:example.com intitle:"control panel"
+site:example.com intitle:"dashboard" inurl:admin
+
+# CMS-specific
+site:example.com inurl:wp-admin            # WordPress
+site:example.com inurl:wp-login.php
+site:example.com inurl:/administrator/     # Joomla
+site:example.com inurl:/user/login         # Drupal
+site:example.com inurl:/admin/content      # Drupal
+site:example.com inurl:/typo3/             # TYPO3
+site:example.com inurl:/umbraco/           # Umbraco
+
+# Framework-specific
+site:example.com inurl:/django-admin/      # Django
+site:example.com inurl:/rails/admin        # Rails
+site:example.com inurl:/laravel/admin      # Laravel
+
+# Database management
+site:example.com inurl:phpmyadmin
+site:example.com inurl:phpMyAdmin
+site:example.com inurl:adminer
+site:example.com intitle:"Adminer"
+site:example.com inurl:pgadmin
+site:example.com intitle:"phpPgAdmin"
+
+# Server management
+site:example.com inurl:cpanel
+site:example.com inurl:plesk
+site:example.com inurl:webmin
+site:example.com intitle:"Webmin"
+site:example.com inurl:WHM
+{% endraw %}
+</admin_panels>
+
+<error_messages>
+{% raw %}
+# Error Message and Stack Trace Discovery
+
+# SQL errors (database fingerprinting)
+site:example.com "sql syntax error"
+site:example.com "mysql_fetch"
+site:example.com "ORA-00921"
+site:example.com "PostgreSQL query failed"
+site:example.com "Microsoft OLE DB Provider"
+site:example.com "ODBC SQL Server Driver"
+site:example.com "SQLite3::query"
+
+# PHP errors
+site:example.com "Fatal error:" "on line"
+site:example.com "Warning:" "on line"
+site:example.com "Parse error:" "on line"
+site:example.com "Undefined index:"
+site:example.com "Call to undefined function"
+
+# ASP.NET errors
+site:example.com "Server Error in '/' Application"
+site:example.com "Runtime Error"
+site:example.com "Unhandled Exception"
+site:example.com "Stack Trace:" "at System"
+
+# Java errors
+site:example.com "java.lang.NullPointerException"
+site:example.com "javax.servlet.ServletException"
+site:example.com "org.springframework"
+site:example.com "at org.apache"
+
+# Python errors
+site:example.com "Traceback (most recent call last)"
+site:example.com "Django" "DEBUG = True"
+site:example.com "Flask" "Traceback"
+
+# Ruby errors
+site:example.com "ActionController::RoutingError"
+site:example.com "ActiveRecord::RecordNotFound"
+
+# Node.js errors
+site:example.com "TypeError:" "at Object"
+site:example.com "ReferenceError:"
+site:example.com "SyntaxError:" "Unexpected token"
+{% endraw %}
+</error_messages>
+
+<credentials_api_keys>
+{% raw %}
+# Credential and API Key Exposure
+
+# API keys in general
+site:example.com "api_key"
+site:example.com "apikey"
+site:example.com "api-key"
+site:example.com "access_token"
+site:example.com "secret_key"
+site:example.com "private_key"
+
+# Cloud provider keys
+site:example.com "AKIA"                    # AWS Access Key prefix
+site:example.com "amazonaws.com" "key"
+site:example.com "storage.googleapis.com"
+site:example.com "blob.core.windows.net"
+
+# Service-specific
+site:example.com "sk_live_"                # Stripe
+site:example.com "pk_live_"                # Stripe public
+site:example.com "sq0atp-"                 # Square
+site:example.com "AIza"                    # Google API
+site:example.com "ghp_"                    # GitHub PAT
+site:example.com "glpat-"                  # GitLab PAT
+site:example.com "xoxb-"                   # Slack bot
+site:example.com "xoxp-"                   # Slack user
+
+# Database connection strings
+site:example.com "mongodb+srv://"
+site:example.com "postgres://"
+site:example.com "mysql://"
+site:example.com "jdbc:"
+site:example.com "connection_string"
+
+# Password exposure
+site:example.com "password" filetype:txt
+site:example.com "passwd" filetype:txt
+site:example.com inurl:password.txt
+site:example.com "credentials" filetype:csv
+{% endraw %}
+</credentials_api_keys>
+
+<cloud_storage>
+{% raw %}
+# Cloud Storage Misconfiguration Discovery
+
+# AWS S3
+site:s3.amazonaws.com "example"
+site:*.s3.amazonaws.com
+"s3.amazonaws.com" "example.com"
+inurl:s3.amazonaws.com filetype:pdf
+site:example.com "s3://"
+
+# Azure Blob
+site:blob.core.windows.net "example"
+"blob.core.windows.net" "example.com"
+inurl:blob.core.windows.net
+
+# Google Cloud Storage
+site:storage.googleapis.com "example"
+"storage.googleapis.com" "example.com"
+inurl:storage.googleapis.com
+
+# Firebase
+site:firebaseio.com
+"firebaseio.com" "example"
+site:*.firebaseapp.com
+
+# DigitalOcean Spaces
+site:*.digitaloceanspaces.com "example"
+
+# General cloud patterns
+site:example.com inurl:upload
+site:example.com inurl:bucket
+site:example.com inurl:storage
+site:example.com "X-Amz-Signature"
+{% endraw %}
+</cloud_storage>
+
+<directory_listings>
+{% raw %}
+# Directory Listing and Index Discovery
+
+# Apache/Nginx directory listings
+site:example.com intitle:"Index of /"
+site:example.com intitle:"Index of" "Parent Directory"
+site:example.com intitle:"Directory listing for"
+
+# Specific directories
+site:example.com intitle:"Index of" "backup"
+site:example.com intitle:"Index of" "logs"
+site:example.com intitle:"Index of" "config"
+site:example.com intitle:"Index of" "admin"
+site:example.com intitle:"Index of" "upload"
+site:example.com intitle:"Index of" "private"
+site:example.com intitle:"Index of" ".git"
+site:example.com intitle:"Index of" "wp-content"
+
+# File listings
+site:example.com intitle:"Index of" "password"
+site:example.com intitle:"Index of" ".sql"
+site:example.com intitle:"Index of" ".env"
+site:example.com intitle:"Index of" ".bak"
+{% endraw %}
+</directory_listings>
+
+<vulnerable_systems>
+{% raw %}
+# Vulnerable System and Version Discovery
+
+# Known vulnerable software
+site:example.com "powered by" "WordPress 4.7"   # Specific versions
+site:example.com "Joomla! 2.5"
+site:example.com "Drupal 7"
+site:example.com intitle:"Apache Tomcat" "7.0"
+
+# Default installations
+site:example.com intitle:"Welcome to nginx"
+site:example.com intitle:"Apache2 Ubuntu Default Page"
+site:example.com intitle:"Welcome to IIS"
+site:example.com "It works!" intitle:Apache
+
+# Exposed management interfaces
+site:example.com inurl:"/manager/html"         # Tomcat Manager
+site:example.com intitle:"JBoss Management"
+site:example.com intitle:"WebLogic Server"
+site:example.com intitle:"Jenkins" inurl:"/login"
+site:example.com intitle:"Kibana"
+site:example.com intitle:"Grafana"
+
+# IoT and network devices
+site:example.com intitle:"RouterOS"
+site:example.com intitle:"Dell iDRAC"
+site:example.com intitle:"HP Integrated Lights-Out"
+site:example.com inurl:"/cgi-bin/webcm"
+
+# Cameras and surveillance
+site:example.com inurl:"/view/view.shtml"
+site:example.com intitle:"Live View / - AXIS"
+site:example.com inurl:"ViewerFrame?Mode="
+{% endraw %}
+</vulnerable_systems>
+
+<document_metadata>
+{% raw %}
+# Document Metadata for OSINT
+
+# Internal documents
+site:example.com filetype:pdf "confidential"
+site:example.com filetype:pdf "internal use only"
+site:example.com filetype:pdf "draft"
+site:example.com filetype:doc "not for distribution"
+
+# Technical documentation
+site:example.com filetype:pdf "network diagram"
+site:example.com filetype:pdf "architecture"
+site:example.com filetype:pdf "infrastructure"
+site:example.com filetype:pdf "security assessment"
+site:example.com filetype:pdf "penetration test"
+site:example.com filetype:pdf "vulnerability"
+
+# Employee information
+site:example.com filetype:pdf "org chart"
+site:example.com filetype:xlsx "employee"
+site:example.com filetype:csv "email" "@example.com"
+
+# Financial documents
+site:example.com filetype:pdf "budget"
+site:example.com filetype:xlsx "financial"
+site:example.com filetype:pdf "invoice"
+{% endraw %}
+</document_metadata>
+</testing_techniques>
+
+<automation_tips>
+{% raw %}
+# Rate Limiting and Automation
+
+# Google rate limits aggressive querying
+# Use delays between queries (2-5 seconds minimum)
+# Rotate user agents and IPs if necessary
+# Consider using Google Custom Search API for automation
+
+# Query generation script example
+TARGET="example.com"
+QUERIES=(
+    "site:$TARGET filetype:env"
+    "site:$TARGET filetype:sql"
+    "site:$TARGET inurl:admin"
+    "site:$TARGET intitle:login"
+    "site:$TARGET \"error\" \"on line\""
+)
+
+# Combine with other search engines
+# Bing: similar operators (site:, filetype:, inurl:)
+# DuckDuckGo: limited operators
+# Yandex: additional indexed content
+# Shodan: infrastructure-focused
+
+# GHDB (Google Hacking Database)
+# https://www.exploit-db.com/google-hacking-database
+# Pre-built dorks for specific vulnerabilities
+{% endraw %}
+</automation_tips>
+
+<validation>
+1. Verify discovered files are accessible without authentication.
+2. Confirm sensitive data in search results matches target scope.
+3. Check if indexed credentials are still valid (with authorization).
+4. Validate exposed admin panels accept connections.
+5. Cross-reference discoveries with target asset inventory.
+6. Document cache dates to establish exposure timeline.
+7. Test if robots.txt disallows indexed sensitive paths.
+8. Verify cloud storage buckets are genuinely misconfigured.
+</validation>
+
+<false_positives>
+- Search results showing snippets without actual file access (404 on click)
+- Cached results for pages that have been secured or removed
+- Honeypot files designed to detect scanning activity
+- Demo or test environments intentionally exposed
+- Public documentation containing example credentials (not real)
+- Open source projects with intentional public files
+- Search results for different organizations with similar names
+- CDN-cached content that's no longer on origin server
+</false_positives>
+
+<impact>
+- Credential exposure leading to account compromise
+- Configuration file leakage revealing infrastructure details
+- Backup file access exposing source code and database dumps
+- Admin panel discovery enabling brute force attacks
+- Error message disclosure revealing technology stack and paths
+- Internal document exposure (org charts, network diagrams)
+- API key leakage enabling service abuse and billing fraud
+- Cloud storage misconfiguration exposing customer data
+</impact>
+
+<pro_tips>
+1. Start broad (site:example.com) then narrow with operators.
+2. Use cache: operator to view removed content before it disappears.
+3. Combine GHDB dorks with target-specific modifications.
+4. Search for target name without site: to find third-party references.
+5. Check robots.txt for paths the site doesn't want indexed—then search for them.
+6. Use quotes for exact phrases: "powered by" vs powered by.
+7. Exclude common false positives: -site:github.com -site:stackoverflow.com.
+8. Search date ranges: after:2023-01-01 before:2023-12-31.
+9. Try typosquatting domains: exampel.com, example.co, exampleinc.com.
+10. Document search timestamps—indexed content can disappear quickly.
+</pro_tips>
+
+<remember>Google dorking is passive reconnaissance that reveals what organizations accidentally expose. Start with broad site searches, systematically test file types and paths, and always verify results are in scope. The best dorks combine multiple operators to reduce noise and find high-value targets.</remember>
+</google_dorking_guide>

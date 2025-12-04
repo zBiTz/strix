@@ -1,0 +1,517 @@
+<whois_lookup_guide>
+<title>WHOIS AND DOMAIN OSINT ANALYSIS</title>
+
+<critical>WHOIS data reveals domain ownership, registration history, and organizational relationships. Even with privacy protection, patterns in registrar, nameservers, creation dates, and historical records expose infrastructure connections, enable related domain discovery, and provide social engineering vectors. WHOIS is the starting point for mapping an organization's digital footprint.</critical>
+
+<scope>
+- Domain registration data extraction
+- Registrant, admin, and tech contact analysis
+- Privacy protection bypass techniques
+- Historical WHOIS data mining
+- Related domain discovery
+- Registrar and reseller identification
+- Expiration and renewal tracking
+- Nameserver relationship mapping
+- Organization and infrastructure correlation
+- Reverse WHOIS lookups
+</scope>
+
+<methodology>
+1. Query current WHOIS data for target domains.
+2. Identify registrant organization and contact details.
+3. Analyze nameserver patterns and hosting providers.
+4. Query historical WHOIS for ownership changes.
+5. Perform reverse WHOIS on discovered identifiers.
+6. Map related domains through shared attributes.
+7. Identify registration patterns and naming conventions.
+8. Check domain expiration for potential hijacking.
+9. Correlate findings with other OSINT sources.
+10. Document organizational structure and relationships.
+</methodology>
+
+<testing_techniques>
+<basic_whois>
+{% raw %}
+# Basic WHOIS Queries
+
+# Command-line WHOIS
+whois example.com
+
+# Specify WHOIS server
+whois -h whois.verisign-grs.com example.com
+
+# Query specific TLD servers
+# .com/.net: whois.verisign-grs.com
+# .org:      whois.pir.org
+# .io:       whois.nic.io
+# .co:       whois.nic.co
+# .info:     whois.afilias.net
+
+# Key fields to extract:
+# Domain Name: example.com
+# Registry Domain ID: unique identifier
+# Registrar WHOIS Server: registrar's WHOIS
+# Registrar URL: registrar website
+# Updated Date: last modification
+# Creation Date: domain age
+# Registry Expiry Date: renewal deadline
+# Registrar: company name
+# Registrar IANA ID: unique registrar ID
+# Registrar Abuse Contact Email/Phone
+# Domain Status: clientTransferProhibited, etc.
+# Name Server: ns1.example.com, ns2.example.com
+# DNSSEC: signed/unsigned
+
+# Registrant/Admin/Tech Contact:
+# Name, Organization, Street, City, State, Postal, Country
+# Phone, Email
+{% endraw %}
+</basic_whois>
+
+<domain_status_codes>
+{% raw %}
+# WHOIS Status Codes (EPP Status)
+
+# Client-side locks (registrant/registrar controlled)
+clientDeleteProhibited     # Cannot be deleted
+clientTransferProhibited   # Cannot be transferred
+clientUpdateProhibited     # Cannot be modified
+clientHold                 # Not resolving (suspended by registrar)
+
+# Server-side locks (registry controlled)
+serverDeleteProhibited     # Registry lock
+serverTransferProhibited   # Registry lock
+serverUpdateProhibited     # Registry lock
+serverHold                 # Registry suspended
+
+# Lifecycle statuses
+addPeriod                  # Recently registered (5 day grace)
+autoRenewPeriod           # Auto-renewed, can be deleted
+redemptionPeriod          # Deleted, can be restored (30 days)
+pendingRestore            # Restoration requested
+pendingDelete             # Will be deleted soon
+pendingTransfer           # Transfer in progress
+pendingCreate             # Registration in progress
+
+# Security-relevant
+clientTransferProhibited  # Good: prevents unauthorized transfer
+serverTransferProhibited  # Registry-level protection
+clientDeleteProhibited    # Prevents accidental deletion
+
+# Warning signs
+clientHold / serverHold   # Domain suspended
+pendingDelete             # About to be available
+redemptionPeriod          # Owner may have lost control
+{% endraw %}
+</domain_status_codes>
+
+<privacy_bypass>
+{% raw %}
+# Privacy Protection and Bypass Techniques
+
+# Common privacy services
+# "WhoisGuard Protected" (Namecheap)
+# "Contact Privacy Inc" (Tucows)
+# "Domains By Proxy, LLC" (GoDaddy)
+# "REDACTED FOR PRIVACY" (GDPR compliance)
+# "Privacy service provided by" (various)
+
+# Historical WHOIS (before privacy applied)
+# SecurityTrails: https://securitytrails.com
+# DomainTools: https://whois.domaintools.com
+# WhoisXMLAPI: https://whoishistory.whoisxmlapi.com
+# Wayback WHOIS snapshots
+
+# Certificate Transparency logs
+# Certificates may contain organization info
+curl -s "https://crt.sh/?q=%.example.com&output=json" | \
+    jq -r '.[].issuer_name'
+
+# Legal entity searches
+# Search registrant org name in:
+# - State business registries
+# - SEC filings (public companies)
+# - LinkedIn company pages
+# - Crunchbase, etc.
+
+# Related domain correlation
+# Same nameservers often = same owner
+# Same registrar + similar dates = related
+# Similar naming patterns = related
+
+# Email pattern analysis
+# admin@example.com in one domain
+# Search for admin@* across WHOIS
+{% endraw %}
+</privacy_bypass>
+
+<reverse_whois>
+{% raw %}
+# Reverse WHOIS Lookups
+
+# Find domains by registrant details
+# Search by: email, organization, name, phone
+
+# DomainTools Reverse WHOIS
+# https://reversewhois.domaintools.com
+# Search: "Company Name" → all domains registered
+
+# ViewDNS Reverse WHOIS
+# https://viewdns.info/reversewhois/
+# Free, limited results
+
+# WhoisXMLAPI
+# Programmatic reverse WHOIS queries
+
+# Common search strategies:
+# 1. Registrant organization name
+# 2. Registrant email address
+# 3. Admin email address
+# 4. Technical contact email
+# 5. Registrant phone number
+# 6. Registrant street address
+
+# Correlate by nameservers
+# Find domains using same custom nameservers
+whois example.com | grep "Name Server"
+# ns1.customdns.example.com
+# Search: all domains using ns1.customdns.example.com
+
+# Correlate by registrar + date range
+# Bulk registrations often same owner
+{% endraw %}
+</reverse_whois>
+
+<historical_whois>
+{% raw %}
+# Historical WHOIS Analysis
+
+# Why historical matters:
+# - Privacy protection added later (original owner visible)
+# - Ownership changes reveal acquisitions/sales
+# - Contact changes reveal organizational shifts
+# - Expiration lapses reveal potential hijacking
+
+# Sources for historical WHOIS:
+
+# DomainTools (paid, comprehensive)
+# https://whois.domaintools.com/example.com
+# Shows all historical changes
+
+# SecurityTrails (freemium)
+# https://securitytrails.com/domain/example.com/history
+# Historical DNS and WHOIS
+
+# WhoisXMLAPI (API access)
+# Historical WHOIS database
+
+# Archive.org WHOIS
+# Some snapshots include WHOIS data
+
+# Key historical events to track:
+# 1. Original registration (first owner)
+# 2. Transfer between registrars
+# 3. Contact/registrant changes
+# 4. Privacy protection added/removed
+# 5. Nameserver changes (hosting moves)
+# 6. Status changes (locks added/removed)
+
+# Timeline analysis
+# Domain created: 2010
+# Privacy added: 2018 (GDPR)
+# Before 2018: Registrant visible in historical
+{% endraw %}
+</historical_whois>
+
+<related_domains>
+{% raw %}
+# Related Domain Discovery
+
+# Strategy 1: Nameserver correlation
+NS=$(whois example.com | grep -i "name server" | head -1 | awk '{print $3}')
+# Search for all domains using this NS
+
+# Strategy 2: IP correlation
+# Same IP often = related domains
+# Use reverse IP lookup tools
+
+# Strategy 3: SSL certificate SANs
+curl -s "https://crt.sh/?q=%.example.com&output=json" | \
+    jq -r '.[].name_value' | sort -u
+# Certificates often include related domains
+
+# Strategy 4: Registration patterns
+# - Same registrar
+# - Similar creation dates
+# - Sequential domain names
+# example1.com, example2.com, example-test.com
+
+# Strategy 5: Brand variations
+# example.com → example.net, example.org, example.io
+# example.com → exampleapp.com, myexample.com
+# example.com → example.co.uk, example.de
+
+# Strategy 6: Typosquatting check
+# exampel.com, exampl.com, example.cm
+# Use dnstwist or similar tools
+
+# Strategy 7: Acquisition patterns
+# acquired-company.com often uses parent's nameservers
+# Historical WHOIS shows transfer dates matching M&A news
+
+# Strategy 8: Product/service domains
+# company.com → product.company.com
+# company.com → companyproduct.com
+# company.com → getproduct.com
+{% endraw %}
+</related_domains>
+
+<registrar_analysis>
+{% raw %}
+# Registrar and Registration Analysis
+
+# Registrar identification
+whois example.com | grep -i "registrar"
+# Registrar: GoDaddy.com, LLC
+# Registrar IANA ID: 146
+# Registrar URL: https://www.godaddy.com
+
+# IANA registrar ID lookup
+# https://www.iana.org/assignments/registrar-ids
+
+# Registration patterns analysis
+# Budget registrars (Namecheap, Porkbun)
+# - Often used for side projects, personal
+# - May indicate smaller organization
+
+# Enterprise registrars (MarkMonitor, CSC)
+# - Used by large corporations
+# - Brand protection focus
+# - Indicates significant organization
+
+# Suspicious patterns:
+# - Recently created domain
+# - Privacy protection from day 1
+# - Non-standard TLD (.xyz, .top, .click)
+# - Registrar known for abuse tolerance
+
+# Domain age analysis
+# Creation date indicates:
+# - Established business (10+ years)
+# - Startup (1-3 years)
+# - Potential phishing (days/weeks)
+
+# Expiration monitoring
+# Domains expiring soon:
+# - Potential acquisition opportunity
+# - Lapse could enable hijacking
+# - Owner may have lost interest
+{% endraw %}
+</registrar_analysis>
+
+<ip_asn_correlation>
+{% raw %}
+# IP and ASN Correlation from WHOIS
+
+# Get IP from DNS
+dig +short A example.com
+# 93.184.216.34
+
+# WHOIS for IP address
+whois 93.184.216.34
+# Returns:
+# NetRange: 93.184.216.0 - 93.184.216.255
+# CIDR: 93.184.216.0/24
+# NetName: EDGECAST
+# OrgName: Verizon Digital Media Services
+# OrgId: VDMS
+
+# ASN lookup
+whois -h whois.radb.net -- '-i origin AS15133'
+# Lists all prefixes announced by ASN
+
+# IP to ASN
+whois -h whois.cymru.com " -v 93.184.216.34"
+# Returns ASN, prefix, country, registry, allocation date
+
+# Bulk IP to ASN
+cat ips.txt | nc whois.cymru.com 43
+
+# Correlate domains by ASN
+# All domains on same ASN = same hosting
+# May reveal related infrastructure
+
+# Identify hosting provider
+# Cloud: AWS, GCP, Azure ASNs
+# CDN: Cloudflare, Akamai, Fastly ASNs
+# Dedicated: Single organization ASN
+{% endraw %}
+</ip_asn_correlation>
+
+<expiration_monitoring>
+{% raw %}
+# Domain Expiration and Hijacking Risks
+
+# Check expiration
+whois example.com | grep -i "expir"
+# Registry Expiry Date: 2024-08-13T04:00:00Z
+
+# Expiration risk assessment
+# 1. Expired domains can be registered by anyone
+# 2. Lapsed renewals may indicate organizational issues
+# 3. Subdomain takeover via expired parent domain
+
+# Monitoring strategies
+# - Set alerts for target domains approaching expiration
+# - Watch competitor domains for acquisition opportunities
+# - Monitor historical domains of acquired companies
+
+# After expiration timeline:
+# Day 0-30: Grace period (can still renew)
+# Day 30-60: Redemption period (expensive restore)
+# Day 60-75: Pending delete
+# Day 75+: Available for registration
+
+# Deleted domain lists
+# Various services list domains entering deletion
+# Competitive registration ("drop catching")
+
+# Security implications
+# - Email sent to expired domain = intercepted
+# - Links to expired domain = hijacked
+# - Subdomain of expired parent = takeover
+{% endraw %}
+</expiration_monitoring>
+
+<osint_integration>
+{% raw %}
+# WHOIS Integration with OSINT Sources
+
+# Cross-reference registrant with:
+
+# 1. LinkedIn
+# Company name → Employee list
+# Contact name → Role identification
+
+# 2. Business registries
+# Company name → Legal entity details
+# State incorporation records
+# SEC filings (public companies)
+
+# 3. Social media
+# Domain owner Twitter, GitHub, etc.
+# Historical posts about domain
+
+# 4. Certificate Transparency
+# Organization in certificate
+curl -s "https://crt.sh/?O=Company%20Name&output=json" | jq
+
+# 5. GitHub/GitLab
+# Domain references in code
+# Configuration files mentioning domain
+# Developer email addresses
+
+# 6. Passive DNS
+# Historical DNS resolutions
+# IP address changes over time
+
+# 7. Web archives
+# Archive.org snapshots
+# Historical content and ownership claims
+
+# 8. Trademark databases
+# USPTO TESS for US trademarks
+# Domain often matches trademark owner
+
+# 9. Email verification
+# Verify registrant email is active
+# Check for data breach exposure
+{% endraw %}
+</osint_integration>
+
+<whois_tools>
+{% raw %}
+# WHOIS Tools and Automation
+
+# Command-line tools
+whois example.com                    # Basic query
+jwhois example.com                   # JSON output option
+python-whois                         # Python library
+
+# Online services
+# DomainTools: https://whois.domaintools.com
+# ViewDNS: https://viewdns.info/whois/
+# ICANN Lookup: https://lookup.icann.org
+# who.is: https://who.is/
+
+# API services
+# WhoisXMLAPI: Comprehensive WHOIS API
+# DomainTools API: Enterprise WHOIS
+# SecurityTrails API: WHOIS + DNS
+
+# Bulk WHOIS queries
+for domain in $(cat domains.txt); do
+    echo "=== $domain ==="
+    whois $domain | grep -E "(Registrant|Created|Expires|Name Server)"
+    sleep 2  # Rate limiting
+done
+
+# Python automation
+from whois import whois
+result = whois('example.com')
+print(result.registrar)
+print(result.creation_date)
+print(result.expiration_date)
+print(result.name_servers)
+{% endraw %}
+</whois_tools>
+</testing_techniques>
+
+<validation>
+1. Verify WHOIS data matches target organization (not privacy proxy).
+2. Confirm historical WHOIS reveals pre-privacy registration details.
+3. Validate related domains share registrant or infrastructure.
+4. Check reverse WHOIS returns expected domain portfolio.
+5. Verify nameserver patterns correlate with known infrastructure.
+6. Confirm expiration dates and renewal status.
+7. Cross-reference registrant with business registry records.
+8. Validate IP/ASN correlation identifies hosting provider.
+</validation>
+
+<false_positives>
+- Privacy protection obscuring legitimate registrant (expected behavior)
+- Shared hosting nameservers linking unrelated domains
+- Common registrar (GoDaddy, Namecheap) false-linking domains
+- Acquisition dates not matching actual M&A events (domain acquired separately)
+- Multiple organizations with same name in different countries
+- Expired contact email not indicating organizational issues
+- CDN/proxy hiding actual hosting provider
+- Test/development domains appearing in reverse WHOIS
+</false_positives>
+
+<impact>
+- Registrant exposure enables social engineering attacks
+- Historical ownership reveals organizational structure
+- Related domain discovery expands attack surface
+- Expiration monitoring enables domain hijacking
+- Nameserver patterns reveal hosting infrastructure
+- Email exposure enables targeted phishing
+- Contact details enable impersonation attacks
+- Organizational mapping reveals M&A and partnerships
+</impact>
+
+<pro_tips>
+1. Always query historical WHOIS—privacy wasn't always applied.
+2. SSL certificates often contain organization info bypassing privacy.
+3. Nameserver patterns are rarely privacy-protected—use for correlation.
+4. Creation dates within days often indicate same registration batch.
+5. Watch for expiration 30-60 days out for hijacking opportunities.
+6. Reverse WHOIS on email finds all domains by same owner.
+7. Enterprise registrars (MarkMonitor, CSC) indicate large organizations.
+8. GDPR "REDACTED" doesn't hide registrar, nameservers, or dates.
+9. Check for typosquatting domains registered by same entity.
+10. Correlate WHOIS findings with LinkedIn, business registries, and CT logs.
+</pro_tips>
+
+<remember>WHOIS reveals organizational relationships and infrastructure patterns that persist despite privacy protection. Always check historical records, correlate by nameserver and registrar patterns, and cross-reference with other OSINT sources. The goal is mapping the complete domain portfolio and ownership structure.</remember>
+</whois_lookup_guide>

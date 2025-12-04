@@ -1,0 +1,473 @@
+<dns_resolver_guide>
+<title>DNS SECURITY TESTING AND ANALYSIS</title>
+
+<critical>DNS is the foundation of internet infrastructure—misconfigurations expose internal hostnames, enable zone transfers, bypass email security, and reveal hidden services. Comprehensive DNS analysis uncovers attack surface invisible to web scanners: mail servers, internal systems, cloud resources, and security control weaknesses in SPF/DKIM/DMARC.</critical>
+
+<scope>
+- DNS record enumeration (A, AAAA, CNAME, MX, TXT, NS, SOA, PTR, SRV)
+- Zone transfer attempts (AXFR/IXFR)
+- DNSSEC validation and configuration analysis
+- SPF, DKIM, and DMARC email security assessment
+- Internal hostname and network leakage
+- DNS cache poisoning detection
+- Subdomain enumeration via DNS
+- Reverse DNS and PTR record mapping
+- DNS tunneling detection
+- Authoritative vs recursive resolver analysis
+</scope>
+
+<methodology>
+1. Enumerate all DNS record types for target domains.
+2. Identify authoritative nameservers and their configuration.
+3. Attempt zone transfers against all discovered nameservers.
+4. Analyze email security records (SPF, DKIM, DMARC).
+5. Check DNSSEC deployment and configuration.
+6. Perform reverse DNS lookups on discovered IPs.
+7. Identify internal hostnames and naming conventions.
+8. Test for DNS rebinding and cache poisoning vectors.
+9. Map relationships between domains and infrastructure.
+10. Document security gaps and misconfigurations.
+</methodology>
+
+<testing_techniques>
+<record_enumeration>
+{% raw %}
+# DNS Record Type Enumeration
+
+# A Record (IPv4 address)
+dig +short A example.com
+dig +short A www.example.com
+dig +short A mail.example.com
+
+# AAAA Record (IPv6 address)
+dig +short AAAA example.com
+dig +short AAAA www.example.com
+
+# CNAME Record (Canonical name / alias)
+dig +short CNAME www.example.com
+# Check for dangling CNAMEs (subdomain takeover)
+dig +short CNAME old.example.com
+
+# MX Record (Mail servers)
+dig +short MX example.com
+# Priority and hostname returned
+# Lower number = higher priority
+
+# TXT Record (Text records - SPF, DKIM, etc.)
+dig +short TXT example.com
+dig +short TXT _dmarc.example.com
+dig +short TXT selector._domainkey.example.com
+
+# NS Record (Authoritative nameservers)
+dig +short NS example.com
+
+# SOA Record (Start of Authority)
+dig +short SOA example.com
+# Returns: primary NS, admin email, serial, refresh, retry, expire, TTL
+
+# PTR Record (Reverse DNS)
+dig +short -x 192.0.2.1
+# Returns hostname for IP address
+
+# SRV Record (Service records)
+dig +short SRV _sip._tcp.example.com
+dig +short SRV _ldap._tcp.example.com
+dig +short SRV _kerberos._tcp.example.com
+dig +short SRV _autodiscover._tcp.example.com
+
+# ANY Record (All records - often blocked)
+dig +short ANY example.com
+# Many servers refuse ANY queries
+
+# CAA Record (Certificate Authority Authorization)
+dig +short CAA example.com
+# Controls which CAs can issue certificates
+
+# Comprehensive query
+dig example.com ANY +noall +answer
+{% endraw %}
+</record_enumeration>
+
+<zone_transfer>
+{% raw %}
+# Zone Transfer Attempts (AXFR)
+
+# Zone transfer reveals ALL DNS records for a domain
+# Should be restricted to authorized secondary nameservers
+
+# Get nameservers first
+dig +short NS example.com
+# Returns: ns1.example.com, ns2.example.com
+
+# Attempt zone transfer against each NS
+dig @ns1.example.com example.com AXFR
+dig @ns2.example.com example.com AXFR
+
+# Using host command
+host -t axfr example.com ns1.example.com
+
+# Using nslookup
+nslookup
+> server ns1.example.com
+> set type=any
+> ls -d example.com
+
+# Zone transfer success indicators:
+# - Hundreds/thousands of records returned
+# - Internal hostnames visible
+# - All subdomains exposed
+# - IP address mappings revealed
+
+# Failed zone transfer (expected secure behavior):
+# ; Transfer failed.
+# ; REFUSED
+# ; connection timed out
+
+# Incremental zone transfer
+dig @ns1.example.com example.com IXFR=2023010100
+{% endraw %}
+</zone_transfer>
+
+<email_security>
+{% raw %}
+# Email Security Record Analysis
+
+# SPF (Sender Policy Framework)
+dig +short TXT example.com | grep -i "spf"
+# v=spf1 ip4:192.0.2.0/24 include:_spf.google.com -all
+
+# SPF Mechanisms:
+# ip4: / ip6:  - Allowed IP ranges
+# a:           - A record of specified domain
+# mx:          - MX records of domain
+# include:     - Include another domain's SPF
+# redirect:    - Use another domain's SPF entirely
+# all          - Catch-all (+ pass, - fail, ~ softfail, ? neutral)
+
+# Weak SPF indicators:
+# +all         - Anyone can send (no protection)
+# ~all         - Softfail only (weak enforcement)
+# No SPF       - No email authentication
+
+# DKIM (DomainKeys Identified Mail)
+# Selector discovery (common selectors)
+for selector in default google selector1 selector2 k1 mail; do
+    dig +short TXT ${selector}._domainkey.example.com
+done
+
+# DKIM record example:
+# v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQ...
+
+# DMARC (Domain-based Message Authentication)
+dig +short TXT _dmarc.example.com
+# v=DMARC1; p=reject; rua=mailto:dmarc@example.com
+
+# DMARC Policies:
+# p=none       - Monitor only (no enforcement)
+# p=quarantine - Send to spam
+# p=reject     - Reject unauthorized mail
+
+# Weak DMARC indicators:
+# p=none       - No enforcement (monitoring only)
+# No DMARC     - No policy defined
+# sp=none      - Subdomains unprotected
+# pct=10       - Only 10% of mail checked
+
+# MTA-STS (Mail Transfer Agent Strict Transport Security)
+dig +short TXT _mta-sts.example.com
+curl https://mta-sts.example.com/.well-known/mta-sts.txt
+
+# BIMI (Brand Indicators for Message Identification)
+dig +short TXT default._bimi.example.com
+{% endraw %}
+</email_security>
+
+<dnssec>
+{% raw %}
+# DNSSEC Configuration Analysis
+
+# Check if DNSSEC is enabled
+dig +dnssec example.com
+
+# Look for RRSIG (signature) records
+dig +short RRSIG example.com
+
+# Check DNSKEY records
+dig +short DNSKEY example.com
+
+# DS Record (Delegation Signer) at parent zone
+dig +short DS example.com @a.gtld-servers.net
+
+# NSEC/NSEC3 (denial of existence)
+dig +dnssec nonexistent.example.com
+# NSEC reveals adjacent hostnames
+# NSEC3 uses hashing to prevent enumeration
+
+# Validate DNSSEC chain
+delv @8.8.8.8 example.com
+# or
+drill -S example.com
+
+# DNSSEC issues to look for:
+# - Missing RRSIG records
+# - Expired signatures
+# - Algorithm mismatches
+# - Broken chain of trust
+# - NSEC records enabling zone walking
+
+# NSEC walking (enumerate via NSEC)
+# If NSEC (not NSEC3) is used:
+ldns-walk example.com
+nsec3walker example.com
+{% endraw %}
+</dnssec>
+
+<reverse_dns>
+{% raw %}
+# Reverse DNS (PTR) Analysis
+
+# Single IP lookup
+dig +short -x 192.0.2.1
+host 192.0.2.1
+nslookup 192.0.2.1
+
+# Reverse DNS for network range
+# /24 network
+for i in $(seq 1 254); do
+    host 192.0.2.$i 2>/dev/null | grep "domain name pointer"
+done
+
+# Using dnsrecon
+dnsrecon -r 192.0.2.0/24
+
+# Using fierce
+fierce --range 192.0.2.0/24
+
+# Internal hostname patterns to look for:
+# - mail.internal.example.com
+# - db01.prod.example.com
+# - vpn.corp.example.com
+# - dc1.ad.example.com
+# - nas.office.example.com
+
+# Cloud provider reverse DNS patterns:
+# AWS:   ec2-1-2-3-4.compute-1.amazonaws.com
+# GCP:   4.3.2.1.bc.googleusercontent.com
+# Azure: hostname.region.cloudapp.azure.com
+{% endraw %}
+</reverse_dns>
+
+<srv_records>
+{% raw %}
+# SRV Record Discovery (Service Location)
+
+# Common SRV records to query
+# Format: _service._proto.domain
+
+# Active Directory / LDAP
+dig +short SRV _ldap._tcp.example.com
+dig +short SRV _ldap._tcp.dc._msdcs.example.com
+dig +short SRV _kerberos._tcp.example.com
+dig +short SRV _kpasswd._tcp.example.com
+dig +short SRV _gc._tcp.example.com  # Global Catalog
+
+# Email
+dig +short SRV _autodiscover._tcp.example.com
+dig +short SRV _submission._tcp.example.com
+
+# SIP / VoIP
+dig +short SRV _sip._tcp.example.com
+dig +short SRV _sip._udp.example.com
+dig +short SRV _sips._tcp.example.com
+
+# XMPP / Jabber
+dig +short SRV _xmpp-client._tcp.example.com
+dig +short SRV _xmpp-server._tcp.example.com
+
+# Matrix
+dig +short SRV _matrix._tcp.example.com
+
+# CalDAV / CardDAV
+dig +short SRV _caldav._tcp.example.com
+dig +short SRV _carddav._tcp.example.com
+
+# Other services
+dig +short SRV _http._tcp.example.com
+dig +short SRV _ftp._tcp.example.com
+{% endraw %}
+</srv_records>
+
+<dns_tools>
+{% raw %}
+# DNS Reconnaissance Tools
+
+# dig (most versatile)
+dig @8.8.8.8 example.com A +trace       # Show delegation path
+dig example.com +short +identify        # Show answering server
+dig example.com +stats                  # Show query statistics
+
+# host (simple lookups)
+host example.com
+host -t MX example.com
+host -a example.com                     # All records
+
+# nslookup (interactive)
+nslookup -type=ANY example.com 8.8.8.8
+
+# dnsrecon (comprehensive)
+dnsrecon -d example.com -t std          # Standard enumeration
+dnsrecon -d example.com -t axfr         # Zone transfer
+dnsrecon -d example.com -t brt          # Brute force
+
+# dnsenum
+dnsenum example.com
+dnsenum --enum example.com              # Full enumeration
+
+# fierce
+fierce --domain example.com
+
+# massdns (fast bruteforce)
+massdns -r resolvers.txt -t A -o S subdomains.txt
+
+# amass (comprehensive)
+amass enum -d example.com -passive
+amass enum -d example.com -active
+
+# Comparison of DNS resolvers
+for resolver in 8.8.8.8 1.1.1.1 9.9.9.9; do
+    echo "=== $resolver ==="
+    dig @$resolver example.com +short
+done
+{% endraw %}
+</dns_tools>
+
+<internal_leakage>
+{% raw %}
+# Internal Hostname and Network Leakage
+
+# Common internal naming patterns
+# Environment prefixes
+dev., staging., test., uat., qa., prod.
+# Function prefixes
+db., sql., mysql., postgres., mongo., redis.
+mail., smtp., imap., pop., exchange.
+ldap., ad., dc., kdc., dns.
+vpn., ras., remote., citrix.
+nas., san., backup., archive.
+# Infrastructure
+fw., firewall., waf., lb., haproxy., nginx.
+k8s., kubernetes., docker., rancher.
+jenkins., gitlab., bitbucket., artifactory.
+# Location/Region
+us., eu., asia., dc1., dc2., colo.
+
+# Internal domain patterns in TXT records
+dig +short TXT example.com
+# May reveal: "v=spf1 include:_spf.internal.example.com"
+
+# Internal references in MX records
+dig +short MX example.com
+# May reveal: mail.corp.example.local
+
+# Check for split-horizon DNS
+# Same query from internal vs external may differ
+dig @internal-dns example.com
+dig @8.8.8.8 example.com
+
+# CHAOS class records (bind version)
+dig @ns1.example.com version.bind txt chaos
+dig @ns1.example.com hostname.bind txt chaos
+{% endraw %}
+</internal_leakage>
+
+<dns_security_issues>
+{% raw %}
+# DNS Security Issues to Identify
+
+# 1. Zone transfer enabled (HIGH)
+# Full zone exposure to anyone
+
+# 2. Missing/Weak SPF (MEDIUM)
+dig +short TXT example.com
+# No SPF or "+all" or "~all" = spoofing possible
+
+# 3. Missing DMARC (MEDIUM)
+dig +short TXT _dmarc.example.com
+# No record = no email auth policy
+
+# 4. DMARC p=none (LOW)
+# Monitoring only, no enforcement
+
+# 5. DNSSEC not enabled (LOW-MEDIUM)
+# Vulnerable to cache poisoning in theory
+
+# 6. NSEC zone walking (LOW)
+# Enumerate all hostnames via NSEC records
+
+# 7. Wildcard DNS (INFO)
+dig +short A random.example.com
+# Same IP for any subdomain = wildcard
+
+# 8. Open recursive resolver (HIGH if exposed)
+# Should not answer queries for external domains
+dig @target-dns google.com
+
+# 9. DNS cache snooping
+dig @target-dns example.com +norecurse
+# If answers, domain was recently queried
+
+# 10. Dangling CNAME (HIGH)
+dig +short CNAME old.example.com
+# Points to decommissioned service = takeover risk
+{% endraw %}
+</dns_security_issues>
+</testing_techniques>
+
+<validation>
+1. Verify zone transfer fails from external IPs (expected behavior).
+2. Confirm SPF record ends with -all (hard fail) not ~all or +all.
+3. Check DMARC policy is p=reject or p=quarantine, not p=none.
+4. Validate DKIM selectors return valid public keys.
+5. Confirm DNSSEC chain validates end-to-end.
+6. Verify internal hostnames are not resolvable externally.
+7. Check reverse DNS doesn't expose sensitive naming conventions.
+8. Test that recursive queries are refused from external sources.
+</validation>
+
+<false_positives>
+- Zone transfer "refused" for domains using third-party DNS (expected)
+- SPF softfail (~all) during migration period (temporary, documented)
+- DMARC p=none with active rua monitoring (intentional rollout phase)
+- Missing DNSSEC for domains on registrars that don't support it
+- SRV records for services hosted by third-party providers
+- Wildcard DNS for legitimate catch-all configurations
+- Internal-looking hostnames that are actually public CDN nodes
+- High TTL values that are appropriate for stable records
+</false_positives>
+
+<impact>
+- Zone transfer exposure reveals complete attack surface
+- SPF/DMARC weakness enables email spoofing and phishing
+- Internal hostname leakage reveals network architecture
+- Dangling CNAME enables subdomain takeover
+- Missing DNSSEC allows potential cache poisoning
+- Open recursion enables DNS amplification attacks
+- SRV record exposure reveals internal services and protocols
+- Reverse DNS mapping exposes server roles and locations
+</impact>
+
+<pro_tips>
+1. Always check all authoritative nameservers—one may be misconfigured.
+2. Zone transfers may work from specific IPs—test from multiple sources.
+3. NSEC zone walking can enumerate subdomains even without zone transfer.
+4. Check for BIND version disclosure via CHAOS class queries.
+5. SPF include: chains can reveal third-party services in use.
+6. Historical DNS (SecurityTrails, PassiveDNS) shows decommissioned hosts.
+7. Compare responses from different resolvers—CDN/geo variations.
+8. SRV records often reveal internal Active Directory structure.
+9. CAA records show which CAs are authorized—useful for cert analysis.
+10. DNS over HTTPS/TLS may return different results than plain DNS.
+</pro_tips>
+
+<remember>DNS misconfigurations persist because they're invisible to normal operations. Zone transfers, weak email security, and internal hostname leakage are common findings with significant impact. Always enumerate all record types, test all nameservers, and analyze email security records comprehensively.</remember>
+</dns_resolver_guide>
