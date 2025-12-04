@@ -8,6 +8,12 @@ from collections import Counter
 from typing import Any, Literal
 
 from strix.tools.registry import register_tool
+from strix.tools.validation import (
+    generate_usage_hint,
+    validate_action_param,
+    validate_required_param,
+    validate_unknown_params,
+)
 
 
 EntropyAction = Literal["analyze", "compare", "batch_analyze"]
@@ -185,7 +191,8 @@ def entropy_analyzer(
     token: str | None = None,
     tokens: list[str] | None = None,
     token1: str | None = None,
-    token2: str | None = None
+    token2: str | None = None,
+    **kwargs: Any,
 ) -> dict[str, Any]:
     """Analyze entropy and randomness of tokens, session IDs, and secrets.
     
@@ -222,6 +229,65 @@ def entropy_analyzer(
             token2="abc124"
         )
     """
+    # Define valid parameters and actions
+    VALID_PARAMS = {
+        "action",
+        "token",
+        "tokens",
+        "token1",
+        "token2",
+    }
+    VALID_ACTIONS = ["analyze", "compare", "batch_analyze"]
+
+    # Check for unknown parameters
+    unknown_error = validate_unknown_params(kwargs, VALID_PARAMS, "entropy_analyzer")
+    if unknown_error:
+        unknown_error.update(
+            generate_usage_hint("entropy_analyzer", "analyze", {"token": "a1b2c3d4e5f6g7h8"})
+        )
+        return unknown_error
+
+    # Validate action parameter
+    action_error = validate_action_param(action, VALID_ACTIONS, "entropy_analyzer")
+    if action_error:
+        action_error["usage_examples"] = {
+            "analyze": "entropy_analyzer(action='analyze', token='a1b2c3d4e5f6g7h8')",
+            "compare": "entropy_analyzer(action='compare', token1='abc123', token2='abc124')",
+            "batch_analyze": "entropy_analyzer(action='batch_analyze', tokens=['token1', 'token2', 'token3'])",
+        }
+        return action_error
+
+    # Validate required parameters based on action
+    if action == "analyze":
+        param_error = validate_required_param(token, "token", action, "entropy_analyzer")
+        if param_error:
+            param_error.update(
+                generate_usage_hint("entropy_analyzer", action, {"token": "a1b2c3d4e5f6g7h8"})
+            )
+            return param_error
+
+    if action == "compare":
+        param_error = validate_required_param(token1, "token1", action, "entropy_analyzer")
+        if param_error:
+            param_error.update(
+                generate_usage_hint("entropy_analyzer", action, {"token1": "abc123", "token2": "abc124"})
+            )
+            return param_error
+        param_error = validate_required_param(token2, "token2", action, "entropy_analyzer")
+        if param_error:
+            param_error.update(
+                generate_usage_hint("entropy_analyzer", action, {"token1": "abc123", "token2": "abc124"})
+            )
+            return param_error
+
+    if action == "batch_analyze":
+        param_error = validate_required_param(tokens, "tokens", action, "entropy_analyzer")
+        if param_error:
+            param_error.update(
+                generate_usage_hint("entropy_analyzer", action, {"tokens": ["token1", "token2", "token3"]})
+            )
+            return param_error
+
     try:
         if action == "analyze":
             if not token:

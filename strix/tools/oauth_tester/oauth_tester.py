@@ -232,6 +232,77 @@ def oauth_tester(
     Returns:
         Security analysis results with findings and recommendations
     """
+    # Define valid parameters and actions
+    VALID_PARAMS = {
+        "action",
+        "url",
+        "redirect_uri",
+        "state",
+        "code_challenge",
+        "code_challenge_method",
+        "token",
+    }
+    VALID_ACTIONS = [
+        "analyze_flow",
+        "check_redirect_uri",
+        "check_state",
+        "check_pkce",
+        "generate_tests",
+        "analyze_token",
+    ]
+
+    # Check for unknown parameters
+    unknown_error = validate_unknown_params(kwargs, VALID_PARAMS, "oauth_tester")
+    if unknown_error:
+        unknown_error.update(
+            generate_usage_hint(
+                "oauth_tester", "analyze_flow", {"url": "https://auth.example.com/authorize?..."}
+            )
+        )
+        return unknown_error
+
+    # Validate action parameter
+    action_error = validate_action_param(action, VALID_ACTIONS, "oauth_tester")
+    if action_error:
+        action_error["usage_examples"] = {
+            "analyze_flow": "oauth_tester(action='analyze_flow', url='https://auth.example.com/authorize?...')",
+            "check_redirect_uri": "oauth_tester(action='check_redirect_uri', redirect_uri='https://app.com/callback')",
+            "check_state": "oauth_tester(action='check_state', state='random_state_value')",
+            "check_pkce": "oauth_tester(action='check_pkce', code_challenge='challenge', code_challenge_method='S256')",
+            "generate_tests": "oauth_tester(action='generate_tests')",
+            "analyze_token": "oauth_tester(action='analyze_token', token='eyJ...')",
+        }
+        return action_error
+
+    # Validate required parameters based on action
+    if action == "analyze_flow":
+        param_error = validate_required_param(url, "url", action, "oauth_tester")
+        if param_error:
+            param_error.update(
+                generate_usage_hint(
+                    "oauth_tester", action, {"url": "https://auth.example.com/authorize?..."}
+                )
+            )
+            return param_error
+
+    if action == "check_redirect_uri":
+        param_error = validate_required_param(redirect_uri, "redirect_uri", action, "oauth_tester")
+        if param_error:
+            param_error.update(
+                generate_usage_hint(
+                    "oauth_tester", action, {"redirect_uri": "https://app.com/callback"}
+                )
+            )
+            return param_error
+
+    if action == "analyze_token":
+        param_error = validate_required_param(token, "token", action, "oauth_tester")
+        if param_error:
+            param_error.update(
+                generate_usage_hint("oauth_tester", action, {"token": "eyJ..."})
+            )
+            return param_error
+
     try:
         if action == "analyze_flow":
             if not url:

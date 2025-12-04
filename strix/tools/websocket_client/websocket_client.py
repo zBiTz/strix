@@ -7,6 +7,12 @@ from typing import Any, Literal
 from urllib.parse import parse_qs, urlparse
 
 from strix.tools.registry import register_tool
+from strix.tools.validation import (
+    generate_usage_hint,
+    validate_action_param,
+    validate_required_param,
+    validate_unknown_params,
+)
 
 
 WSAction = Literal["connect_info", "generate_payloads", "test_origin", "generate_exploit"]
@@ -190,6 +196,7 @@ def websocket_client(
     ws_url: str | None = None,
     origin: str | None = None,
     exfil_url: str | None = None,
+    **kwargs: Any,
 ) -> dict[str, Any]:
     """WebSocket security testing utilities.
 
@@ -213,6 +220,51 @@ def websocket_client(
     Returns:
         Testing payloads, exploit code, or analysis results
     """
+    # Define valid parameters and actions
+    VALID_PARAMS = {
+        "action",
+        "ws_url",
+        "origin",
+        "exfil_url",
+    }
+    VALID_ACTIONS = ["connect_info", "generate_payloads", "test_origin", "generate_exploit"]
+
+    # Check for unknown parameters
+    unknown_error = validate_unknown_params(kwargs, VALID_PARAMS, "websocket_client")
+    if unknown_error:
+        unknown_error.update(
+            generate_usage_hint("websocket_client", "connect_info", {"ws_url": "wss://example.com/ws"})
+        )
+        return unknown_error
+
+    # Validate action parameter
+    action_error = validate_action_param(action, VALID_ACTIONS, "websocket_client")
+    if action_error:
+        action_error["usage_examples"] = {
+            "connect_info": "websocket_client(action='connect_info', ws_url='wss://example.com/ws')",
+            "generate_payloads": "websocket_client(action='generate_payloads')",
+            "test_origin": "websocket_client(action='test_origin', origin='target.com')",
+            "generate_exploit": "websocket_client(action='generate_exploit', ws_url='wss://target.com/ws', exfil_url='https://attacker.com/log')",
+        }
+        return action_error
+
+    # Validate required parameters based on action
+    if action in ["connect_info", "generate_exploit"]:
+        param_error = validate_required_param(ws_url, "ws_url", action, "websocket_client")
+        if param_error:
+            param_error.update(
+                generate_usage_hint("websocket_client", action, {"ws_url": "wss://example.com/ws"})
+            )
+            return param_error
+
+    if action == "generate_exploit":
+        param_error = validate_required_param(exfil_url, "exfil_url", action, "websocket_client")
+        if param_error:
+            param_error.update(
+                generate_usage_hint("websocket_client", action, {"ws_url": "wss://target.com/ws", "exfil_url": "https://attacker.com/log"})
+            )
+            return param_error
+
     try:
         if action == "connect_info":
             if not ws_url:

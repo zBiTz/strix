@@ -325,9 +325,54 @@ def poc_generator(
     Returns:
         Generated PoC code in requested format(s)
     """
+    # Define valid parameters and actions
+    VALID_PARAMS = {
+        "action",
+        "method",
+        "url",
+        "headers",
+        "body",
+        "cookies",
+        "poc_format",
+        "vulnerability_type",
+        "description",
+    }
+    VALID_ACTIONS = ["generate", "generate_all"]
+
+    # Check for unknown parameters
+    unknown_error = validate_unknown_params(kwargs, VALID_PARAMS, "poc_generator")
+    if unknown_error:
+        unknown_error.update(
+            generate_usage_hint("poc_generator", "generate", {"url": "https://example.com/api", "poc_format": "curl"})
+        )
+        return unknown_error
+
+    # Validate action parameter
+    action_error = validate_action_param(action, VALID_ACTIONS, "poc_generator")
+    if action_error:
+        action_error["usage_examples"] = {
+            "generate": "poc_generator(action='generate', url='https://example.com/api', poc_format='curl')",
+            "generate_all": "poc_generator(action='generate_all', url='https://example.com/api')",
+        }
+        return action_error
+
+    # Validate required parameters
+    param_error = validate_required_param(url, "url", action, "poc_generator")
+    if param_error:
+        param_error.update(
+            generate_usage_hint("poc_generator", action, {"url": "https://example.com/api"})
+        )
+        return param_error
+
+    if action == "generate":
+        param_error = validate_required_param(poc_format, "poc_format", action, "poc_generator")
+        if param_error:
+            param_error.update(
+                generate_usage_hint("poc_generator", action, {"url": "https://example.com/api", "poc_format": "curl"})
+            )
+            return param_error
+
     try:
-        if not url:
-            return {"error": "url parameter required"}
 
         headers = headers or {}
         cookies = cookies or {}

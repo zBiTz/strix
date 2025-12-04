@@ -311,6 +311,41 @@ def rate_limit_tester(
     Returns:
         Rate limit detection results, bypass potential, and analysis
     """
+    # Define valid parameters and actions
+    VALID_PARAMS = {
+        "action",
+        "url",
+        "method",
+        "num_requests",
+    }
+    VALID_ACTIONS = ["detect", "test_bypass", "analyze"]
+
+    # Check for unknown parameters
+    unknown_error = validate_unknown_params(kwargs, VALID_PARAMS, "rate_limit_tester")
+    if unknown_error:
+        unknown_error.update(
+            generate_usage_hint("rate_limit_tester", "detect", {"url": "https://api.example.com/endpoint"})
+        )
+        return unknown_error
+
+    # Validate action parameter
+    action_error = validate_action_param(action, VALID_ACTIONS, "rate_limit_tester")
+    if action_error:
+        action_error["usage_examples"] = {
+            "detect": "rate_limit_tester(action='detect', url='https://api.example.com/endpoint')",
+            "test_bypass": "rate_limit_tester(action='test_bypass', url='https://api.example.com/endpoint')",
+            "analyze": "rate_limit_tester(action='analyze', url='https://api.example.com/endpoint')",
+        }
+        return action_error
+
+    # Validate required parameters
+    param_error = validate_required_param(url, "url", action, "rate_limit_tester")
+    if param_error:
+        param_error.update(
+            generate_usage_hint("rate_limit_tester", action, {"url": "https://api.example.com/endpoint"})
+        )
+        return param_error
+
     try:
         if action == "detect":
             return _detect_rate_limit(url, method, num_requests)

@@ -220,6 +220,50 @@ def polyglot_generator(
         # List all types:
         polyglot_generator(action="list_types")
     """
+    # Define valid parameters and actions
+    VALID_PARAMS = {
+        "action",
+        "payload_type",
+        "encoding",
+        "custom_template",
+    }
+    VALID_ACTIONS = ["generate", "list_types", "custom"]
+
+    # Check for unknown parameters
+    unknown_error = validate_unknown_params(kwargs, VALID_PARAMS, "polyglot_generator")
+    if unknown_error:
+        unknown_error.update(
+            generate_usage_hint("polyglot_generator", "generate", {"payload_type": "xss_basic"})
+        )
+        return unknown_error
+
+    # Validate action parameter
+    action_error = validate_action_param(action, VALID_ACTIONS, "polyglot_generator")
+    if action_error:
+        action_error["usage_examples"] = {
+            "generate": "polyglot_generator(action='generate', payload_type='xss_basic')",
+            "list_types": "polyglot_generator(action='list_types')",
+            "custom": "polyglot_generator(action='custom', custom_template='<script>...{payload}...</script>')",
+        }
+        return action_error
+
+    # Validate required parameters based on action
+    if action == "generate":
+        param_error = validate_required_param(payload_type, "payload_type", action, "polyglot_generator")
+        if param_error:
+            param_error.update(
+                generate_usage_hint("polyglot_generator", action, {"payload_type": "xss_basic"})
+            )
+            return param_error
+
+    if action == "custom":
+        param_error = validate_required_param(custom_template, "custom_template", action, "polyglot_generator")
+        if param_error:
+            param_error.update(
+                generate_usage_hint("polyglot_generator", action, {"custom_template": "<script>...{payload}...</script>"})
+            )
+            return param_error
+
     try:
         if action == "list_types":
             return {
