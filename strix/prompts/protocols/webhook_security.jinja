@@ -177,6 +177,17 @@ Test common: /webhook/test, /webhook/default, /webhook/admin
 - Data exfiltration via webhook URLs
 </impact>
 
+<false_positives>
+- Signature validation present but using test/development secret (intended for testing)
+- Webhook URL accepts internal addresses but network segmentation prevents access
+- Replay window exists but idempotency keys prevent duplicate processing
+- Timing differences detected but within noise threshold (not exploitable)
+- Webhook enumeration possible but all endpoints require valid signatures
+- Event injection blocked by schema validation on required fields
+- SSRF to metadata endpoint possible but IAM role has no sensitive permissions
+- Rate limiting absent but DDoS protection at infrastructure level
+</false_positives>
+
 <pro_tips>
 1. Test with localhost, 127.0.0.1, metadata IPs first
 2. Capture webhook payloads for replay testing

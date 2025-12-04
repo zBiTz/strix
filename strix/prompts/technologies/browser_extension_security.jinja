@@ -172,6 +172,17 @@ chrome.runtime.sendMessage(targetExtensionId, {action: 'getData'});
 - Sensitive data exfiltration from storage
 </impact>
 
+<false_positives>
+- Broad permissions requested but extension legitimately needs them for core functionality
+- Content script injected on all URLs but only reads non-sensitive page metadata
+- Message passing exists but validates sender origin and message format
+- Storage contains API keys but they're encrypted with user-derived key
+- webRequest listener present but only for legitimate ad-blocking or privacy features
+- Tabs API used but only accesses tab URLs, not content
+- External messaging enabled but externally_connectable restricts to specific trusted domains
+- Background script persistent but doesn't exfiltrate data (verified code review)
+</false_positives>
+
 <pro_tips>
 1. Check manifest.json permissions first—overly broad is suspicious
 2. "<all_urls>" permission extremely powerful—grants universal access

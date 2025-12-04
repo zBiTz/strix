@@ -262,6 +262,17 @@ const estimatedGas = await contract.estimateGas.function();
 - Fake transaction simulation
 </impact>
 
+<false_positives>
+- High gas price displayed but matches current network congestion (not manipulation)
+- Unlimited token approval requested but standard practice for DEX protocols
+- Transaction parameters differ from UI but values are equivalent (different encoding)
+- EIP-712 signature requested but domain and types correctly represent intended action
+- RPC endpoint is third-party but legitimate provider (Infura, Alchemy)
+- Contract address looks suspicious but is verified proxy pattern with legitimate implementation
+- Multiple transactions requested but represent atomic operation (approve + swap pattern)
+- Wallet popup shows technical details but accurately represents user's intended action
+</false_positives>
+
 <pro_tips>
 1. Always verify transaction parameters in wallet popup
 2. Check contract address is correct (not similar-looking)

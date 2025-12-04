@@ -1,44 +1,441 @@
 <helm_chart_security_guide>
 <title>HELM CHART SECURITY TESTING</title>
 
-<critical>Helm chart security testing covers secret exposure, insecure default values, RBAC misconfigurations, template injection, and dependency vulnerabilities.</critical>
+<critical>Helm charts are the de facto standard for Kubernetes application packaging, making them high-value targets. Insecure charts can expose secrets, create overly permissive RBAC roles, deploy containers with dangerous privileges, or be vulnerable to supply chain attacks. Template injection, dependency confusion, and chart repository compromises can lead to cluster-wide compromise. Most organizations deploy Helm charts without security review.</critical>
 
 <scope>
-- Secret exposure in Helm charts
-- Insecure default values
-- RBAC misconfigurations
-- Template injection in Helm templates
-- Tiller security (Helm v2)
+- Secret exposure in values.yaml and templates
+- RBAC role and ClusterRole misconfigurations
+- Template injection vulnerabilities
+- Container security context issues
+- Chart dependency and supply chain security
+- Hook exploitation (pre-install, post-install)
 - Chart repository security
-- Dependency vulnerabilities
+- Values schema bypass
+- NetworkPolicy gaps
+- Resource limit abuse
+- ServiceAccount token exposure
+- Helm release secret exposure
 </scope>
 
-<secret_exposure>
+<methodology>
+1. Pull and extract chart for static analysis.
+2. Review values.yaml for secrets and insecure defaults.
+3. Analyze templates for injection vulnerabilities.
+4. Check RBAC definitions for excessive permissions.
+5. Examine container security contexts and capabilities.
+6. Audit chart dependencies for vulnerabilities.
+7. Test hooks for privilege escalation opportunities.
+8. Verify chart signature and provenance.
+</methodology>
+
+<testing_techniques>
+<secret_exposure_analysis>
 {% raw %}
-# Secrets in values.yaml:
-helm show values chart-name | grep -i password
+# Finding Secrets in Helm Charts
 
-# Secrets in templates:
-grep -r "password\|secret\|token" charts/*/templates/
+# 1. Download and extract chart
+helm pull repo/chart-name --untar
+cd chart-name/
 
-# Hardcoded secrets:
-apiVersion: v1
-kind: Secret
-data:
-  password: cGFzc3dvcmQxMjM=  # base64 encoded, not encrypted
+# 2. Search values.yaml for secrets
+grep -Ei "password|secret|token|key|apikey|credential|auth" values.yaml
+
+# Common patterns to find:
+# password: ""           # Empty default, user must set
+# password: admin123     # Hardcoded default (BAD)
+# existingSecret: ""     # References existing secret (BETTER)
+
+# 3. Search templates for hardcoded secrets
+grep -rEi "password|secret|token|key" templates/
+
+# 4. Check for base64 "encoded" secrets (NOT encrypted)
+grep -r "base64" templates/
+# Secrets in templates are base64, easily decoded:
+echo "cGFzc3dvcmQxMjM=" | base64 -d  # Decodes to: password123
+
+# 5. Look for secrets in ConfigMaps (wrong place)
+grep -l "kind: ConfigMap" templates/*.yaml | xargs grep -l "password\|secret"
+
+# 6. Check mounted secrets in deployments
+grep -A20 "volumeMounts:" templates/deployment.yaml | grep -i secret
+
+# 7. Environment variables from secrets
+grep -B2 -A2 "secretKeyRef" templates/*.yaml
+
+# 8. Helm release secrets (contain all values)
+kubectl get secret -l "owner=helm" -o yaml
+# Release secrets contain all values including passwords!
 {% endraw %}
-</secret_exposure>
+</secret_exposure_analysis>
+
+<rbac_misconfiguration>
+{% raw %}
+# RBAC Analysis in Helm Charts
+
+# 1. Find RBAC templates
+ls templates/ | grep -E "role|rbac|serviceaccount|clusterrole"
+
+# 2. Check for ClusterRole (cluster-wide permissions)
+grep -l "kind: ClusterRole" templates/*.yaml
+
+# Dangerous ClusterRole rules:
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+rules:
+- apiGroups: ["*"]        # ALL API groups - DANGEROUS
+  resources: ["*"]        # ALL resources - DANGEROUS
+  verbs: ["*"]            # ALL verbs - DANGEROUS
+
+# 3. Check for wildcard permissions
+grep -E "apiGroups.*\*|resources.*\*|verbs.*\*" templates/*.yaml
+
+# 4. Dangerous verb combinations
+# - create secrets + get secrets = credential theft
+# - create pods + exec = container escape
+# - escalate = RBAC bypass
+
+grep -E "verbs:.*create.*get|verbs:.*exec|verbs:.*escalate" templates/*.yaml
+
+# 5. ServiceAccount auto-mount
+# Check if SA token is mounted (default: true)
+grep -A5 "serviceAccountName:" templates/*.yaml | grep "automountServiceAccountToken"
+
+# 6. ServiceAccount in privileged namespace
+grep "namespace:" templates/*serviceaccount*.yaml
+
+# 7. Check for cluster-admin binding
+grep -i "cluster-admin" templates/*.yaml
+{% endraw %}
+</rbac_misconfiguration>
 
 <template_injection>
 {% raw %}
-# Helm template injection:
-# If user input in template:
-{{ .Values.userInput }}
+# Helm Template Injection Testing
 
-# Can inject:
-{{ .Values.userInput }}{{ .Release.Name }}{{ .Release.Namespace }}
+# 1. Find user-controlled values in templates
+grep -E "\{\{.*\.Values\." templates/*.yaml
+
+# 2. Look for unquoted value references
+# VULNERABLE (no quotes):
+metadata:
+  name: {{ .Values.name }}
+
+# SAFER (quoted):
+metadata:
+  name: {{ .Values.name | quote }}
+
+# 3. Injection via values
+# If values.yaml has:
+userInput: "test"
+
+# And template has:
+labels:
+  app: {{ .Values.userInput }}
+
+# Attacker can inject:
+# --set userInput="malicious\nkind: ClusterRoleBinding"
+
+# 4. Template function abuse
+# Some functions can leak info:
+{{ env "SECRET_VAR" }}           # Environment variable
+{{ .Files.Get "secret.txt" }}   # File contents
+{{ include "helper" . }}         # Other templates
+
+# 5. Test injection payloads
+helm template chart-name --set 'userInput="}}\nkind: Pod\nmetadata:\n  name: pwned\nspec:\n  containers:\n  - name: evil\n    image: evil:latest\n---\n{{"'
+
+# 6. YAML multiline injection
+helm template chart-name --set 'annotation=|-
+  malicious: content
+  another: field'
+
+# 7. Values file injection
+echo 'podAnnotations: {"injected": "value"}' > malicious-values.yaml
+helm template chart-name -f malicious-values.yaml
 {% endraw %}
 </template_injection>
 
-<remember>Helm security: Check for exposed secrets in values/templates, test RBAC permissions, validate template injection protection, scan dependencies for vulnerabilities.</remember>
+<container_security>
+{% raw %}
+# Container Security Context Analysis
+
+# 1. Check for privileged containers
+grep -B5 -A10 "privileged:" templates/*.yaml
+# privileged: true = DANGEROUS (root on host)
+
+# 2. Check for host namespaces
+grep -E "hostNetwork:|hostPID:|hostIPC:" templates/*.yaml
+# hostNetwork: true = container shares host network
+# hostPID: true = can see/signal host processes
+# hostIPC: true = can access host IPC
+
+# 3. Check for host path mounts
+grep -B2 -A5 "hostPath:" templates/*.yaml
+# hostPath: / = full host filesystem access
+
+# 4. Check for dangerous capabilities
+grep -A10 "capabilities:" templates/*.yaml
+# Dangerous capabilities:
+# - SYS_ADMIN (near-root)
+# - SYS_PTRACE (debug any process)
+# - NET_ADMIN (network control)
+# - DAC_OVERRIDE (bypass file permissions)
+
+# 5. Check for allowPrivilegeEscalation
+grep "allowPrivilegeEscalation" templates/*.yaml
+# Should be: allowPrivilegeEscalation: false
+
+# 6. Check runAsNonRoot
+grep "runAsNonRoot" templates/*.yaml
+# Should be: runAsNonRoot: true
+
+# 7. Read-only root filesystem
+grep "readOnlyRootFilesystem" templates/*.yaml
+# Should be: readOnlyRootFilesystem: true
+
+# 8. Check seccompProfile
+grep -A3 "seccompProfile:" templates/*.yaml
+# Should have: type: RuntimeDefault
+{% endraw %}
+</container_security>
+
+<dependency_security>
+{% raw %}
+# Chart Dependency Analysis
+
+# 1. List dependencies
+cat Chart.yaml | grep -A20 "dependencies:"
+helm dependency list .
+
+# 2. Check dependency versions
+# Look for:
+# - version: "*"     # Any version (BAD)
+# - version: ">=1.0" # Range (risky)
+# - version: "1.2.3" # Pinned (GOOD)
+
+# 3. Check dependency repositories
+# Trusted repos:
+# - https://charts.helm.sh/stable
+# - https://charts.bitnami.com/bitnami
+# Suspicious repos:
+# - http:// (insecure)
+# - Unknown domains
+
+# 4. Scan dependencies for vulnerabilities
+helm dependency update .
+# Then scan with trivy or other tools:
+trivy config .
+
+# 5. Check for dependency confusion
+# If chart uses private repo name that could be registered publicly
+# Attacker registers public repo with same name
+# Helm may pull from public instead of private
+
+# 6. Verify dependency signatures
+helm verify chart.tgz --keyring pubkeys.gpg
+
+# 7. Analyze sub-chart values
+cat charts/*/values.yaml
+
+# 8. Check for outdated dependencies
+helm search repo dep-name --versions | head -5
+{% endraw %}
+</dependency_security>
+
+<hook_exploitation>
+{% raw %}
+# Helm Hook Security Analysis
+
+# 1. Find hook definitions
+grep -r "helm.sh/hook" templates/*.yaml
+
+# Hook types and risks:
+# pre-install: Runs before any resources - can modify cluster state
+# post-install: Runs after install - access to created resources
+# pre-delete: Runs before deletion - last chance access
+# post-delete: Cleanup - might leave artifacts
+# pre-upgrade/post-upgrade: Migration risks
+# test: Test hooks - often overprivileged
+
+# 2. Check hook permissions
+grep -l "helm.sh/hook" templates/*.yaml | xargs grep -A30 "kind:"
+# Hooks often have elevated RBAC for setup tasks
+
+# 3. Hook weight manipulation
+# Lower weight = runs first
+# --set can sometimes influence hook behavior
+
+# 4. Hook delete policy
+grep "helm.sh/hook-delete-policy" templates/*.yaml
+# "before-hook-creation" = delete old, create new (can race)
+# "hook-succeeded" = cleanup on success
+# "hook-failed" = cleanup on failure
+
+# 5. Hook timeout exploitation
+# Long-running hooks can be interrupted
+# Partial state may be exploitable
+
+# 6. Job hooks and secrets
+# Jobs created by hooks may have SA tokens
+# Check for service account on hook jobs
+{% endraw %}
+</hook_exploitation>
+
+<chart_repository_security>
+{% raw %}
+# Chart Repository Security Testing
+
+# 1. Check repository authentication
+helm repo add test-repo https://charts.example.com
+# Does it require auth? Can you add without credentials?
+
+# 2. Analyze index.yaml
+curl -s https://charts.example.com/index.yaml | head -50
+# Contains all chart versions and digests
+
+# 3. Check for HTTP repositories
+helm repo list
+# Any http:// repos are vulnerable to MITM
+
+# 4. Verify chart provenance
+helm pull repo/chart --prov  # Download provenance file
+helm verify chart.tgz        # Verify signature
+
+# 5. Check for chart tampering
+# Download chart, compute SHA, compare to index.yaml
+sha256sum chart.tgz
+
+# 6. OCI registry security
+# Charts stored in OCI registries (Docker registries)
+helm pull oci://registry.example.com/charts/myapp
+# Check registry authentication and authorization
+
+# 7. Private repository exposure
+# Are private charts accidentally public?
+# Can you access without auth?
+curl -s https://private-charts.example.com/index.yaml
+{% endraw %}
+</chart_repository_security>
+
+<values_schema_bypass>
+{% raw %}
+# Values Schema Validation Bypass
+
+# 1. Check if schema exists
+ls values.schema.json
+
+# 2. Schema defines valid values:
+{
+  "properties": {
+    "replicaCount": {
+      "type": "integer",
+      "minimum": 1
+    }
+  }
+}
+
+# 3. Bypass attempts:
+# JSON schema only validates known properties
+# Unknown properties pass through!
+
+helm install release chart --set unknownField=malicious
+
+# 4. Type coercion bypass
+# Schema expects integer, pass string that looks like int
+helm install release chart --set replicaCount="999999999999"
+
+# 5. Null value bypass
+helm install release chart --set replicaCount=null
+
+# 6. Schema version mismatches
+# Helm 3 uses JSON Schema draft-07
+# Older schemas may have weaker validation
+{% endraw %}
+</values_schema_bypass>
+
+<network_policy_gaps>
+{% raw %}
+# NetworkPolicy Analysis
+
+# 1. Check if chart creates NetworkPolicies
+ls templates/ | grep -i network
+
+# 2. Default deny analysis
+# Good: Deny all, then allow specific
+kind: NetworkPolicy
+spec:
+  podSelector: {}  # Select all pods
+  policyTypes:
+  - Ingress
+  - Egress
+  # No ingress/egress rules = deny all
+
+# 3. Overly permissive policies
+spec:
+  ingress:
+  - {}  # Allow ALL ingress - DANGEROUS
+  egress:
+  - {}  # Allow ALL egress - DANGEROUS
+
+# 4. Missing egress restrictions
+# Pods can reach internet, cloud metadata, etc.
+# Should restrict to needed services only
+
+# 5. Namespace selector issues
+namespaceSelector:
+  matchLabels: {}  # Matches ALL namespaces - DANGEROUS
+
+# 6. Check for network policy support
+# NetworkPolicies require CNI support (Calico, Cilium, etc.)
+# If not supported, policies are ignored!
+{% endraw %}
+</network_policy_gaps>
+</testing_techniques>
+
+<validation>
+1. Deploy chart in test cluster and verify resources created match expectations.
+2. Test RBAC by attempting unauthorized actions with created ServiceAccount.
+3. Verify secrets are not exposed in ConfigMaps or release secrets.
+4. Test template injection by deploying with malicious values.
+5. Scan deployed containers for security context issues.
+6. Verify NetworkPolicies actually restrict traffic.
+7. Test hooks by observing their execution and permissions.
+</validation>
+
+<false_positives>
+- Empty password fields that require user input (not hardcoded)
+- ClusterRole with wildcards but limited to specific namespace
+- Privileged containers required for specific workloads (CNI, storage)
+- Host path mounts for logging/monitoring with restricted paths
+- RBAC escalate permission with proper RoleBinding restrictions
+- Schema validation disabled intentionally for flexibility
+- Test hooks with elevated permissions that aren't deployed to production
+</false_positives>
+
+<impact>
+- Credential exposure enabling unauthorized access
+- Cluster-wide compromise via overly permissive RBAC
+- Container escape through privileged containers
+- Supply chain attacks via compromised dependencies
+- Lateral movement through missing NetworkPolicies
+- Data exfiltration via unrestricted egress
+- Privilege escalation through hook exploitation
+- Persistent access via ServiceAccount token theft
+</impact>
+
+<pro_tips>
+1. Always render templates locally before deploying: helm template . > rendered.yaml
+2. Check release secrets (sh.helm.release.*) - they contain ALL values including secrets.
+3. Use helm-secrets or sealed-secrets for actual secret management.
+4. Pin all dependency versions exactly - never use ranges or wildcards.
+5. ServiceAccount tokens are mounted by default - disable if not needed.
+6. Hooks often have elevated permissions for setup - review carefully.
+7. Run Kubernetes security scanners (kubesec, trivy) on rendered templates.
+8. Check for values that become labels/annotations - YAML injection risk.
+9. Test with --dry-run --debug to see exactly what will be created.
+10. OCI registries for charts have better integrity verification than HTTP repos.
+</pro_tips>
+
+<remember>Helm charts are trusted code that creates Kubernetes resources. A malicious or insecure chart can compromise the entire cluster. Always review charts before deployment, verify signatures, pin versions, and scan for vulnerabilities. The release secret contains all deployment values - protect it like credentials.</remember>
 </helm_chart_security_guide>

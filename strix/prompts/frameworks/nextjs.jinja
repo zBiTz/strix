@@ -109,6 +109,17 @@
 5. Include runtime parity checks (Edge vs Node) proving inconsistent enforcement.
 </validation>
 
+<false_positives>
+- ISR page cached but contains only public content (no personalization)
+- Middleware bypass headers present but route still enforces auth at handler level
+- Server action callable externally but performs proper authorization checks
+- RSC payload visible but contains no sensitive data (public page structure only)
+- NextAuth callback URL allows redirects but validates against allowlist
+- Preview mode secret exposed but only enables draft content viewing (not admin actions)
+- Image optimization accepts external URLs but properly validates against remotePatterns
+- x-middleware-subrequest header accepted but middleware still runs (version patched)
+</false_positives>
+
 <pro_tips>
 1. Enumerate with both App and Pages routers: many apps ship a hybrid surface.
 2. Treat caching as an identity boundary—test with cookies stripped, altered, and with Vary/ETag diffs.

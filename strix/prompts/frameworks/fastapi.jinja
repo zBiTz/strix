@@ -125,6 +125,17 @@
 5. Document exact dependency paths (router-level, route-level) that missed enforcement.
 </validation>
 
+<false_positives>
+- OpenAPI/docs exposed but on internal network or behind authentication
+- CORS allows broad origins but no sensitive data or state-changing operations available
+- JWT decoded without signature verification but only for logging/debugging (not auth decisions)
+- ProxyHeadersMiddleware enabled but application runs behind trusted reverse proxy only
+- Missing CSRF protection but authentication uses Bearer tokens (not cookies)
+- Template injection syntax detected but Jinja2 autoescape enabled and no custom filters
+- File upload accepts any filename but storage layer sanitizes before writing
+- WebSocket lacks per-message auth but channel subscription validates ownership at handshake
+</false_positives>
+
 <pro_tips>
 1. Always fetch `/openapi.json` first; it’s the blueprint. If hidden, brute-force likely admin/report/export routes.
 2. Trace dependencies per route; map which ones enforce auth/scopes vs merely parse input.

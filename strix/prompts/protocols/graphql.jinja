@@ -72,8 +72,8 @@ query {
 </batching_and_alias>
 
 <variable_and_shape_abuse>
-- Scalars vs objects vs arrays: {% raw %}{id:123}{% endraw} vs {% raw %}{id:"123"}{% endraw} vs {% raw %}{id:[123]}{% endraw}; send null/empty/0/-1 and extra object keys retained by backend
-- Duplicate keys in JSON variables: {% raw %}{"id":1,"id":2}{% endraw} (parser precedence), default argument values, coercion errors leaking field names
+- Scalars vs objects vs arrays: {% raw %}{id:123}{% endraw %} vs {% raw %}{id:"123"}{% endraw %} vs {% raw %}{id:[123]}{% endraw %}; send null/empty/0/-1 and extra object keys retained by backend
+- Duplicate keys in JSON variables: {% raw %}{"id":1,"id":2}{% endraw %} (parser precedence), default argument values, coercion errors leaking field names
 </variable_and_shape_abuse>
 
 <cursor_and_projection>

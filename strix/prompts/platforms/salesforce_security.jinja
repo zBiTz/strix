@@ -190,5 +190,29 @@ GET /services/data/v52.0/query?q=SELECT+Id+FROM+Account
 - XSS in Lightning components
 </impact>
 
+<false_positives>
+- Guest user access enabled but only to public-designated objects (by design)
+- API returns object metadata but actual records require proper credentials
+- Apex code "without sharing" but runs in trusted context with no user input
+- SOQL query accepts parameters but uses bind variables (safe)
+- Lightning components expose data but properly enforce field-level security
+- Community site public but contains only intended public content
+- Bulk API access but scoped to user's permission set (working as designed)
+- Object IDs enumerable but row-level security prevents actual access
+</false_positives>
+
+<pro_tips>
+1. SOQL has no UNION—use boolean-based blind injection with timing or error analysis.
+2. Look for "without sharing" in Apex classes—it's the most common authorization bypass.
+3. Guest user in Experience Cloud (Communities) often has excessive default permissions.
+4. Bulk API (async jobs) can exfiltrate large datasets if permissions allow.
+5. Check for sensitive fields in API responses that UI doesn't display (overfetching).
+6. Aura endpoints (/aura) allow direct Apex method invocation—test for injection.
+7. Custom objects may lack proper OWD (Organization-Wide Defaults) configuration.
+8. Connected Apps may grant excessive OAuth scopes—review token permissions.
+9. Profile and Permission Set misconfigurations are more common than code vulnerabilities.
+10. Use Salesforce Inspector browser extension to quickly enumerate accessible objects and fields.
+</pro_tips>
+
 <remember>Salesforce security: SOQL injection (no UNION, use boolean blind), Apex "without sharing" bypasses rules, guest user in Communities often over-permissioned, API excessive permissions common, Lightning components need XSS prevention. Test sharing rules enforcement, check Apex code for security keywords (with/without sharing), enumerate accessible objects via API, test guest user access in Communities.</remember>
 </salesforce_security_guide>

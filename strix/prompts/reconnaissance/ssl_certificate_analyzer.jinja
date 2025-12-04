@@ -1,0 +1,291 @@
+<ssl_certificate_analyzer_guide>
+<title>SSL/TLS CERTIFICATE ANALYSIS</title>
+
+<critical>SSL/TLS certificates reveal critical infrastructure information including organizational details, domain scope through SANs, issuer relationships, and security posture. Certificate analysis exposes subdomain enumeration opportunities, deprecated protocols, weak ciphers, and potential MITM vulnerabilities. Certificate Transparency logs provide historical reconnaissance data.</critical>
+
+<scope>
+- Certificate validity and expiration analysis
+- Subject Alternative Names (SAN) extraction for domain enumeration
+- Certificate chain validation and trust analysis
+- Cipher suite strength assessment
+- Protocol version security (TLS 1.2/1.3 vs deprecated)
+- Certificate Transparency (CT) log mining
+- Organizational information extraction
+- Wildcard certificate scope analysis
+- Key strength and algorithm assessment
+</scope>
+
+<methodology>
+1. Connect to target and retrieve certificate chain.
+2. Extract and analyze Subject Alternative Names (SANs).
+3. Evaluate certificate validity and expiration timeline.
+4. Analyze cipher suites and protocol versions.
+5. Check for deprecated algorithms and weak keys.
+6. Mine Certificate Transparency logs for historical data.
+7. Map certificate issuance to organizational structure.
+8. Identify potential attack vectors from findings.
+</methodology>
+
+<certificate_analysis>
+<san_extraction>
+{% raw %}
+# Subject Alternative Names - Critical for Subdomain Enumeration
+# SANs reveal related domains and services
+
+# Example SAN entries:
+DNS:example.com
+DNS:www.example.com
+DNS:api.example.com
+DNS:staging.example.com          # Staging environment exposed
+DNS:admin.example.com            # Admin panel revealed
+DNS:*.example.com                # Wildcard - check all subdomains
+
+# Extract SANs for enumeration:
+openssl s_client -connect example.com:443 </dev/null 2>/dev/null | \
+  openssl x509 -noout -text | grep -A1 "Subject Alternative Name"
+
+# Each SAN is a potential attack surface
+# Cross-reference with subdomain enumeration tools
+{% endraw %}
+</san_extraction>
+
+<validity_analysis>
+{% raw %}
+# Certificate Validity Issues
+
+# Expired certificates - trust warnings, potential MITM
+Not After: Jan 15 00:00:00 2024 GMT   # Check if expired
+
+# Soon to expire - operational issues
+# < 30 days remaining = urgent
+# < 90 days remaining = plan renewal
+
+# Future-dated certificates
+Not Before: Jan 1 00:00:00 2025 GMT   # Not yet valid
+
+# Extremely long validity
+# > 397 days violates CA/Browser Forum requirements
+# May indicate self-signed or internal CA
+
+# Check CA/Browser Forum compliance:
+# - Max 397 days for public trust
+# - EV certs have stricter requirements
+{% endraw %}
+</validity_analysis>
+
+<chain_analysis>
+{% raw %}
+# Certificate Chain Issues
+
+# Missing intermediate certificates
+# Causes trust failures on some clients
+depth=0  # Only end-entity, no intermediates
+
+# Self-signed certificates
+Issuer: CN=example.com
+Subject: CN=example.com
+# Same issuer and subject = self-signed
+
+# Untrusted CA
+# Check if issuer is publicly trusted or internal
+
+# Chain order issues
+# Certificates must be in correct order:
+# 1. End-entity (server) certificate
+# 2. Intermediate CA(s)
+# 3. Root CA (optional, usually omitted)
+
+# Cross-signed certificates
+# May have multiple valid chains
+{% endraw %}
+</chain_analysis>
+
+<cipher_analysis>
+{% raw %}
+# Cipher Suite Security Assessment
+
+# WEAK - Must be disabled:
+SSL 2.0/3.0               # Protocol deprecated
+TLS 1.0/1.1               # Protocol deprecated
+RC4                       # Broken cipher
+DES/3DES                  # Weak cipher
+MD5                       # Broken hash
+NULL                      # No encryption
+EXPORT                    # Weak export ciphers
+ANON                      # No authentication
+
+# STRONG - Preferred:
+TLS 1.2 with:
+  TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384
+  TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256
+  TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256
+
+TLS 1.3 cipher suites:
+  TLS_AES_256_GCM_SHA384
+  TLS_AES_128_GCM_SHA256
+  TLS_CHACHA20_POLY1305_SHA256
+
+# Check Perfect Forward Secrecy (PFS):
+# ECDHE or DHE key exchange required for PFS
+{% endraw %}
+</cipher_analysis>
+
+<key_analysis>
+{% raw %}
+# Key Strength Assessment
+
+# RSA key sizes:
+2048-bit RSA              # Minimum acceptable
+3072-bit RSA              # Recommended
+4096-bit RSA              # Strong
+< 2048-bit RSA            # WEAK - must upgrade
+
+# ECDSA key sizes:
+256-bit ECDSA (P-256)     # Equivalent to 3072-bit RSA
+384-bit ECDSA (P-384)     # Strong
+521-bit ECDSA (P-521)     # Very strong
+
+# Signature algorithms:
+SHA-256, SHA-384, SHA-512 # Good
+SHA-1                     # DEPRECATED - collision attacks
+MD5                       # BROKEN - must not use
+{% endraw %}
+</key_analysis>
+</certificate_analysis>
+
+<advanced_techniques>
+<ct_log_mining>
+{% raw %}
+# Certificate Transparency Log Mining
+# Historical certificate issuance reveals:
+# - Previously used subdomains
+# - Development/staging environments
+# - Acquired domains
+# - Internal hostnames accidentally exposed
+
+# CT search tools:
+crt.sh                    # https://crt.sh/?q=example.com
+Censys                    # https://search.censys.io
+Google CT                 # https://transparencyreport.google.com/
+Facebook CT               # https://developers.facebook.com/tools/ct
+
+# Query patterns:
+%.example.com             # All subdomains
+example.com               # Exact domain
+%.%.example.com           # Two-level subdomains
+
+# Look for:
+# - admin.*, staging.*, dev.*, test.*
+# - api.*, app.*, portal.*
+# - Internal service names
+# - Deprecated domains still in CT logs
+{% endraw %}
+</ct_log_mining>
+
+<organizational_recon>
+{% raw %}
+# Extract organizational information from certificates
+
+Subject:
+  CN = www.example.com
+  O = Example Corporation
+  L = San Francisco
+  ST = California
+  C = US
+
+# Organization (O) reveals company name
+# Location fields (L, ST, C) reveal geography
+# Email fields may reveal contact info
+# Organizational Unit (OU) may reveal departments
+
+# EV certificates have verified organization info
+# DV certificates have minimal info (domain only)
+# OV certificates have some verified org info
+{% endraw %}
+</organizational_recon>
+
+<wildcard_analysis>
+{% raw %}
+# Wildcard Certificate Implications
+CN = *.example.com
+
+# Wildcard scope:
+*.example.com             # Matches single level only
+# Matches: www.example.com, api.example.com
+# NOT: www.api.example.com (multi-level)
+
+# Security implications:
+# - Compromise of one subdomain = compromise of all
+# - Private key shared across all services
+# - Cannot use for multi-level subdomains
+
+# Check for wildcard in:
+# - CN (Common Name)
+# - SANs (Subject Alternative Names)
+{% endraw %}
+</wildcard_analysis>
+
+<protocol_downgrade>
+{% raw %}
+# Protocol Downgrade Attack Vectors
+
+# Test for deprecated protocols:
+openssl s_client -connect example.com:443 -ssl3    # SSLv3
+openssl s_client -connect example.com:443 -tls1    # TLS 1.0
+openssl s_client -connect example.com:443 -tls1_1  # TLS 1.1
+
+# POODLE vulnerability (SSLv3)
+# BEAST vulnerability (TLS 1.0 with CBC)
+# Lucky13 (TLS 1.0/1.1 with CBC)
+
+# Check for TLS_FALLBACK_SCSV support
+# Prevents protocol downgrade attacks
+{% endraw %}
+</protocol_downgrade>
+</advanced_techniques>
+
+<validation>
+1. Verify certificate chain completeness with multiple clients.
+2. Confirm cipher issues are exploitable, not just theoretical.
+3. Cross-reference CT log findings with active DNS records.
+4. Test protocol support from different network locations.
+5. Validate expiration timeline against operational impact.
+6. Check if weak ciphers are actually negotiable vs just listed.
+7. Verify self-signed certs are intentional vs misconfiguration.
+</validation>
+
+<false_positives>
+- CT logs show historical certs that may be revoked/expired
+- Load balancer may have different cert than origin
+- CDN certificates vs origin certificates differ
+- Internal CA is valid for private networks
+- Some weak ciphers may be enabled but never negotiated
+- Certificate testing tools may report theoretical vs actual risks
+- Multi-region deployments may have different certificates
+</false_positives>
+
+<impact>
+- Expired certificates cause user warnings and abandonment
+- Weak ciphers enable traffic decryption (MITM)
+- Deprecated protocols have known vulnerabilities
+- SAN exposure reveals hidden attack surface
+- Self-signed certs enable impersonation attacks
+- Short keys can be factored with enough resources
+- Missing chain causes trust failures
+</impact>
+
+<pro_tips>
+1. Always check crt.sh for historical subdomains before testing.
+2. Compare certificates across multiple ports (443, 8443, etc.).
+3. Check for different certs on www vs naked domain.
+4. Look for staging/dev environments in SANs and CT logs.
+5. Monitor CT logs for new certificate issuance (shadow IT detection).
+6. Test from multiple network paths - CDN may have different cert.
+7. Check Certificate Revocation status (OCSP/CRL).
+8. Extract email addresses from certificate fields.
+9. Note certificate renewal patterns for operational insights.
+10. Use SSL Labs for comprehensive public-facing analysis.
+</pro_tips>
+
+<remember>SSL/TLS certificates are a goldmine for reconnaissance. SANs and CT logs reveal hidden infrastructure. Always extract and enumerate every domain found. Certificate security directly impacts confidentiality - weak configurations enable traffic interception.</remember>
+</ssl_certificate_analyzer_guide>

@@ -217,6 +217,17 @@ electron app.asar
 - Update mechanism compromise
 </impact>
 
+<false_positives>
+- nodeIntegration enabled but only in trusted preload context with contextIsolation
+- webSecurity disabled but application only loads local/trusted content
+- IPC handlers exist but validate sender and sanitize input
+- Protocol handler registered but parses and validates all URL parameters
+- asar file unencrypted but code signing prevents tampering
+- DevTools accessible but only in development builds
+- Remote module enabled but wrapped with security checks
+- File system access present but restricted to application directory
+</false_positives>
+
 <pro_tips>
 1. Check webPreferences in main.js—security starts there
 2. nodeIntegration:true + any XSS = RCE

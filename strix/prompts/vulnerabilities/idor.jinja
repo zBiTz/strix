@@ -27,8 +27,8 @@
 </parameter_analysis>
 
 <advanced_enumeration>
-- Alternate types: {% raw %}{"id":123}{% endraw} vs {% raw %}{"id":"123"}{% endraw}, arrays vs scalars, objects vs scalars, null/empty/0/-1/MAX_INT, scientific notation, overflows, unknown attributes retained by backend
-- Duplicate keys/parameter pollution: id=1&id=2, JSON duplicate keys {% raw %}{"id":1,"id":2}{% endraw} (parser precedence differences)
+- Alternate types: {% raw %}{"id":123}{% endraw %} vs {% raw %}{"id":"123"}{% endraw %}, arrays vs scalars, objects vs scalars, null/empty/0/-1/MAX_INT, scientific notation, overflows, unknown attributes retained by backend
+- Duplicate keys/parameter pollution: id=1&id=2, JSON duplicate keys {% raw %}{"id":1,"id":2}{% endraw %} (parser precedence differences)
 - Case/aliasing: userId vs userid vs USER_ID; alt names like resourceId, targetId, account
 - Path traversal-like in virtual file systems: /files/user_123/../../user_456/report.csv
 - Directory/list endpoints as seeders: search/list/suggest/export often leak object IDs for secondary exploitation

@@ -123,5 +123,28 @@ shell.php.txt with PHP code
 - Mass defacement and data theft
 </impact>
 
+<false_positives>
+- CHANGELOG.txt accessible but version is fully patched (no applicable CVEs)
+- RESTful API enabled but requires authentication for all endpoints
+- update.php accessible but protected by file permissions or .htaccess
+- settings.php readable in error messages but contains no real credentials (development defaults)
+- Views module enabled but all queries use parameterized input
+- User enumeration possible but rate limited and monitored
+- Form API accepts input but properly sanitizes before database queries
+</false_positives>
+
+<pro_tips>
+1. Check Drupal version via CHANGELOG.txt, META tag, or response headers first—it determines applicable exploits.
+2. Drupalgeddon 2 (SA-CORE-2018-002) affects Drupal 7.x < 7.58 and 8.x < 8.3.9—prioritize version checks.
+3. RESTful Web Services often expose /user/1 (admin) and /node endpoints without authentication.
+4. settings.php may be exposed via backup files (.bak, ~, .old) or directory listing.
+5. Views SQL injection requires finding user-controlled parameters in Views AJAX requests.
+6. Test update.php access—it's often forgotten and allows administrative actions.
+7. Drupal 8+ uses Twig templates—test for SSTI if custom templating is used.
+8. Check for contributed modules at /sites/all/modules/ or /modules/contrib/—many have CVEs.
+9. Form API (#type, #markup) fields with user input often lead to XSS or RCE.
+10. Use drupalgeddon2 scanner tools for automated SA-CORE vulnerability detection.
+</pro_tips>
+
 <remember>Drupal security: Check for Drupalgeddon vulnerabilities (SA-CORE-2014-005, SA-CORE-2018-002, SA-CORE-2018-004) which allow RCE and SQLi. Test RESTful Web Services for auth bypass. Enumerate modules and check for known vulnerabilities. Look for settings.php exposure containing database credentials.</remember>
 </drupal_security_guide>

