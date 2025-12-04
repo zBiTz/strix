@@ -18,6 +18,10 @@ from .registry import (
 from .validation import generate_missing_param_error
 
 
+# HTTP timeout for sandbox requests (tool timeout + buffer for network/processing)
+SANDBOX_HTTP_TIMEOUT = int(os.getenv("STRIX_TOOL_TIMEOUT", "300")) + 30
+
+
 async def execute_tool(tool_name: str, agent_state: Any | None = None, **kwargs: Any) -> Any:
     execute_in_sandbox = should_execute_in_sandbox(tool_name)
     sandbox_mode = os.getenv("STRIX_SANDBOX_MODE", "false").lower() == "true"
@@ -66,13 +70,18 @@ async def _execute_tool_in_sandbox(tool_name: str, agent_state: Any, **kwargs: A
     async with httpx.AsyncClient(trust_env=False) as client:
         try:
             response = await client.post(
-                request_url, json=request_data, headers=headers, timeout=None
+                request_url, json=request_data, headers=headers, timeout=SANDBOX_HTTP_TIMEOUT
             )
             response.raise_for_status()
             response_data = response.json()
             if response_data.get("error"):
                 raise RuntimeError(f"Sandbox execution error: {response_data['error']}")
             return response_data.get("result")
+        except httpx.TimeoutException:
+            raise RuntimeError(
+                f"Tool execution timed out after {SANDBOX_HTTP_TIMEOUT} seconds. "
+                "The tool server may be overloaded or unresponsive."
+            ) from None
         except httpx.HTTPStatusError as e:
             if e.response.status_code == 401:
                 raise RuntimeError("Authentication failed: Invalid or missing sandbox token") from e
