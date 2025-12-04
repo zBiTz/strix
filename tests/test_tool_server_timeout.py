@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import queue
 from multiprocessing import Queue
@@ -38,8 +39,6 @@ class TestToolServerTimeout:
 
     def test_error_dict_to_string_conversion(self) -> None:
         """Test that error dicts are converted to JSON strings."""
-        import json
-
         test_error_dict = {
             "error": "Missing parameter",
             "parameter": "domain",

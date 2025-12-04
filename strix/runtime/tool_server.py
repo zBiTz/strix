@@ -70,7 +70,7 @@ class ToolExecutionResponse(BaseModel):
     error: str | None = None
 
 
-def agent_worker(  # noqa: PLR0912, PLR0915
+def agent_worker(
     _agent_id: str, request_queue: Queue[Any], response_queue: Queue[Any]
 ) -> None:
     null_handler = logging.NullHandler()
@@ -88,15 +88,14 @@ def agent_worker(  # noqa: PLR0912, PLR0915
     from strix.tools.validation import generate_missing_param_error
 
     while True:
-        request = None
         try:
             request = request_queue.get()
 
             if request is None:
                 break
 
-            tool_name = request["tool_name"]
-            kwargs = request["kwargs"]
+            tool_name = request.get("tool_name", "unknown")
+            kwargs = request.get("kwargs", {})
 
             try:
                 tool_func = get_tool_by_name(tool_name)
@@ -142,12 +141,12 @@ def agent_worker(  # noqa: PLR0912, PLR0915
                 response_queue.put({"error": f"Unexpected error executing {tool_name}: {e!s}"})
 
         except Exception as e:  # noqa: BLE001
-            # Even if request parsing fails, try to send an error response
-            if request is not None:
-                try:  # noqa: SIM105
-                    response_queue.put({"error": f"Worker error: {e!s}"})
-                except Exception:  # noqa: BLE001, S110
-                    pass  # Queue might be broken, nothing we can do
+            # Even if getting request from queue fails, try to send an error response
+            # Use contextlib.suppress for cleaner exception handling
+            from contextlib import suppress
+
+            with suppress(Exception):
+                response_queue.put({"error": f"Worker error: {e!s}"})
 
 
 def ensure_agent_process(agent_id: str) -> tuple[Queue[Any], Queue[Any]]:
