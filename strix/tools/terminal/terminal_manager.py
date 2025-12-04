@@ -14,6 +14,8 @@ logger = logging.getLogger(__name__)
 
 
 class TerminalManager:
+    OUTER_TIMEOUT_BUFFER = 5.0  # Buffer seconds for outer timeout wrapper
+
     def __init__(self) -> None:
         self.sessions: dict[str, TerminalSession] = {}
         self._lock = threading.Lock()
@@ -32,8 +34,8 @@ class TerminalManager:
     ) -> dict[str, Any]:
         effective_timeout = timeout or self.default_timeout
 
-        # Add 5 seconds buffer for the outer timeout
-        outer_timeout = effective_timeout + 5
+        # Add buffer for the outer timeout to allow session-level timeout to trigger first
+        outer_timeout = effective_timeout + self.OUTER_TIMEOUT_BUFFER
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
             future = executor.submit(

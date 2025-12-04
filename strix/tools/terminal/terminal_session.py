@@ -28,6 +28,7 @@ class TerminalSession:
     HISTORY_LIMIT = 10_000
     PS1_END = "]$ "
     MAX_COMMAND_TIMEOUT = 300.0  # 5 minutes absolute maximum
+    ITERATION_BUFFER = 10  # Extra iterations beyond expected timeout duration
 
     def __init__(self, session_id: str, work_dir: str = "/workspace") -> None:
         self.session_id = session_id
@@ -133,7 +134,19 @@ class TerminalSession:
         return False
 
     def _detect_command_completion(self, cur_pane_output: str, initial_output: str) -> bool:
-        """Detect if a command has completed using multiple methods."""
+        """Detect if a command has completed using multiple methods.
+
+        This fallback method provides additional detection mechanisms beyond the standard
+        PS1 pattern matching. It's available for future enhancements where the custom PS1
+        prompt may not be reliably set up or detected.
+
+        Args:
+            cur_pane_output: Current pane output to check
+            initial_output: Initial output before command was sent
+
+        Returns:
+            True if command completion is detected, False otherwise
+        """
         ps1_matches = self._matches_ps1_metadata(cur_pane_output)
 
         # Method 1: Custom PS1 pattern (preferred)
@@ -377,7 +390,8 @@ class TerminalSession:
         last_pane_output = initial_pane_output
 
         # Add iteration counter as backup safety
-        max_iterations = int(effective_timeout / self.POLL_INTERVAL) + 10
+        # Calculate expected iterations + buffer to handle edge cases
+        max_iterations = int(effective_timeout / self.POLL_INTERVAL) + self.ITERATION_BUFFER
         iteration = 0
 
         is_special_key = self._is_special_key(command)
