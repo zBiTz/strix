@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<tools>
+  <tool name="api_fuzzer">
+    <description>Generate fuzzing payloads and test cases for API security testing.</description>
+    <details>Common Use Cases:
+      - Generate fuzzing payloads by category (SQL injection, XSS, path traversal, etc.)
+      - Fuzz API parameters with various attack payloads
+      - Generate header injection test cases
+      - Generate HTTP method fuzzing test cases
+      - Test for injection vulnerabilities in API endpoints</details>
+    <parameters>
+      <parameter name="action" type="string" required="true">
+        <description>The fuzzing action to perform:
+          - generate_payloads: Generate fuzzing payloads by category
+          - fuzz_params: Generate fuzzed parameter combinations
+          - fuzz_headers: Generate header injection test cases
+          - fuzz_methods: Generate HTTP method test cases</description>
+      </parameter>
+      <parameter name="params" type="object" required="false">
+        <description>Parameters to fuzz (dict of param name to value). Required for fuzz_params action.</description>
+      </parameter>
+      <parameter name="endpoint" type="string" required="false">
+        <description>API endpoint URL for method fuzzing. Required for fuzz_methods action.</description>
+      </parameter>
+      <parameter name="categories" type="array" required="false">
+        <description>Payload categories to include (sql_injection, nosql_injection, xss, path_traversal, command_injection, ssti, type_juggling, special_chars, boundary)</description>
+      </parameter>
+    </parameters>
+    <returns type="Dict[str, Any]">
+      <description>Fuzzing payloads and test cases for security testing</description>
+    </returns>
+    <examples>
+      # Generate SQL injection and XSS payloads
+      <function=api_fuzzer>
+      <parameter=action>generate_payloads</parameter>
+      <parameter=categories>["sql_injection", "xss"]</parameter>
+      </function>
+
+      # Fuzz parameters with attack payloads
+      <function=api_fuzzer>
+      <parameter=action>fuzz_params</parameter>
+      <parameter=params>{"id": "1", "name": "test"}</parameter>
+      </function>
+
+      # Generate header injection test cases
+      <function=api_fuzzer>
+      <parameter=action>fuzz_headers</parameter>
+      </function>
+
+      # Generate HTTP method test cases
+      <function=api_fuzzer>
+      <parameter=action>fuzz_methods</parameter>
+      <parameter=endpoint>https://api.example.com/users</parameter>
+      </function>
+    </examples>
+  </tool>
+</tools>

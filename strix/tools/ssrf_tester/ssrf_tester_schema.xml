@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<tools>
+  <tool name="ssrf_tester">
+    <description>Test for SSRF (Server-Side Request Forgery) vulnerabilities.</description>
+    <details>Common Use Cases:
+      - Test basic SSRF with callback verification
+      - Test access to cloud metadata endpoints (AWS, GCP, Azure)
+      - Test access to internal services (Docker, Redis, etc.)
+      - Generate SSRF payloads with bypass techniques
+      - Test specific endpoints with custom payloads</details>
+    <parameters>
+      <parameter name="action" type="string" required="true">
+        <description>The testing action:
+          - test_basic: Test basic SSRF with callback
+          - test_cloud_metadata: Test access to cloud metadata endpoints
+          - test_internal: Test access to internal services
+          - generate_payload: Generate SSRF payload
+          - test_endpoint: Test specific endpoint with payload</description>
+      </parameter>
+      <parameter name="url" type="string" required="false">
+        <description>Base URL for testing. Required for test_* actions.</description>
+      </parameter>
+      <parameter name="param_name" type="string" required="false">
+        <description>Parameter name to test (default: url)</description>
+      </parameter>
+      <parameter name="payload_type" type="string" required="false">
+        <description>Type of payload: aws_metadata, gcp_metadata, azure_metadata, localhost, internal_network, custom</description>
+      </parameter>
+      <parameter name="target" type="string" required="false">
+        <description>Custom target URL</description>
+      </parameter>
+      <parameter name="callback_url" type="string" required="false">
+        <description>Callback URL for OOB verification. Required for test_basic.</description>
+      </parameter>
+      <parameter name="timeout" type="integer" required="false">
+        <description>Request timeout in seconds (default: 10)</description>
+      </parameter>
+    </parameters>
+    <returns type="Dict[str, Any]">
+      <description>Test results or generated payloads</description>
+    </returns>
+    <examples>
+      # Test basic SSRF
+      <function=ssrf_tester>
+      <parameter=action>test_basic</parameter>
+      <parameter=url>https://example.com/fetch</parameter>
+      <parameter=callback_url>https://callback.com</parameter>
+      </function>
+
+      # Test cloud metadata access
+      <function=ssrf_tester>
+      <parameter=action>test_cloud_metadata</parameter>
+      <parameter=url>https://example.com/fetch</parameter>
+      </function>
+
+      # Generate payload
+      <function=ssrf_tester>
+      <parameter=action>generate_payload</parameter>
+      <parameter=payload_type>aws_metadata</parameter>
+      </function>
+    </examples>
+  </tool>
+</tools>

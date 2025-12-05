@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<tools>
+  <tool name="payload_encoder">
+    <description>Multi-layer encoding with WAF bypass transformations.</description>
+    <details>Common Use Cases:
+      - Encode payloads using URL, HTML, Base64, Hex, Unicode, Octal
+      - Decode encoded payloads
+      - Apply multiple encodings in sequence
+      - Generate WAF bypass variants of payloads</details>
+    <parameters>
+      <parameter name="action" type="string" required="true">
+        <description>The encoding action to perform:
+          - encode: Apply single encoding
+          - decode: Decode a payload
+          - multi_encode: Apply multiple encodings in sequence
+          - generate_bypass: Generate WAF bypass variants</description>
+      </parameter>
+      <parameter name="payload" type="string" required="true">
+        <description>The payload to encode/decode</description>
+      </parameter>
+      <parameter name="encoding" type="string" required="false">
+        <description>Encoding type: url, html, base64, hex, unicode, octal. Required for encode/decode.</description>
+      </parameter>
+      <parameter name="encodings" type="array" required="false">
+        <description>List of encodings for multi_encode (applied in order). Required for multi_encode.</description>
+      </parameter>
+      <parameter name="decode" type="boolean" required="false">
+        <description>Whether to decode instead of encode (for single encoding)</description>
+      </parameter>
+    </parameters>
+    <returns type="Dict[str, Any]">
+      <description>Encoded payload(s) and transformation details</description>
+    </returns>
+    <examples>
+      # URL encode a payload
+      <function=payload_encoder>
+      <parameter=action>encode</parameter>
+      <parameter=payload>&lt;script&gt;alert(1)&lt;/script&gt;</parameter>
+      <parameter=encoding>url</parameter>
+      </function>
+
+      # Decode a URL-encoded payload
+      <function=payload_encoder>
+      <parameter=action>decode</parameter>
+      <parameter=payload>%3Cscript%3E</parameter>
+      <parameter=encoding>url</parameter>
+      </function>
+
+      # Multi-layer encoding
+      <function=payload_encoder>
+      <parameter=action>multi_encode</parameter>
+      <parameter=payload>alert(1)</parameter>
+      <parameter=encodings>["url", "base64"]</parameter>
+      </function>
+
+      # Generate WAF bypass variants
+      <function=payload_encoder>
+      <parameter=action>generate_bypass</parameter>
+      <parameter=payload>&lt;script&gt;alert(1)&lt;/script&gt;</parameter>
+      </function>
+    </examples>
+  </tool>
+</tools>

@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<tools>
+  <tool name="waf_bypass_toolkit">
+    <description>WAF Bypass Toolkit for evading Web Application Firewall detection.</description>
+    <details>Common Use Cases:
+      - Encode payloads with various methods (URL, HTML, Base64, Hex, Unicode)
+      - Generate multiple payload variants
+      - Generate case variations
+      - Inject comments to evade detection
+      - Generate Unicode-based bypasses</details>
+    <parameters>
+      <parameter name="action" type="string" required="true">
+        <description>The bypass technique:
+          - encode_payload: Encode payload with various methods
+          - generate_variants: Generate multiple payload variants
+          - case_manipulation: Generate case variations
+          - comment_injection: Inject comments to evade detection
+          - unicode_bypass: Generate Unicode-based bypasses</description>
+      </parameter>
+      <parameter name="payload" type="string" required="false">
+        <description>Original payload to transform. Required for most actions.</description>
+      </parameter>
+      <parameter name="encoding_type" type="string" required="false">
+        <description>Specific encoding: url, double_url, hex, base64</description>
+      </parameter>
+    </parameters>
+    <returns type="Dict[str, Any]">
+      <description>Transformed payloads for WAF bypass testing</description>
+    </returns>
+    <examples>
+      # Encode payload
+      <function=waf_bypass_toolkit>
+      <parameter=action>encode_payload</parameter>
+      <parameter=payload>&lt;script&gt;alert(1)&lt;/script&gt;</parameter>
+      </function>
+
+      # Generate variants
+      <function=waf_bypass_toolkit>
+      <parameter=action>generate_variants</parameter>
+      <parameter=payload>' OR '1'='1</parameter>
+      </function>
+
+      # Case manipulation
+      <function=waf_bypass_toolkit>
+      <parameter=action>case_manipulation</parameter>
+      <parameter=payload>SELECT * FROM users</parameter>
+      </function>
+
+      # Comment injection
+      <function=waf_bypass_toolkit>
+      <parameter=action>comment_injection</parameter>
+      <parameter=payload>SELECT * FROM users</parameter>
+      </function>
+    </examples>
+  </tool>
+</tools>

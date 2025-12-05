@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<tools>
+  <tool name="graphql_introspection">
+    <description>GraphQL introspection and security analysis tool.</description>
+    <details>Common Use Cases:
+      - Generate introspection queries for GraphQL endpoints
+      - Parse and analyze GraphQL schemas
+      - Generate sample queries from introspection results
+      - Analyze schemas for security vulnerabilities
+      - Identify sensitive types, mutations, and fields</details>
+    <parameters>
+      <parameter name="action" type="string" required="true">
+        <description>The GraphQL action to perform:
+          - introspection_query: Get introspection query to send
+          - parse_schema: Parse introspection result and extract types
+          - generate_queries: Generate sample queries from schema
+          - security_analysis: Analyze schema for security issues</description>
+      </parameter>
+      <parameter name="schema_data" type="object" required="false">
+        <description>Introspection query result (JSON) for parsing. Required for parse_schema, generate_queries, security_analysis.</description>
+      </parameter>
+      <parameter name="endpoint" type="string" required="false">
+        <description>GraphQL endpoint URL (for reference in output)</description>
+      </parameter>
+    </parameters>
+    <returns type="Dict[str, Any]">
+      <description>Introspection queries, parsed schema, or security analysis results</description>
+    </returns>
+    <examples>
+      # Get introspection query
+      <function=graphql_introspection>
+      <parameter=action>introspection_query</parameter>
+      <parameter=endpoint>https://api.example.com/graphql</parameter>
+      </function>
+
+      # Parse introspection result
+      <function=graphql_introspection>
+      <parameter=action>parse_schema</parameter>
+      <parameter=schema_data>{"data": {"__schema": {...}}}</parameter>
+      </function>
+
+      # Generate queries from schema
+      <function=graphql_introspection>
+      <parameter=action>generate_queries</parameter>
+      <parameter=schema_data>{"data": {"__schema": {...}}}</parameter>
+      </function>
+
+      # Security analysis
+      <function=graphql_introspection>
+      <parameter=action>security_analysis</parameter>
+      <parameter=schema_data>{"data": {"__schema": {...}}}</parameter>
+      </function>
+    </examples>
+  </tool>
+</tools>

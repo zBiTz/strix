@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<tools>
+  <tool name="dns_resolver">
+    <description>Perform DNS record lookups and analysis for security reconnaissance.</description>
+    <details>Common Use Cases:
+      - Query specific DNS record types (A, AAAA, CNAME, MX, NS)
+      - Get all common record types for a domain
+      - Perform reverse DNS lookups
+      - Check for zone transfer vulnerabilities
+      - Analyze SPF, DMARC, DKIM security records</details>
+    <parameters>
+      <parameter name="action" type="string" required="true">
+        <description>The DNS action to perform:
+          - lookup: Query a specific record type
+          - all_records: Get all common record types
+          - reverse: Perform reverse DNS lookup
+          - zone_transfer: Check for zone transfer vulnerability</description>
+      </parameter>
+      <parameter name="domain" type="string" required="false">
+        <description>Target domain to query. Required for lookup, all_records, zone_transfer.</description>
+      </parameter>
+      <parameter name="ip_address" type="string" required="false">
+        <description>IP address for reverse lookup. Required for reverse action.</description>
+      </parameter>
+      <parameter name="record_type" type="string" required="false">
+        <description>DNS record type to query: A, AAAA, CNAME, MX, NS, TXT, SOA (default: A)</description>
+      </parameter>
+      <parameter name="timeout" type="integer" required="false">
+        <description>Socket timeout in seconds (default: 10)</description>
+      </parameter>
+    </parameters>
+    <returns type="Dict[str, Any]">
+      <description>DNS resolution results including records and security analysis</description>
+    </returns>
+    <examples>
+      # Lookup A records
+      <function=dns_resolver>
+      <parameter=action>lookup</parameter>
+      <parameter=domain>example.com</parameter>
+      <parameter=record_type>A</parameter>
+      </function>
+
+      # Get all record types
+      <function=dns_resolver>
+      <parameter=action>all_records</parameter>
+      <parameter=domain>example.com</parameter>
+      </function>
+
+      # Reverse DNS lookup
+      <function=dns_resolver>
+      <parameter=action>reverse</parameter>
+      <parameter=ip_address>8.8.8.8</parameter>
+      </function>
+
+      # Check for zone transfer
+      <function=dns_resolver>
+      <parameter=action>zone_transfer</parameter>
+      <parameter=domain>example.com</parameter>
+      </function>
+    </examples>
+  </tool>
+</tools>

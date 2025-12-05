@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<tools>
+  <tool name="google_dorker">
+    <description>Generate Google dork queries for security reconnaissance.</description>
+    <details>Common Use Cases:
+      - Generate dorks from predefined security templates
+      - Build custom dork queries with operators
+      - Discover exposed files, credentials, and directories
+      - Find login pages and admin panels
+      - Enumerate subdomains and cloud storage</details>
+    <parameters>
+      <parameter name="action" type="string" required="true">
+        <description>The dork action to perform:
+          - generate: Generate dorks from predefined templates
+          - build_query: Build a custom dork query
+          - list_templates: List available dork templates and operators</description>
+      </parameter>
+      <parameter name="domain" type="string" required="false">
+        <description>Target domain for dork queries. Required for generate action.</description>
+      </parameter>
+      <parameter name="categories" type="array" required="false">
+        <description>Specific categories to include: sensitive_files, exposed_documents, login_pages, error_pages, exposed_directories, git_exposure, credentials, api_endpoints, wordpress, cloud_storage, subdomains, technology_detection</description>
+      </parameter>
+      <parameter name="keywords" type="array" required="false">
+        <description>Search keywords for custom query (for build_query)</description>
+      </parameter>
+      <parameter name="file_types" type="array" required="false">
+        <description>File types to search for (for build_query)</description>
+      </parameter>
+      <parameter name="inurl" type="array" required="false">
+        <description>URL patterns to search for (for build_query)</description>
+      </parameter>
+      <parameter name="intitle" type="array" required="false">
+        <description>Title patterns to search for (for build_query)</description>
+      </parameter>
+      <parameter name="exclude" type="array" required="false">
+        <description>Keywords to exclude from results (for build_query)</description>
+      </parameter>
+    </parameters>
+    <returns type="Dict[str, Any]">
+      <description>Generated dork queries with Google search URLs</description>
+    </returns>
+    <examples>
+      # Generate dorks for a domain
+      <function=google_dorker>
+      <parameter=action>generate</parameter>
+      <parameter=domain>example.com</parameter>
+      </function>
+
+      # Generate specific categories
+      <function=google_dorker>
+      <parameter=action>generate</parameter>
+      <parameter=domain>example.com</parameter>
+      <parameter=categories>["sensitive_files", "credentials"]</parameter>
+      </function>
+
+      # Build custom query
+      <function=google_dorker>
+      <parameter=action>build_query</parameter>
+      <parameter=domain>example.com</parameter>
+      <parameter=keywords>["api", "key"]</parameter>
+      <parameter=file_types>["json", "env"]</parameter>
+      </function>
+
+      # List available templates
+      <function=google_dorker>
+      <parameter=action>list_templates</parameter>
+      </function>
+    </examples>
+  </tool>
+</tools>

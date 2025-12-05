@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<tools>
+  <tool name="oob_server">
+    <description>Out-of-Band Interaction Server for blind vulnerability detection.</description>
+    <details>Common Use Cases:
+      - Generate unique OOB payloads for blind testing
+      - Detect blind SSRF vulnerabilities
+      - Detect blind XSS and XXE
+      - Detect blind command injection
+      - Track payload interactions
+      - DNS and HTTP exfiltration testing</details>
+    <parameters>
+      <parameter name="action" type="string" required="true">
+        <description>The OOB action to perform:
+          - generate_payload: Generate unique OOB payload
+          - check_interaction: Check if payload received interaction
+          - list_payloads: List all active payloads
+          - get_url: Get OOB URL for a payload</description>
+      </parameter>
+      <parameter name="payload_id" type="string" required="false">
+        <description>Unique identifier for payload. Required for check_interaction, get_url.</description>
+      </parameter>
+      <parameter name="base_domain" type="string" required="false">
+        <description>Base domain for DNS payloads (default: oob.example.com)</description>
+      </parameter>
+      <parameter name="base_url" type="string" required="false">
+        <description>Base URL for HTTP payloads (default: https://oob.example.com)</description>
+      </parameter>
+      <parameter name="vulnerability_type" type="string" required="false">
+        <description>Type of vulnerability being tested (ssrf, xxe, xss, etc.)</description>
+      </parameter>
+      <parameter name="context" type="string" required="false">
+        <description>Additional context about the test</description>
+      </parameter>
+    </parameters>
+    <returns type="Dict[str, Any]">
+      <description>OOB payload URLs and interaction status</description>
+    </returns>
+    <examples>
+      # Generate OOB payload
+      <function=oob_server>
+      <parameter=action>generate_payload</parameter>
+      <parameter=base_domain>oob.attacker.com</parameter>
+      <parameter=vulnerability_type>ssrf</parameter>
+      </function>
+
+      # Check for interaction
+      <function=oob_server>
+      <parameter=action>check_interaction</parameter>
+      <parameter=payload_id>abc123def</parameter>
+      </function>
+
+      # List all payloads
+      <function=oob_server>
+      <parameter=action>list_payloads</parameter>
+      </function>
+
+      # Get URL for payload
+      <function=oob_server>
+      <parameter=action>get_url</parameter>
+      <parameter=payload_id>abc123def</parameter>
+      </function>
+    </examples>
+  </tool>
+</tools>

@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<tools>
+  <tool name="response_diff">
+    <description>Compare HTTP responses to detect subtle differences.</description>
+    <details>Common Use Cases:
+      - Detect behavioral changes in responses
+      - Identify WAF bypasses by comparing responses
+      - Find security issues through response analysis
+      - Calculate similarity between responses
+      - Identify specific changes between responses</details>
+    <parameters>
+      <parameter name="action" type="string" required="true">
+        <description>The comparison action:
+          - compare: Full comparison with statistics
+          - diff_text: Generate unified diff output
+          - analyze_similarity: Calculate similarity metrics
+          - find_changes: Identify specific changes</description>
+      </parameter>
+      <parameter name="response1" type="string" required="true">
+        <description>First HTTP response body</description>
+      </parameter>
+      <parameter name="response2" type="string" required="false">
+        <description>Second HTTP response body. Required for comparison actions.</description>
+      </parameter>
+      <parameter name="normalize" type="boolean" required="false">
+        <description>Whether to normalize dynamic values before comparison (default: true)</description>
+      </parameter>
+      <parameter name="ignore_patterns" type="array" required="false">
+        <description>Additional regex patterns to ignore during comparison</description>
+      </parameter>
+      <parameter name="context_lines" type="integer" required="false">
+        <description>Number of context lines in diff output (default: 3)</description>
+      </parameter>
+    </parameters>
+    <returns type="Dict[str, Any]">
+      <description>Comparison results including differences, similarity scores, and analysis</description>
+    </returns>
+    <examples>
+      # Full comparison
+      <function=response_diff>
+      <parameter=action>compare</parameter>
+      <parameter=response1>{"status": "success", "user": "admin"}</parameter>
+      <parameter=response2>{"status": "error", "user": "admin"}</parameter>
+      </function>
+
+      # Generate diff text
+      <function=response_diff>
+      <parameter=action>diff_text</parameter>
+      <parameter=response1>Response 1 content</parameter>
+      <parameter=response2>Response 2 content</parameter>
+      </function>
+
+      # Analyze similarity
+      <function=response_diff>
+      <parameter=action>analyze_similarity</parameter>
+      <parameter=response1>Response 1</parameter>
+      <parameter=response2>Response 2</parameter>
+      </function>
+
+      # Find specific changes
+      <function=response_diff>
+      <parameter=action>find_changes</parameter>
+      <parameter=response1>Response 1</parameter>
+      <parameter=response2>Response 2</parameter>
+      </function>
+    </examples>
+  </tool>
+</tools>

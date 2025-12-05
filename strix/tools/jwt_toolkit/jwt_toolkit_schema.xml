@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<tools>
+  <tool name="jwt_toolkit">
+    <description>JWT Security Toolkit for JWT attacks and manipulation.</description>
+    <details>Common Use Cases:
+      - Decode and analyze JWT tokens
+      - Perform 'none' algorithm attack
+      - Test RS256 to HS256 algorithm confusion
+      - Brute force HMAC secret
+      - Forge tokens with custom claims
+      - JWK injection attacks</details>
+    <parameters>
+      <parameter name="action" type="string" required="true">
+        <description>The JWT attack to perform:
+          - decode: Decode and analyze JWT
+          - none_attack: Create JWT with 'none' algorithm
+          - alg_confusion: Test RS256-&gt;HS256 confusion
+          - crack_secret: Brute force HMAC secret
+          - forge_token: Create forged token with custom claims
+          - jwk_injection: Create token with injected JWK</description>
+      </parameter>
+      <parameter name="token" type="string" required="false">
+        <description>JWT token to manipulate. Required for decode, none_attack, alg_confusion, crack_secret, jwk_injection.</description>
+      </parameter>
+      <parameter name="secret" type="string" required="false">
+        <description>Secret key for signing/verification</description>
+      </parameter>
+      <parameter name="claims" type="object" required="false">
+        <description>Custom claims for forged token. Required for forge_token.</description>
+      </parameter>
+      <parameter name="algorithm" type="string" required="false">
+        <description>Algorithm to use for token creation</description>
+      </parameter>
+      <parameter name="wordlist" type="array" required="false">
+        <description>Wordlist for secret cracking</description>
+      </parameter>
+    </parameters>
+    <returns type="Dict[str, Any]">
+      <description>Results of JWT attack including manipulated tokens</description>
+    </returns>
+    <examples>
+      # Decode JWT
+      <function=jwt_toolkit>
+      <parameter=action>decode</parameter>
+      <parameter=token>eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U</parameter>
+      </function>
+
+      # None algorithm attack
+      <function=jwt_toolkit>
+      <parameter=action>none_attack</parameter>
+      <parameter=token>eyJhbGciOiJIUzI1NiIs...</parameter>
+      </function>
+
+      # Crack secret
+      <function=jwt_toolkit>
+      <parameter=action>crack_secret</parameter>
+      <parameter=token>eyJhbGciOiJIUzI1NiIs...</parameter>
+      <parameter=wordlist>["secret", "password", "key123"]</parameter>
+      </function>
+
+      # Forge token
+      <function=jwt_toolkit>
+      <parameter=action>forge_token</parameter>
+      <parameter=claims>{"sub": "admin", "role": "admin"}</parameter>
+      <parameter=secret>my_secret</parameter>
+      </function>
+    </examples>
+  </tool>
+</tools>

@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<tools>
+  <tool name="ssti_tester">
+    <description>Test for SSTI (Server-Side Template Injection) vulnerabilities.</description>
+    <details>Common Use Cases:
+      - Detect template engine (Jinja2, Twig, Freemarker, etc.)
+      - Test basic SSTI injection
+      - Generate RCE payloads for specific engines
+      - Test endpoints with SSTI payloads</details>
+    <parameters>
+      <parameter name="action" type="string" required="true">
+        <description>The testing action:
+          - detect_engine: Detect template engine
+          - test_basic: Test basic SSTI
+          - generate_payload: Generate RCE payload for engine
+          - test_endpoint: Test endpoint with SSTI payload</description>
+      </parameter>
+      <parameter name="url" type="string" required="false">
+        <description>Target URL for testing. Required for detect_engine, test_basic, test_endpoint.</description>
+      </parameter>
+      <parameter name="param_name" type="string" required="false">
+        <description>Parameter name to test (default: name)</description>
+      </parameter>
+      <parameter name="engine" type="string" required="false">
+        <description>Template engine: jinja2, twig, freemarker, velocity, erb, smarty, thymeleaf</description>
+      </parameter>
+      <parameter name="command" type="string" required="false">
+        <description>Command to execute in RCE payload (default: id)</description>
+      </parameter>
+      <parameter name="timeout" type="integer" required="false">
+        <description>Request timeout in seconds (default: 10)</description>
+      </parameter>
+    </parameters>
+    <returns type="Dict[str, Any]">
+      <description>Test results or generated payloads</description>
+    </returns>
+    <examples>
+      # Detect template engine
+      <function=ssti_tester>
+      <parameter=action>detect_engine</parameter>
+      <parameter=url>https://example.com/render</parameter>
+      <parameter=param_name>template</parameter>
+      </function>
+
+      # Generate payload for Jinja2
+      <function=ssti_tester>
+      <parameter=action>generate_payload</parameter>
+      <parameter=engine>jinja2</parameter>
+      <parameter=command>whoami</parameter>
+      </function>
+
+      # Test endpoint
+      <function=ssti_tester>
+      <parameter=action>test_endpoint</parameter>
+      <parameter=url>https://example.com/render</parameter>
+      <parameter=engine>jinja2</parameter>
+      </function>
+    </examples>
+  </tool>
+</tools>

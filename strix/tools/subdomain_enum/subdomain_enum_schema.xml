@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<tools>
+  <tool name="subdomain_enum">
+    <description>Enumerate subdomains for a target domain.</description>
+    <details>Common Use Cases:
+      - Full subdomain enumeration with wordlist
+      - Check if a specific subdomain exists
+      - Get common subdomain wordlist
+      - Wildcard DNS detection and filtering</details>
+    <parameters>
+      <parameter name="action" type="string" required="true">
+        <description>The enumeration action:
+          - enumerate: Full subdomain enumeration with wordlist
+          - check: Check if a specific subdomain exists
+          - wordlist: List available wordlist entries</description>
+      </parameter>
+      <parameter name="domain" type="string" required="true">
+        <description>Target domain to enumerate (e.g., example.com)</description>
+      </parameter>
+      <parameter name="subdomain" type="string" required="false">
+        <description>Specific subdomain to check. Required for check action.</description>
+      </parameter>
+      <parameter name="wordlist" type="array" required="false">
+        <description>Custom wordlist to use (optional)</description>
+      </parameter>
+      <parameter name="timeout" type="integer" required="false">
+        <description>DNS resolution timeout in seconds (default: 2)</description>
+      </parameter>
+    </parameters>
+    <returns type="Dict[str, Any]">
+      <description>Enumeration results including found subdomains and their IP addresses</description>
+    </returns>
+    <examples>
+      # Enumerate subdomains
+      <function=subdomain_enum>
+      <parameter=action>enumerate</parameter>
+      <parameter=domain>example.com</parameter>
+      </function>
+
+      # Check specific subdomain
+      <function=subdomain_enum>
+      <parameter=action>check</parameter>
+      <parameter=domain>example.com</parameter>
+      <parameter=subdomain>www</parameter>
+      </function>
+
+      # Get wordlist
+      <function=subdomain_enum>
+      <parameter=action>wordlist</parameter>
+      <parameter=domain>example.com</parameter>
+      </function>
+    </examples>
+  </tool>
+</tools>

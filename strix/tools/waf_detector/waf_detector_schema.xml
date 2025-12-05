@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<tools>
+  <tool name="waf_detector">
+    <description>Detect and fingerprint Web Application Firewalls (WAF).</description>
+    <details>Common Use Cases:
+      - Detect if WAF is present
+      - Identify specific WAF vendor (Cloudflare, Akamai, AWS WAF, etc.)
+      - Test common WAF bypass techniques</details>
+    <parameters>
+      <parameter name="action" type="string" required="true">
+        <description>The detection action:
+          - detect: Detect if WAF is present
+          - fingerprint: Identify specific WAF vendor
+          - test_bypass: Test WAF bypass techniques</description>
+      </parameter>
+      <parameter name="url" type="string" required="true">
+        <description>Target URL for testing</description>
+      </parameter>
+      <parameter name="timeout" type="integer" required="false">
+        <description>Request timeout in seconds (default: 10)</description>
+      </parameter>
+    </parameters>
+    <returns type="Dict[str, Any]">
+      <description>Detection results and WAF fingerprint information</description>
+    </returns>
+    <examples>
+      # Detect WAF
+      <function=waf_detector>
+      <parameter=action>detect</parameter>
+      <parameter=url>https://example.com</parameter>
+      </function>
+
+      # Fingerprint WAF vendor
+      <function=waf_detector>
+      <parameter=action>fingerprint</parameter>
+      <parameter=url>https://example.com</parameter>
+      </function>
+
+      # Test bypass techniques
+      <function=waf_detector>
+      <parameter=action>test_bypass</parameter>
+      <parameter=url>https://example.com</parameter>
+      </function>
+    </examples>
+  </tool>
+</tools>

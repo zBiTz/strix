@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<tools>
+  <tool name="js_link_extractor">
+    <description>Extract API endpoints, secrets, and sensitive data from JavaScript files.</description>
+    <details>Common Use Cases:
+      - Extract API endpoints from JavaScript code
+      - Find leaked secrets and credentials
+      - Discover domains and external services
+      - Identify authentication and admin endpoints
+      - Detect AWS keys, JWT tokens, API keys</details>
+    <parameters>
+      <parameter name="action" type="string" required="true">
+        <description>The extraction action to perform:
+          - extract_all: Extract endpoints, secrets, and domains
+          - extract_endpoints: Extract API endpoints only
+          - extract_secrets: Extract potential secrets only
+          - extract_domains: Extract domains and URLs only</description>
+      </parameter>
+      <parameter name="js_content" type="string" required="true">
+        <description>JavaScript file content to analyze</description>
+      </parameter>
+      <parameter name="include_comments" type="boolean" required="false">
+        <description>Whether to include commented code in analysis (default: false)</description>
+      </parameter>
+    </parameters>
+    <returns type="Dict[str, Any]">
+      <description>Extracted endpoints, secrets, domains, and analysis summary</description>
+    </returns>
+    <examples>
+      # Extract all findings
+      <function=js_link_extractor>
+      <parameter=action>extract_all</parameter>
+      <parameter=js_content>const apiUrl = '/api/v1/users'; const key = 'sk_live_...';</parameter>
+      </function>
+
+      # Extract endpoints only
+      <function=js_link_extractor>
+      <parameter=action>extract_endpoints</parameter>
+      <parameter=js_content>fetch('/api/admin/users').then(...);</parameter>
+      </function>
+
+      # Extract secrets only
+      <function=js_link_extractor>
+      <parameter=action>extract_secrets</parameter>
+      <parameter=js_content>const AWS_KEY = 'AKIAIOSFODNN7EXAMPLE';</parameter>
+      </function>
+
+      # Extract domains
+      <function=js_link_extractor>
+      <parameter=action>extract_domains</parameter>
+      <parameter=js_content>const cdn = 'https://cdn.example.com';</parameter>
+      </function>
+    </examples>
+  </tool>
+</tools>

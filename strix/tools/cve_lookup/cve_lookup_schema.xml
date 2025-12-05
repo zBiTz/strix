@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<tools>
+  <tool name="cve_lookup">
+    <description>Query CVE databases and match vulnerabilities against technologies.</description>
+    <details>Common Use Cases:
+      - Look up specific CVE details by ID
+      - Search CVEs by keywords
+      - Find CVEs for a specific product and version
+      - Identify exploit availability for vulnerabilities
+      - Get remediation recommendations</details>
+    <parameters>
+      <parameter name="action" type="string" required="true">
+        <description>The lookup action to perform:
+          - lookup: Look up specific CVE by ID
+          - search: Search CVEs by keyword
+          - by_product: Find CVEs for a specific product/version</description>
+      </parameter>
+      <parameter name="cve_id" type="string" required="false">
+        <description>CVE ID to look up (e.g., "CVE-2021-44228"). Required for lookup action.</description>
+      </parameter>
+      <parameter name="query" type="string" required="false">
+        <description>Search query for keywords. Required for search action.</description>
+      </parameter>
+      <parameter name="product" type="string" required="false">
+        <description>Product name for CPE matching. Required for by_product action.</description>
+      </parameter>
+      <parameter name="version" type="string" required="false">
+        <description>Optional product version for more specific matching</description>
+      </parameter>
+    </parameters>
+    <returns type="Dict[str, Any]">
+      <description>CVE information including description, CVSS scores, affected versions, exploit availability, and references</description>
+    </returns>
+    <examples>
+      # Look up specific CVE
+      <function=cve_lookup>
+      <parameter=action>lookup</parameter>
+      <parameter=cve_id>CVE-2021-44228</parameter>
+      </function>
+
+      # Search for vulnerabilities
+      <function=cve_lookup>
+      <parameter=action>search</parameter>
+      <parameter=query>log4j</parameter>
+      </function>
+
+      # Find CVEs by product
+      <function=cve_lookup>
+      <parameter=action>by_product</parameter>
+      <parameter=product>Apache Log4j</parameter>
+      <parameter=version>2.14.0</parameter>
+      </function>
+    </examples>
+  </tool>
+</tools>

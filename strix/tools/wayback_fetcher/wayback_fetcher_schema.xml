@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<tools>
+  <tool name="wayback_fetcher">
+    <description>Fetch historical URLs from the Wayback Machine.</description>
+    <details>Common Use Cases:
+      - Get archived URLs for a domain
+      - Search for URLs matching a pattern
+      - Get available snapshots for a specific URL
+      - Filter by file type (js, json, xml, php, api, config, backup)</details>
+    <parameters>
+      <parameter name="action" type="string" required="true">
+        <description>The fetch action:
+          - fetch: Get archived URLs for a domain
+          - search: Search for URLs matching a pattern
+          - snapshots: Get available snapshots for a specific URL</description>
+      </parameter>
+      <parameter name="domain" type="string" required="false">
+        <description>Target domain to fetch URLs for. Required for fetch, search.</description>
+      </parameter>
+      <parameter name="url" type="string" required="false">
+        <description>Specific URL to get snapshots for. Required for snapshots.</description>
+      </parameter>
+      <parameter name="file_type" type="string" required="false">
+        <description>Filter by file type: js, json, xml, php, asp, jsp, api, config, backup</description>
+      </parameter>
+      <parameter name="pattern" type="string" required="false">
+        <description>Regex pattern to search for. Required for search.</description>
+      </parameter>
+      <parameter name="limit" type="integer" required="false">
+        <description>Maximum number of results (default: 100)</description>
+      </parameter>
+    </parameters>
+    <returns type="Dict[str, Any]">
+      <description>Discovered URLs, snapshots, and metadata from the Wayback Machine</description>
+    </returns>
+    <examples>
+      # Fetch archived URLs
+      <function=wayback_fetcher>
+      <parameter=action>fetch</parameter>
+      <parameter=domain>example.com</parameter>
+      </function>
+
+      # Fetch JavaScript files
+      <function=wayback_fetcher>
+      <parameter=action>fetch</parameter>
+      <parameter=domain>example.com</parameter>
+      <parameter=file_type>js</parameter>
+      </function>
+
+      # Search for API endpoints
+      <function=wayback_fetcher>
+      <parameter=action>search</parameter>
+      <parameter=domain>example.com</parameter>
+      <parameter=pattern>api</parameter>
+      </function>
+
+      # Get snapshots
+      <function=wayback_fetcher>
+      <parameter=action>snapshots</parameter>
+      <parameter=url>https://example.com/page.html</parameter>
+      </function>
+    </examples>
+  </tool>
+</tools>

@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<tools>
+  <tool name="hash_identifier">
+    <description>Identify hash types and suggest cracking approaches.</description>
+    <details>Common Use Cases:
+      - Identify hash algorithm from hash value
+      - Analyze hash characteristics (length, charset, prefix)
+      - Get cracking tool recommendations (hashcat, john)
+      - Assess hash security strength
+      - Detect bcrypt, argon2, PBKDF2, and other modern hashes</details>
+    <parameters>
+      <parameter name="action" type="string" required="true">
+        <description>The identification action:
+          - identify: Identify possible hash types
+          - analyze: Analyze hash characteristics
+          - suggest_crack: Get cracking suggestions and tools</description>
+      </parameter>
+      <parameter name="hash_value" type="string" required="true">
+        <description>The hash value to analyze</description>
+      </parameter>
+    </parameters>
+    <returns type="Dict[str, Any]">
+      <description>Hash identification results with type matches, security level, and cracking tools</description>
+    </returns>
+    <examples>
+      # Identify hash type
+      <function=hash_identifier>
+      <parameter=action>identify</parameter>
+      <parameter=hash_value>5f4dcc3b5aa765d61d8327deb882cf99</parameter>
+      </function>
+
+      # Analyze hash characteristics
+      <function=hash_identifier>
+      <parameter=action>analyze</parameter>
+      <parameter=hash_value>$2a$10$N9qo8uLOickgx2ZMRZoMy</parameter>
+      </function>
+
+      # Get cracking suggestions
+      <function=hash_identifier>
+      <parameter=action>suggest_crack</parameter>
+      <parameter=hash_value>$6$rounds=5000$salt$hash</parameter>
+      </function>
+    </examples>
+  </tool>
+</tools>

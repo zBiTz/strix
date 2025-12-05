@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<tools>
+  <tool name="rate_limit_tester">
+    <description>Test and analyze API rate limiting implementation.</description>
+    <details>Common Use Cases:
+      - Detect if rate limiting exists on an endpoint
+      - Find rate limit threshold
+      - Test common bypass techniques (headers, paths)
+      - Analyze rate limit implementation details</details>
+    <parameters>
+      <parameter name="action" type="string" required="true">
+        <description>The testing action:
+          - detect: Detect if rate limiting exists and find threshold
+          - test_bypass: Test common bypass techniques (headers, paths)
+          - analyze: Analyze rate limit implementation details</description>
+      </parameter>
+      <parameter name="url" type="string" required="true">
+        <description>Target URL to test</description>
+      </parameter>
+      <parameter name="method" type="string" required="false">
+        <description>HTTP method to use (GET or POST). Default: GET</description>
+      </parameter>
+      <parameter name="num_requests" type="integer" required="false">
+        <description>Number of requests for detection (default: 20)</description>
+      </parameter>
+    </parameters>
+    <returns type="Dict[str, Any]">
+      <description>Rate limit detection results, bypass potential, and analysis</description>
+    </returns>
+    <examples>
+      # Detect rate limiting
+      <function=rate_limit_tester>
+      <parameter=action>detect</parameter>
+      <parameter=url>https://api.example.com/endpoint</parameter>
+      </function>
+
+      # Test bypass techniques
+      <function=rate_limit_tester>
+      <parameter=action>test_bypass</parameter>
+      <parameter=url>https://api.example.com/endpoint</parameter>
+      </function>
+
+      # Analyze rate limit implementation
+      <function=rate_limit_tester>
+      <parameter=action>analyze</parameter>
+      <parameter=url>https://api.example.com/endpoint</parameter>
+      </function>
+    </examples>
+  </tool>
+</tools>

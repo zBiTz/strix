@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<tools>
+  <tool name="sast_engine">
+    <description>Static Application Security Testing (SAST) engine for code analysis.</description>
+    <details>Common Use Cases:
+      - Detect SQL injection vulnerabilities in code
+      - Find command injection vulnerabilities
+      - Detect hardcoded secrets and credentials
+      - Find insecure cryptography usage
+      - Detect XXE, SSRF, deserialization vulnerabilities</details>
+    <parameters>
+      <parameter name="action" type="string" required="true">
+        <description>The SAST action:
+          - scan_code: Scan provided code content
+          - scan_file: Scan a file (requires filename)
+          - list_rules: List all available detection rules</description>
+      </parameter>
+      <parameter name="code" type="string" required="false">
+        <description>Code content to scan. Required for scan_code.</description>
+      </parameter>
+      <parameter name="filename" type="string" required="false">
+        <description>Path to file to scan. Required for scan_file.</description>
+      </parameter>
+      <parameter name="custom_rules" type="object" required="false">
+        <description>Additional custom rules to apply</description>
+      </parameter>
+    </parameters>
+    <returns type="Dict[str, Any]">
+      <description>Scan results including vulnerabilities found with severity and location</description>
+    </returns>
+    <examples>
+      # Scan code content
+      <function=sast_engine>
+      <parameter=action>scan_code</parameter>
+      <parameter=code>import os; os.system(user_input)</parameter>
+      </function>
+
+      # Scan a file
+      <function=sast_engine>
+      <parameter=action>scan_file</parameter>
+      <parameter=filename>/path/to/file.py</parameter>
+      </function>
+
+      # List available rules
+      <function=sast_engine>
+      <parameter=action>list_rules</parameter>
+      </function>
+    </examples>
+  </tool>
+</tools>

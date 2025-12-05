@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<tools>
+  <tool name="cvss_calculator">
+    <description>Calculate CVSS scores for vulnerability severity assessment.</description>
+    <details>Common Use Cases:
+      - Calculate CVSS v3.1 scores from individual metrics
+      - Calculate CVSS v4.0 scores
+      - Parse existing CVSS vector strings
+      - Assess vulnerability severity for prioritization
+      - Get remediation timeline recommendations based on severity</details>
+    <parameters>
+      <parameter name="action" type="string" required="true">
+        <description>The calculation action:
+          - calculate_v3: Calculate CVSS v3.1 score from individual metrics
+          - calculate_v4: Calculate CVSS v4.0 score (simplified)
+          - parse_vector: Parse existing CVSS vector string</description>
+      </parameter>
+      <parameter name="vector" type="string" required="false">
+        <description>CVSS vector string (for parse_vector action). E.g., "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"</description>
+      </parameter>
+      <parameter name="av" type="string" required="false">
+        <description>Attack Vector: N=Network, A=Adjacent, L=Local, P=Physical</description>
+      </parameter>
+      <parameter name="ac" type="string" required="false">
+        <description>Attack Complexity: L=Low, H=High</description>
+      </parameter>
+      <parameter name="pr" type="string" required="false">
+        <description>Privileges Required: N=None, L=Low, H=High</description>
+      </parameter>
+      <parameter name="ui" type="string" required="false">
+        <description>User Interaction: N=None, R=Required</description>
+      </parameter>
+      <parameter name="s" type="string" required="false">
+        <description>Scope: U=Unchanged, C=Changed</description>
+      </parameter>
+      <parameter name="c" type="string" required="false">
+        <description>Confidentiality Impact: N=None, L=Low, H=High</description>
+      </parameter>
+      <parameter name="i" type="string" required="false">
+        <description>Integrity Impact: N=None, L=Low, H=High</description>
+      </parameter>
+      <parameter name="a" type="string" required="false">
+        <description>Availability Impact: N=None, L=Low, H=High</description>
+      </parameter>
+    </parameters>
+    <returns type="Dict[str, Any]">
+      <description>CVSS score, severity rating, vector string, subscores, and remediation recommendations</description>
+    </returns>
+    <examples>
+      # Calculate CVSS v3.1 score (Critical RCE)
+      <function=cvss_calculator>
+      <parameter=action>calculate_v3</parameter>
+      <parameter=av>N</parameter>
+      <parameter=ac>L</parameter>
+      <parameter=pr>N</parameter>
+      <parameter=ui>N</parameter>
+      <parameter=s>U</parameter>
+      <parameter=c>H</parameter>
+      <parameter=i>H</parameter>
+      <parameter=a>H</parameter>
+      </function>
+
+      # Parse existing vector
+      <function=cvss_calculator>
+      <parameter=action>parse_vector</parameter>
+      <parameter=vector>CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H</parameter>
+      </function>
+    </examples>
+  </tool>
+</tools>

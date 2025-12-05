@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<tools>
+  <tool name="sqli_tester">
+    <description>Test for SQL injection vulnerabilities in web applications.</description>
+    <details>Common Use Cases:
+      - Comprehensive SQL injection testing (error-based, blind, time-based)
+      - Quick detection of SQL injection
+      - Database fingerprinting (MySQL, PostgreSQL, MSSQL, Oracle, SQLite)
+      - Identify exploitable injection points</details>
+    <parameters>
+      <parameter name="action" type="string" required="true">
+        <description>The testing action to perform:
+          - test: Comprehensive SQL injection testing
+          - detect: Quick detection of SQL injection
+          - fingerprint: Attempt to identify database type</description>
+      </parameter>
+      <parameter name="url" type="string" required="true">
+        <description>Target URL with parameter to test</description>
+      </parameter>
+      <parameter name="param" type="string" required="true">
+        <description>Name of the parameter to test for SQL injection</description>
+      </parameter>
+      <parameter name="method" type="string" required="false">
+        <description>HTTP method to use: GET or POST (default: GET)</description>
+      </parameter>
+    </parameters>
+    <returns type="Dict[str, Any]">
+      <description>SQL injection test results with findings and recommendations</description>
+    </returns>
+    <examples>
+      # Comprehensive SQL injection test
+      <function=sqli_tester>
+      <parameter=action>test</parameter>
+      <parameter=url>https://example.com/page?id=1</parameter>
+      <parameter=param>id</parameter>
+      </function>
+
+      # Quick detection
+      <function=sqli_tester>
+      <parameter=action>detect</parameter>
+      <parameter=url>https://example.com/page?id=1</parameter>
+      <parameter=param>id</parameter>
+      </function>
+
+      # Fingerprint database
+      <function=sqli_tester>
+      <parameter=action>fingerprint</parameter>
+      <parameter=url>https://example.com/page?id=1</parameter>
+      <parameter=param>id</parameter>
+      </function>
+    </examples>
+  </tool>
+</tools>

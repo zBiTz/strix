@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<tools>
+  <tool name="xxe_tester">
+    <description>Test for XXE (XML External Entity) injection vulnerabilities.</description>
+    <details>Common Use Cases:
+      - Test basic XXE payloads on endpoint
+      - Generate out-of-band XXE payload
+      - Generate specific XXE payload
+      - Test endpoint with custom payload
+      - Test file disclosure, SSRF, and OOB techniques</details>
+    <parameters>
+      <parameter name="action" type="string" required="true">
+        <description>The testing action:
+          - test_basic: Test basic XXE payloads on endpoint
+          - test_oob: Generate out-of-band XXE payload
+          - generate_payload: Generate specific XXE payload
+          - test_endpoint: Test endpoint with custom payload</description>
+      </parameter>
+      <parameter name="url" type="string" required="false">
+        <description>Target URL for testing. Required for test_basic, test_endpoint.</description>
+      </parameter>
+      <parameter name="payload_type" type="string" required="false">
+        <description>Type of payload: basic_file, basic_http, xinclude, soap, oob</description>
+      </parameter>
+      <parameter name="target_file" type="string" required="false">
+        <description>File path to target (default: /etc/passwd)</description>
+      </parameter>
+      <parameter name="callback_url" type="string" required="false">
+        <description>Callback URL for OOB attacks. Required for test_oob.</description>
+      </parameter>
+      <parameter name="timeout" type="integer" required="false">
+        <description>Request timeout in seconds (default: 10)</description>
+      </parameter>
+    </parameters>
+    <returns type="Dict[str, Any]">
+      <description>Test results or generated payload</description>
+    </returns>
+    <examples>
+      # Test basic XXE
+      <function=xxe_tester>
+      <parameter=action>test_basic</parameter>
+      <parameter=url>https://example.com/api/xml</parameter>
+      </function>
+
+      # Generate OOB payload
+      <function=xxe_tester>
+      <parameter=action>test_oob</parameter>
+      <parameter=callback_url>https://callback.com</parameter>
+      </function>
+
+      # Generate specific payload
+      <function=xxe_tester>
+      <parameter=action>generate_payload</parameter>
+      <parameter=payload_type>basic_file</parameter>
+      <parameter=target_file>/etc/passwd</parameter>
+      </function>
+
+      # Test endpoint with XInclude
+      <function=xxe_tester>
+      <parameter=action>test_endpoint</parameter>
+      <parameter=url>https://example.com/api/xml</parameter>
+      <parameter=payload_type>xinclude</parameter>
+      </function>
+    </examples>
+  </tool>
+</tools>

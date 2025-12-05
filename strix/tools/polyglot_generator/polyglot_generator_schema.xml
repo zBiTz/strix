@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<tools>
+  <tool name="polyglot_generator">
+    <description>Generate polyglot payloads for multi-context exploitation.</description>
+    <details>Common Use Cases:
+      - Generate XSS polyglots working in multiple contexts
+      - Generate SQL injection polyglots for different DBMS
+      - Generate SSTI polyglots for template engines
+      - Generate command injection polyglots
+      - Test multiple vulnerability types simultaneously</details>
+    <parameters>
+      <parameter name="action" type="string" required="true">
+        <description>The generation action:
+          - generate: Generate polyglot payloads for specified type
+          - list_types: List all available polyglot types
+          - custom: Generate custom polyglot from template</description>
+      </parameter>
+      <parameter name="payload_type" type="string" required="false">
+        <description>Type of polyglot: xss_basic, xss_advanced, sqli_basic, sqli_union, ssti_basic, ssti_advanced, command_injection, xxe_basic, path_traversal, ldap_injection, nosql_injection, multi_context. Required for generate.</description>
+      </parameter>
+      <parameter name="encoding" type="string" required="false">
+        <description>Optional encoding to apply: url, double_url, html, base64, unicode</description>
+      </parameter>
+      <parameter name="custom_template" type="string" required="false">
+        <description>Custom payload template for custom action</description>
+      </parameter>
+    </parameters>
+    <returns type="Dict[str, Any]">
+      <description>Generated polyglot payloads with descriptions and usage tips</description>
+    </returns>
+    <examples>
+      # Generate XSS polyglots
+      <function=polyglot_generator>
+      <parameter=action>generate</parameter>
+      <parameter=payload_type>xss_basic</parameter>
+      </function>
+
+      # Generate with URL encoding
+      <function=polyglot_generator>
+      <parameter=action>generate</parameter>
+      <parameter=payload_type>sqli_basic</parameter>
+      <parameter=encoding>url</parameter>
+      </function>
+
+      # List available types
+      <function=polyglot_generator>
+      <parameter=action>list_types</parameter>
+      </function>
+
+      # Custom polyglot
+      <function=polyglot_generator>
+      <parameter=action>custom</parameter>
+      <parameter=custom_template>' OR '1'='1--</parameter>
+      </function>
+    </examples>
+  </tool>
+</tools>

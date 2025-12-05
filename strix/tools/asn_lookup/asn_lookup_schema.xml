@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<tools>
+  <tool name="asn_lookup">
+    <description>Lookup ASN and IP range information for network reconnaissance.</description>
+    <details>Common Use Cases:
+      - Map IP addresses to their autonomous systems
+      - Get details about an ASN (organization, contacts, allocation)
+      - Enumerate IP prefixes announced by an ASN
+      - Find related IP ranges for an organization
+      - Network infrastructure reconnaissance</details>
+    <parameters>
+      <parameter name="action" type="string" required="true">
+        <description>The lookup action to perform:
+          - lookup_ip: Get ASN info for an IP address
+          - lookup_asn: Get details for an ASN number
+          - prefixes: Get IP prefixes announced by an ASN</description>
+      </parameter>
+      <parameter name="ip_address" type="string" required="false">
+        <description>IP address to lookup (for lookup_ip action)</description>
+      </parameter>
+      <parameter name="asn" type="string" required="false">
+        <description>ASN number to lookup (for lookup_asn, prefixes actions). E.g., "AS15169"</description>
+      </parameter>
+      <parameter name="domain" type="string" required="false">
+        <description>Domain to resolve and lookup (alternative to ip_address)</description>
+      </parameter>
+    </parameters>
+    <returns type="Dict[str, Any]">
+      <description>ASN information, IP ranges, and network details including organization, country, and contact information</description>
+    </returns>
+    <examples>
+      # Lookup ASN info for an IP address
+      <function=asn_lookup>
+      <parameter=action>lookup_ip</parameter>
+      <parameter=ip_address>8.8.8.8</parameter>
+      </function>
+
+      # Get details for an ASN
+      <function=asn_lookup>
+      <parameter=action>lookup_asn</parameter>
+      <parameter=asn>AS15169</parameter>
+      </function>
+
+      # Get IP prefixes for an ASN
+      <function=asn_lookup>
+      <parameter=action>prefixes</parameter>
+      <parameter=asn>AS15169</parameter>
+      </function>
+
+      # Lookup by domain name
+      <function=asn_lookup>
+      <parameter=action>lookup_ip</parameter>
+      <parameter=domain>google.com</parameter>
+      </function>
+    </examples>
+  </tool>
+</tools>

@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<tools>
+  <tool name="cookie_analyzer">
+    <description>Analyze cookie security attributes for web applications.</description>
+    <details>Common Use Cases:
+      - Full security analysis of all cookies from a URL
+      - Check specific security attributes (Secure, HttpOnly, SameSite)
+      - List all cookies from a URL
+      - Identify session and authentication cookies
+      - Detect missing security flags and misconfigurations</details>
+    <parameters>
+      <parameter name="action" type="string" required="true">
+        <description>The analysis action to perform:
+          - analyze: Full security analysis of all cookies
+          - check_attributes: Check specific security attributes
+          - list: List all cookies from a URL</description>
+      </parameter>
+      <parameter name="url" type="string" required="true">
+        <description>Target URL to analyze for cookies</description>
+      </parameter>
+      <parameter name="cookie_name" type="string" required="false">
+        <description>Specific cookie name to analyze (optional, for filtering results)</description>
+      </parameter>
+    </parameters>
+    <returns type="Dict[str, Any]">
+      <description>Cookie security analysis including issues, recommendations, and security score</description>
+    </returns>
+    <examples>
+      # Full security analysis
+      <function=cookie_analyzer>
+      <parameter=action>analyze</parameter>
+      <parameter=url>https://example.com</parameter>
+      </function>
+
+      # Check attributes for a specific cookie
+      <function=cookie_analyzer>
+      <parameter=action>check_attributes</parameter>
+      <parameter=url>https://example.com</parameter>
+      <parameter=cookie_name>session</parameter>
+      </function>
+
+      # List all cookies
+      <function=cookie_analyzer>
+      <parameter=action>list</parameter>
+      <parameter=url>https://example.com</parameter>
+      </function>
+    </examples>
+  </tool>
+</tools>

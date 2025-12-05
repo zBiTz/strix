@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<tools>
+  <tool name="dns_rebinding_server">
+    <description>DNS Rebinding Server for SSRF and localhost bypass attacks.</description>
+    <details>Common Use Cases:
+      - Generate DNS rebinding domain configurations
+      - Learn about DNS rebinding techniques
+      - Access cloud metadata endpoints (169.254.169.254)
+      - Bypass SSRF filters that check DNS before requests
+      - Test applications with TOCTOU vulnerabilities</details>
+    <parameters>
+      <parameter name="action" type="string" required="true">
+        <description>The DNS rebinding action:
+          - generate_domain: Generate rebinding domain configuration
+          - info: Get information about DNS rebinding
+          - test_scenarios: List common test scenarios</description>
+      </parameter>
+      <parameter name="target_ip" type="string" required="false">
+        <description>Target IP address (usually internal like 127.0.0.1 or 169.254.169.254)</description>
+      </parameter>
+      <parameter name="attacker_ip" type="string" required="false">
+        <description>Attacker-controlled IP address (passes initial whitelist check)</description>
+      </parameter>
+      <parameter name="ttl" type="integer" required="false">
+        <description>DNS TTL in seconds (0 for immediate rebind, default: 0)</description>
+      </parameter>
+    </parameters>
+    <returns type="Dict[str, Any]">
+      <description>DNS rebinding configuration, test scenarios, and defense recommendations</description>
+    </returns>
+    <examples>
+      # Generate rebinding domain for localhost access
+      <function=dns_rebinding_server>
+      <parameter=action>generate_domain</parameter>
+      <parameter=target_ip>127.0.0.1</parameter>
+      <parameter=attacker_ip>1.2.3.4</parameter>
+      </function>
+
+      # Get DNS rebinding information
+      <function=dns_rebinding_server>
+      <parameter=action>info</parameter>
+      </function>
+
+      # Get test scenarios
+      <function=dns_rebinding_server>
+      <parameter=action>test_scenarios</parameter>
+      </function>
+    </examples>
+  </tool>
+</tools>

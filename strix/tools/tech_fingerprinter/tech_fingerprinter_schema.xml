@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<tools>
+  <tool name="tech_fingerprinter">
+    <description>Identify technologies, frameworks, and versions from HTTP responses.</description>
+    <details>Common Use Cases:
+      - Analyze HTTP headers for technology signatures
+      - Analyze response body for framework fingerprints
+      - Full analysis of headers and body
+      - Focus on framework identification</details>
+    <parameters>
+      <parameter name="action" type="string" required="true">
+        <description>The fingerprinting action:
+          - analyze_headers: Analyze HTTP headers only
+          - analyze_body: Analyze response body only
+          - full_analysis: Complete analysis of headers and body
+          - identify_framework: Focus on framework identification</description>
+      </parameter>
+      <parameter name="headers" type="object" required="false">
+        <description>HTTP response headers as a dictionary. Required for analyze_headers.</description>
+      </parameter>
+      <parameter name="body" type="string" required="false">
+        <description>HTTP response body content. Required for analyze_body.</description>
+      </parameter>
+      <parameter name="url" type="string" required="false">
+        <description>URL being analyzed (for context)</description>
+      </parameter>
+    </parameters>
+    <returns type="Dict[str, Any]">
+      <description>Detected technologies with confidence levels and sources</description>
+    </returns>
+    <examples>
+      # Analyze headers
+      <function=tech_fingerprinter>
+      <parameter=action>analyze_headers</parameter>
+      <parameter=headers>{"Server": "nginx/1.18.0", "X-Powered-By": "PHP/7.4"}</parameter>
+      </function>
+
+      # Analyze body
+      <function=tech_fingerprinter>
+      <parameter=action>analyze_body</parameter>
+      <parameter=body>&lt;html&gt;...wp-content...&lt;/html&gt;</parameter>
+      </function>
+
+      # Full analysis
+      <function=tech_fingerprinter>
+      <parameter=action>full_analysis</parameter>
+      <parameter=headers>{"Server": "nginx"}</parameter>
+      <parameter=body>&lt;html&gt;...&lt;/html&gt;</parameter>
+      </function>
+    </examples>
+  </tool>
+</tools>

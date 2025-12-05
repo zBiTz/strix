@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<tools>
+  <tool name="header_analyzer">
+    <description>Analyze HTTP security headers for misconfigurations.</description>
+    <details>Common Use Cases:
+      - Full analysis of HTTP security headers
+      - Analyze Content Security Policy (CSP)
+      - Check HSTS configuration
+      - Analyze cookie security attributes
+      - Get security header recommendations</details>
+    <parameters>
+      <parameter name="action" type="string" required="true">
+        <description>The analysis action to perform:
+          - analyze: Full header analysis
+          - check_csp: Analyze Content Security Policy
+          - check_hsts: Analyze HSTS configuration
+          - check_cookies: Analyze cookie security attributes
+          - recommendations: Get security header recommendations</description>
+      </parameter>
+      <parameter name="headers" type="object" required="false">
+        <description>HTTP response headers to analyze (dict). Required for analyze action.</description>
+      </parameter>
+      <parameter name="csp" type="string" required="false">
+        <description>Content Security Policy header value (for check_csp)</description>
+      </parameter>
+      <parameter name="hsts" type="string" required="false">
+        <description>HSTS header value (for check_hsts)</description>
+      </parameter>
+      <parameter name="cookies" type="array" required="false">
+        <description>List of Set-Cookie header values (for check_cookies)</description>
+      </parameter>
+    </parameters>
+    <returns type="Dict[str, Any]">
+      <description>Analysis results including issues, recommendations, and security score</description>
+    </returns>
+    <examples>
+      # Full header analysis
+      <function=header_analyzer>
+      <parameter=action>analyze</parameter>
+      <parameter=headers>{"Content-Type": "text/html", "Server": "nginx"}</parameter>
+      </function>
+
+      # Check CSP
+      <function=header_analyzer>
+      <parameter=action>check_csp</parameter>
+      <parameter=csp>default-src 'self'; script-src 'unsafe-inline'</parameter>
+      </function>
+
+      # Check HSTS
+      <function=header_analyzer>
+      <parameter=action>check_hsts</parameter>
+      <parameter=hsts>max-age=31536000; includeSubDomains</parameter>
+      </function>
+
+      # Check cookies
+      <function=header_analyzer>
+      <parameter=action>check_cookies</parameter>
+      <parameter=cookies>["session=abc123; Secure; HttpOnly"]</parameter>
+      </function>
+
+      # Get recommendations
+      <function=header_analyzer>
+      <parameter=action>recommendations</parameter>
+      </function>
+    </examples>
+  </tool>
+</tools>

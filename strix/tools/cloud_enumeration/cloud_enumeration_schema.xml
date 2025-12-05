@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<tools>
+  <tool name="cloud_enumeration">
+    <description>Cloud Enumeration Suite for discovering cloud storage resources across AWS, Azure, and GCP.</description>
+    <details>Common Use Cases:
+      - Generate S3 bucket enumeration tests
+      - Generate Azure Blob storage enumeration tests
+      - Generate GCP bucket enumeration tests
+      - Generate wordlists for bucket name discovery
+      - Test cloud storage permissions and misconfigurations</details>
+    <parameters>
+      <parameter name="action" type="string" required="true">
+        <description>The enumeration action to perform:
+          - enumerate_s3: Generate S3 bucket enumeration tests
+          - enumerate_azure_blob: Generate Azure Blob storage tests
+          - enumerate_gcp_bucket: Generate GCP bucket tests
+          - generate_wordlist: Generate wordlist for bucket names</description>
+      </parameter>
+      <parameter name="target" type="string" required="false">
+        <description>Target to enumerate (bucket name, domain, etc.)</description>
+      </parameter>
+      <parameter name="company_name" type="string" required="false">
+        <description>Company name for generating bucket names and wordlists</description>
+      </parameter>
+      <parameter name="region" type="string" required="false">
+        <description>Cloud region to target (e.g., us-east-1 for AWS)</description>
+      </parameter>
+    </parameters>
+    <returns type="Dict[str, Any]">
+      <description>Enumeration results including test URLs, permission tests, and naming patterns</description>
+    </returns>
+    <examples>
+      # Enumerate S3 buckets
+      <function=cloud_enumeration>
+      <parameter=action>enumerate_s3</parameter>
+      <parameter=target>company-data</parameter>
+      </function>
+
+      # Enumerate Azure Blob storage
+      <function=cloud_enumeration>
+      <parameter=action>enumerate_azure_blob</parameter>
+      <parameter=target>companydata</parameter>
+      </function>
+
+      # Enumerate GCP buckets
+      <function=cloud_enumeration>
+      <parameter=action>enumerate_gcp_bucket</parameter>
+      <parameter=target>company-data</parameter>
+      </function>
+
+      # Generate wordlist for bucket discovery
+      <function=cloud_enumeration>
+      <parameter=action>generate_wordlist</parameter>
+      <parameter=company_name>Acme Corp</parameter>
+      </function>
+    </examples>
+  </tool>
+</tools>

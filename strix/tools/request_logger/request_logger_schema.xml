@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<tools>
+  <tool name="request_logger">
+    <description>Log HTTP requests/responses with search and analysis capabilities.</description>
+    <details>Common Use Cases:
+      - Log HTTP requests and responses for analysis
+      - Search logged requests with filters
+      - Analyze requests for patterns and security findings
+      - Get summary of logged requests
+      - Track testing session history</details>
+    <parameters>
+      <parameter name="action" type="string" required="true">
+        <description>The logging action:
+          - log: Log a new request/response
+          - search: Search logged requests with filters
+          - analyze: Analyze logged requests for patterns
+          - summarize: Get summary of logged requests
+          - clear: Clear the request log</description>
+      </parameter>
+      <parameter name="request" type="object" required="false">
+        <description>Request data to log (for log action). Contains: method, url, headers, body, response (status_code, headers, body), response_time</description>
+      </parameter>
+      <parameter name="filters" type="object" required="false">
+        <description>Search filters: method, url_contains, status_code, min_response_time, has_error, body_contains, response_contains</description>
+      </parameter>
+      <parameter name="limit" type="integer" required="false">
+        <description>Maximum number of results to return (default: 100)</description>
+      </parameter>
+    </parameters>
+    <returns type="Dict[str, Any]">
+      <description>Logged request details, search results, or analysis</description>
+    </returns>
+    <examples>
+      # Log a request
+      <function=request_logger>
+      <parameter=action>log</parameter>
+      <parameter=request>{"method": "GET", "url": "https://example.com/api", "response": {"status_code": 200}}</parameter>
+      </function>
+
+      # Search logged requests
+      <function=request_logger>
+      <parameter=action>search</parameter>
+      <parameter=filters>{"method": "POST", "status_code": 500}</parameter>
+      </function>
+
+      # Analyze requests
+      <function=request_logger>
+      <parameter=action>analyze</parameter>
+      </function>
+
+      # Get summary
+      <function=request_logger>
+      <parameter=action>summarize</parameter>
+      </function>
+
+      # Clear log
+      <function=request_logger>
+      <parameter=action>clear</parameter>
+      </function>
+    </examples>
+  </tool>
+</tools>

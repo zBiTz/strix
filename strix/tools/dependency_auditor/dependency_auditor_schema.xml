@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<tools>
+  <tool name="dependency_auditor">
+    <description>Audit project dependencies for known security vulnerabilities.</description>
+    <details>Common Use Cases:
+      - Check a specific package version for vulnerabilities
+      - Audit dependencies from package files (package.json, requirements.txt, pom.xml)
+      - Verify if a specific version is vulnerable
+      - List supported package ecosystems
+      - Get CVE details for vulnerable dependencies</details>
+    <parameters>
+      <parameter name="action" type="string" required="true">
+        <description>The audit action to perform:
+          - audit_package: Check a specific package version
+          - audit_file: Audit dependencies from a file
+          - check_version: Check if a specific version is vulnerable
+          - list_ecosystems: List supported package ecosystems</description>
+      </parameter>
+      <parameter name="package_name" type="string" required="false">
+        <description>Name of the package to audit. Required for audit_package, check_version.</description>
+      </parameter>
+      <parameter name="version" type="string" required="false">
+        <description>Version of the package. Required for audit_package, check_version.</description>
+      </parameter>
+      <parameter name="file_content" type="string" required="false">
+        <description>Content of dependency file to audit. Required for audit_file.</description>
+      </parameter>
+      <parameter name="file_type" type="string" required="false">
+        <description>Type of file: package.json, requirements.txt, pom.xml. Required for audit_file.</description>
+      </parameter>
+    </parameters>
+    <returns type="Dict[str, Any]">
+      <description>Audit results including vulnerabilities found with CVE IDs, severity, and recommendations</description>
+    </returns>
+    <examples>
+      # Audit a specific package
+      <function=dependency_auditor>
+      <parameter=action>audit_package</parameter>
+      <parameter=package_name>express</parameter>
+      <parameter=version>4.17.0</parameter>
+      </function>
+
+      # Check if version is vulnerable
+      <function=dependency_auditor>
+      <parameter=action>check_version</parameter>
+      <parameter=package_name>lodash</parameter>
+      <parameter=version>4.17.0</parameter>
+      </function>
+
+      # List supported ecosystems
+      <function=dependency_auditor>
+      <parameter=action>list_ecosystems</parameter>
+      </function>
+
+      # Audit from file content
+      <function=dependency_auditor>
+      <parameter=action>audit_file</parameter>
+      <parameter=file_content>{"dependencies": {"express": "4.17.0"}}</parameter>
+      <parameter=file_type>package.json</parameter>
+      </function>
+    </examples>
+  </tool>
+</tools>

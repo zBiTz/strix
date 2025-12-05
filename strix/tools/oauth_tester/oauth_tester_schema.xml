@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<tools>
+  <tool name="oauth_tester">
+    <description>Automated OAuth flow testing for security vulnerabilities.</description>
+    <details>Common Use Cases:
+      - Analyze complete OAuth authorization flow
+      - Test redirect URI validation (open redirect)
+      - Check state parameter security (CSRF)
+      - Analyze PKCE implementation
+      - Generate OAuth security test cases
+      - Analyze OAuth token structure</details>
+    <parameters>
+      <parameter name="action" type="string" required="true">
+        <description>The testing action to perform:
+          - analyze_flow: Analyze complete OAuth authorization URL
+          - check_redirect_uri: Test redirect URI validation
+          - check_state: Analyze state parameter security
+          - check_pkce: Analyze PKCE implementation
+          - generate_tests: Generate OAuth security test cases
+          - analyze_token: Analyze OAuth token structure</description>
+      </parameter>
+      <parameter name="url" type="string" required="false">
+        <description>OAuth authorization URL to analyze. Required for analyze_flow.</description>
+      </parameter>
+      <parameter name="redirect_uri" type="string" required="false">
+        <description>Redirect URI to test. Required for check_redirect_uri.</description>
+      </parameter>
+      <parameter name="state" type="string" required="false">
+        <description>State parameter value (for check_state)</description>
+      </parameter>
+      <parameter name="code_challenge" type="string" required="false">
+        <description>PKCE code challenge (for check_pkce)</description>
+      </parameter>
+      <parameter name="code_challenge_method" type="string" required="false">
+        <description>PKCE method: plain or S256 (for check_pkce)</description>
+      </parameter>
+      <parameter name="token" type="string" required="false">
+        <description>OAuth token to analyze. Required for analyze_token.</description>
+      </parameter>
+    </parameters>
+    <returns type="Dict[str, Any]">
+      <description>Security analysis results with findings and recommendations</description>
+    </returns>
+    <examples>
+      # Analyze OAuth flow
+      <function=oauth_tester>
+      <parameter=action>analyze_flow</parameter>
+      <parameter=url>https://auth.example.com/authorize?client_id=xxx&amp;redirect_uri=https://app.com/callback&amp;response_type=code&amp;state=abc123</parameter>
+      </function>
+
+      # Check redirect URI
+      <function=oauth_tester>
+      <parameter=action>check_redirect_uri</parameter>
+      <parameter=redirect_uri>https://app.example.com/callback</parameter>
+      </function>
+
+      # Check state parameter
+      <function=oauth_tester>
+      <parameter=action>check_state</parameter>
+      <parameter=state>abc123xyz</parameter>
+      </function>
+
+      # Check PKCE
+      <function=oauth_tester>
+      <parameter=action>check_pkce</parameter>
+      <parameter=code_challenge>E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw</parameter>
+      <parameter=code_challenge_method>S256</parameter>
+      </function>
+
+      # Generate test cases
+      <function=oauth_tester>
+      <parameter=action>generate_tests</parameter>
+      </function>
+    </examples>
+  </tool>
+</tools>

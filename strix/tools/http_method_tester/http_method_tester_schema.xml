@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<tools>
+  <tool name="http_method_tester">
+    <description>Test HTTP methods for security enumeration.</description>
+    <details>Common Use Cases:
+      - Test all HTTP methods on an endpoint
+      - Identify allowed and blocked methods
+      - Test for HTTP method override vulnerabilities
+      - Discover WebDAV methods
+      - Find dangerous methods (PUT, DELETE, TRACE)</details>
+    <parameters>
+      <parameter name="action" type="string" required="true">
+        <description>The testing action to perform:
+          - test_all: Test all HTTP methods
+          - test_method: Test a specific HTTP method
+          - test_override: Test method override headers</description>
+      </parameter>
+      <parameter name="url" type="string" required="true">
+        <description>Target URL for testing</description>
+      </parameter>
+      <parameter name="method" type="string" required="false">
+        <description>Specific method to test (for test_method, default: GET)</description>
+      </parameter>
+      <parameter name="target_method" type="string" required="false">
+        <description>Target method for override testing (for test_override, default: DELETE)</description>
+      </parameter>
+      <parameter name="timeout" type="integer" required="false">
+        <description>Request timeout in seconds (default: 10)</description>
+      </parameter>
+    </parameters>
+    <returns type="Dict[str, Any]">
+      <description>Test results showing allowed methods and findings</description>
+    </returns>
+    <examples>
+      # Test all HTTP methods
+      <function=http_method_tester>
+      <parameter=action>test_all</parameter>
+      <parameter=url>https://example.com/api/resource</parameter>
+      </function>
+
+      # Test specific method
+      <function=http_method_tester>
+      <parameter=action>test_method</parameter>
+      <parameter=url>https://example.com/api/resource</parameter>
+      <parameter=method>PUT</parameter>
+      </function>
+
+      # Test method override
+      <function=http_method_tester>
+      <parameter=action>test_override</parameter>
+      <parameter=url>https://example.com/api/resource</parameter>
+      <parameter=target_method>DELETE</parameter>
+      </function>
+    </examples>
+  </tool>
+</tools>

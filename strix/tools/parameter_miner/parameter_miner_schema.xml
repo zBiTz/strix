@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<tools>
+  <tool name="parameter_miner">
+    <description>Discover hidden and undocumented parameters through analysis.</description>
+    <details>Common Use Cases:
+      - Generate parameter wordlists for fuzzing
+      - Analyze existing parameters and suggest related ones
+      - Get context-aware parameter suggestions
+      - Get common parameters by category
+      - Discover hidden API parameters and admin functionality</details>
+    <parameters>
+      <parameter name="action" type="string" required="true">
+        <description>The mining action to perform:
+          - get_wordlist: Get parameter wordlist for fuzzing
+          - analyze_params: Analyze existing parameters and suggest related ones
+          - suggest_params: Get context-aware parameter suggestions
+          - get_common_params: Get common parameters by category</description>
+      </parameter>
+      <parameter name="categories" type="array" required="false">
+        <description>Categories to include: authentication, user_management, pagination, filtering, file_operations, debug, callback, format, injection_targets, ssrf_targets</description>
+      </parameter>
+      <parameter name="existing_params" type="array" required="false">
+        <description>List of already known parameters. Required for analyze_params.</description>
+      </parameter>
+      <parameter name="context" type="string" required="false">
+        <description>Context for suggestions: api, graphql, oauth, file_upload, search, admin</description>
+      </parameter>
+      <parameter name="include_variations" type="boolean" required="false">
+        <description>Include case and format variations (default: true)</description>
+      </parameter>
+    </parameters>
+    <returns type="Dict[str, Any]">
+      <description>Parameter lists, suggestions, and analysis results</description>
+    </returns>
+    <examples>
+      # Get parameter wordlist
+      <function=parameter_miner>
+      <parameter=action>get_wordlist</parameter>
+      <parameter=categories>["authentication", "user_management"]</parameter>
+      </function>
+
+      # Analyze existing parameters
+      <function=parameter_miner>
+      <parameter=action>analyze_params</parameter>
+      <parameter=existing_params>["id", "name", "user_id"]</parameter>
+      </function>
+
+      # Get context-aware suggestions
+      <function=parameter_miner>
+      <parameter=action>suggest_params</parameter>
+      <parameter=context>api</parameter>
+      </function>
+
+      # Get common parameters
+      <function=parameter_miner>
+      <parameter=action>get_common_params</parameter>
+      </function>
+    </examples>
+  </tool>
+</tools>

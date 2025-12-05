@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<tools>
+  <tool name="poc_generator">
+    <description>Generate Proof of Concept scripts in multiple formats.</description>
+    <details>Common Use Cases:
+      - Generate PoC in curl, Python, JavaScript, HTML, Burp, HTTPie formats
+      - Create CSRF PoC pages
+      - Document vulnerability reproduction steps
+      - Share PoC with development teams</details>
+    <parameters>
+      <parameter name="action" type="string" required="true">
+        <description>The generation action:
+          - generate: Generate PoC in specified format
+          - generate_all: Generate PoC in all formats</description>
+      </parameter>
+      <parameter name="url" type="string" required="true">
+        <description>Target URL</description>
+      </parameter>
+      <parameter name="method" type="string" required="false">
+        <description>HTTP method (GET, POST, PUT, DELETE, etc.). Default: GET</description>
+      </parameter>
+      <parameter name="headers" type="object" required="false">
+        <description>HTTP headers dictionary</description>
+      </parameter>
+      <parameter name="body" type="string" required="false">
+        <description>Request body (for POST/PUT)</description>
+      </parameter>
+      <parameter name="cookies" type="object" required="false">
+        <description>Cookies dictionary</description>
+      </parameter>
+      <parameter name="poc_format" type="string" required="false">
+        <description>Output format: curl, python, javascript, html, burp, httpie. Required for generate.</description>
+      </parameter>
+      <parameter name="vulnerability_type" type="string" required="false">
+        <description>Type of vulnerability (for documentation). Default: generic</description>
+      </parameter>
+      <parameter name="description" type="string" required="false">
+        <description>Description of the vulnerability</description>
+      </parameter>
+    </parameters>
+    <returns type="Dict[str, Any]">
+      <description>Generated PoC code in requested format(s)</description>
+    </returns>
+    <examples>
+      # Generate curl PoC
+      <function=poc_generator>
+      <parameter=action>generate</parameter>
+      <parameter=url>https://example.com/api/users</parameter>
+      <parameter=poc_format>curl</parameter>
+      </function>
+
+      # Generate all formats
+      <function=poc_generator>
+      <parameter=action>generate_all</parameter>
+      <parameter=url>https://example.com/api/users</parameter>
+      <parameter=method>POST</parameter>
+      <parameter=body>{"admin": true}</parameter>
+      </function>
+
+      # Generate CSRF PoC
+      <function=poc_generator>
+      <parameter=action>generate</parameter>
+      <parameter=url>https://example.com/transfer</parameter>
+      <parameter=method>POST</parameter>
+      <parameter=poc_format>html</parameter>
+      <parameter=vulnerability_type>csrf</parameter>
+      </function>
+    </examples>
+  </tool>
+</tools>

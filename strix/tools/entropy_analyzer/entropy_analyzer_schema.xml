@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<tools>
+  <tool name="entropy_analyzer">
+    <description>Analyze string entropy to identify potential secrets, keys, and random tokens.</description>
+    <details>Common Use Cases:
+      - Detect high-entropy strings that may be secrets
+      - Analyze API keys and tokens for randomness
+      - Identify passwords and credentials in code
+      - Find base64-encoded secrets
+      - Audit configuration files for exposed secrets</details>
+    <parameters>
+      <parameter name="action" type="string" required="true">
+        <description>The analysis action to perform:
+          - analyze: Analyze entropy of a single string
+          - scan_text: Scan text for high-entropy strings
+          - classify: Classify string type based on characteristics</description>
+      </parameter>
+      <parameter name="value" type="string" required="false">
+        <description>String value to analyze. Required for analyze action.</description>
+      </parameter>
+      <parameter name="text" type="string" required="false">
+        <description>Text content to scan for secrets. Required for scan_text action.</description>
+      </parameter>
+      <parameter name="threshold" type="number" required="false">
+        <description>Entropy threshold for detection (default: 4.0). Higher values = more selective.</description>
+      </parameter>
+    </parameters>
+    <returns type="Dict[str, Any]">
+      <description>Entropy analysis including score, classification, and recommendations</description>
+    </returns>
+    <examples>
+      # Analyze a single string
+      <function=entropy_analyzer>
+      <parameter=action>analyze</parameter>
+      <parameter=value>AKIAIOSFODNN7EXAMPLE</parameter>
+      </function>
+
+      # Scan text for secrets
+      <function=entropy_analyzer>
+      <parameter=action>scan_text</parameter>
+      <parameter=text>api_key = 'sk_live_51H3...'</parameter>
+      <parameter=threshold>4.5</parameter>
+      </function>
+
+      # Classify string type
+      <function=entropy_analyzer>
+      <parameter=action>classify</parameter>
+      <parameter=value>eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9</parameter>
+      </function>
+    </examples>
+  </tool>
+</tools>

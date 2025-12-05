@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<tools>
+  <tool name="regex_tester">
+    <description>Test regex patterns for ReDoS vulnerabilities.</description>
+    <details>Common Use Cases:
+      - Test if regex patterns are vulnerable to ReDoS
+      - Analyze pattern for catastrophic backtracking
+      - Benchmark pattern with increasing input lengths
+      - Identify evil regex patterns
+      - Get remediation recommendations</details>
+    <parameters>
+      <parameter name="action" type="string" required="true">
+        <description>The testing action:
+          - test: Test pattern against input and check for issues
+          - analyze: Comprehensive pattern analysis
+          - benchmark: Benchmark pattern with increasing input lengths</description>
+      </parameter>
+      <parameter name="pattern" type="string" required="true">
+        <description>The regex pattern to test</description>
+      </parameter>
+      <parameter name="test_input" type="string" required="false">
+        <description>Input string to test against (optional)</description>
+      </parameter>
+      <parameter name="max_length" type="integer" required="false">
+        <description>Maximum input length for benchmarking (default: 30)</description>
+      </parameter>
+    </parameters>
+    <returns type="Dict[str, Any]">
+      <description>ReDoS vulnerability analysis and recommendations</description>
+    </returns>
+    <examples>
+      # Test pattern for vulnerabilities
+      <function=regex_tester>
+      <parameter=action>test</parameter>
+      <parameter=pattern>(a+)+</parameter>
+      <parameter=test_input>aaaaaaaaaa</parameter>
+      </function>
+
+      # Comprehensive analysis
+      <function=regex_tester>
+      <parameter=action>analyze</parameter>
+      <parameter=pattern>(a+)+</parameter>
+      </function>
+
+      # Benchmark pattern
+      <function=regex_tester>
+      <parameter=action>benchmark</parameter>
+      <parameter=pattern>(a+)+</parameter>
+      <parameter=max_length>25</parameter>
+      </function>
+    </examples>
+  </tool>
+</tools>

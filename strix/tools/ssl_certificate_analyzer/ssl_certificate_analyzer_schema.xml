@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<tools>
+  <tool name="ssl_certificate_analyzer">
+    <description>Analyze SSL/TLS certificates for security issues.</description>
+    <details>Common Use Cases:
+      - Full certificate analysis with security checks
+      - Get certificate chain information
+      - Check supported cipher suites
+      - Detect expired or expiring certificates
+      - Identify weak protocols and ciphers</details>
+    <parameters>
+      <parameter name="action" type="string" required="true">
+        <description>The analysis action to perform:
+          - analyze: Full certificate analysis with security check
+          - chain: Get certificate chain information
+          - ciphers: Check supported cipher suites</description>
+      </parameter>
+      <parameter name="host" type="string" required="true">
+        <description>Target hostname or URL</description>
+      </parameter>
+      <parameter name="port" type="integer" required="false">
+        <description>Target port (default: 443)</description>
+      </parameter>
+    </parameters>
+    <returns type="Dict[str, Any]">
+      <description>Certificate details, security analysis, and recommendations</description>
+    </returns>
+    <examples>
+      # Full certificate analysis
+      <function=ssl_certificate_analyzer>
+      <parameter=action>analyze</parameter>
+      <parameter=host>example.com</parameter>
+      </function>
+
+      # Get certificate chain
+      <function=ssl_certificate_analyzer>
+      <parameter=action>chain</parameter>
+      <parameter=host>example.com</parameter>
+      </function>
+
+      # Check ciphers
+      <function=ssl_certificate_analyzer>
+      <parameter=action>ciphers</parameter>
+      <parameter=host>example.com</parameter>
+      <parameter=port>443</parameter>
+      </function>
+    </examples>
+  </tool>
+</tools>

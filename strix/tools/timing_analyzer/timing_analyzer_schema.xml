@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<tools>
+  <tool name="timing_analyzer">
+    <description>Statistical timing analysis for blind vulnerability detection.</description>
+    <details>Common Use Cases:
+      - Analyze single timing dataset
+      - Compare two timing datasets
+      - Determine if timing difference is significant
+      - Get comprehensive statistics with percentiles</details>
+    <parameters>
+      <parameter name="action" type="string" required="true">
+        <description>The analysis action:
+          - analyze: Analyze single timing dataset
+          - compare: Compare two timing datasets
+          - detect_difference: Determine if timing difference is significant
+          - get_statistics: Get comprehensive statistics</description>
+      </parameter>
+      <parameter name="times1" type="array" required="true">
+        <description>First set of response times (in milliseconds or seconds)</description>
+      </parameter>
+      <parameter name="times2" type="array" required="false">
+        <description>Second set of response times. Required for compare, detect_difference.</description>
+      </parameter>
+      <parameter name="remove_outliers" type="boolean" required="false">
+        <description>Whether to remove outliers before analysis (default: true)</description>
+      </parameter>
+      <parameter name="outlier_method" type="string" required="false">
+        <description>Method for outlier removal: iqr or zscore (default: iqr)</description>
+      </parameter>
+    </parameters>
+    <returns type="Dict[str, Any]">
+      <description>Statistical analysis results including significance tests</description>
+    </returns>
+    <examples>
+      # Analyze timing data
+      <function=timing_analyzer>
+      <parameter=action>analyze</parameter>
+      <parameter=times1>[0.123, 0.145, 0.132, 0.156]</parameter>
+      </function>
+
+      # Compare two datasets
+      <function=timing_analyzer>
+      <parameter=action>compare</parameter>
+      <parameter=times1>[0.1, 0.12, 0.11]</parameter>
+      <parameter=times2>[0.5, 0.52, 0.51]</parameter>
+      </function>
+
+      # Detect significant difference
+      <function=timing_analyzer>
+      <parameter=action>detect_difference</parameter>
+      <parameter=times1>[0.1, 0.12, 0.11]</parameter>
+      <parameter=times2>[0.5, 0.52, 0.51]</parameter>
+      </function>
+    </examples>
+  </tool>
+</tools>
