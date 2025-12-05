@@ -226,6 +226,24 @@ COPY strix/tools/cvss_calculator/ /app/strix/tools/cvss_calculator/
 COPY strix/tools/entropy_analyzer/ /app/strix/tools/entropy_analyzer/
 COPY strix/tools/polyglot_generator/ /app/strix/tools/polyglot_generator/
 
+# Tool-Prompt Integration tools (batch 6)
+COPY strix/tools/idor_tester/ /app/strix/tools/idor_tester/
+COPY strix/tools/http_smuggling_tester/ /app/strix/tools/http_smuggling_tester/
+COPY strix/tools/business_logic_scanner/ /app/strix/tools/business_logic_scanner/
+COPY strix/tools/prototype_pollution_tester/ /app/strix/tools/prototype_pollution_tester/
+COPY strix/tools/crlf_injection_tester/ /app/strix/tools/crlf_injection_tester/
+COPY strix/tools/deserialization_scanner/ /app/strix/tools/deserialization_scanner/
+COPY strix/tools/graphql_security_tester/ /app/strix/tools/graphql_security_tester/
+
+# Authentication & Cache Security tools (batch 7)
+COPY strix/tools/cache_poisoning_tester/ /app/strix/tools/cache_poisoning_tester/
+COPY strix/tools/mfa_bypass_tester/ /app/strix/tools/mfa_bypass_tester/
+COPY strix/tools/auth_tester/ /app/strix/tools/auth_tester/
+
+# UI & NoSQL Security tools (batch 8)
+COPY strix/tools/clickjacking_tester/ /app/strix/tools/clickjacking_tester/
+COPY strix/tools/nosql_injection_tester/ /app/strix/tools/nosql_injection_tester/
+
 RUN echo 'export PATH="/home/pentester/go/bin:/home/pentester/.local/bin:/home/pentester/.npm-global/bin:$PATH"' >> /home/pentester/.bashrc && \
     echo 'export PATH="/home/pentester/go/bin:/home/pentester/.local/bin:/home/pentester/.npm-global/bin:$PATH"' >> /home/pentester/.profile
 
