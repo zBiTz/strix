@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<tools>
+  <tool name="idor_tester">
+    <description>Test for IDOR (Insecure Direct Object Reference) vulnerabilities in web applications.</description>
+    <details>Common Use Cases:
+      - Compare responses when swapping object IDs between users
+      - Enumerate object IDs to find accessible resources
+      - Analyze URLs for potential IDOR vulnerabilities
+      - Generate test IDs based on observed ID patterns
+      - Detect horizontal and vertical privilege escalation
+      - Test authorization bypass through ID manipulation</details>
+    <parameters>
+      <parameter name="action" type="string" required="true">
+        <description>The testing action:
+          - compare: Compare responses between two requests with swapped IDs
+          - enumerate: Enumerate object IDs and detect authorization bypass
+          - analyze: Analyze URL for potential IDOR vulnerabilities
+          - generate_ids: Generate test IDs based on original ID pattern</description>
+      </parameter>
+      <parameter name="url" type="string" required="true">
+        <description>Target URL containing the ID parameter to test</description>
+      </parameter>
+      <parameter name="original_id" type="string" required="false">
+        <description>The original/legitimate object ID. Required for compare and generate_ids actions.</description>
+      </parameter>
+      <parameter name="target_id" type="string" required="false">
+        <description>The target ID to test access for. Required for compare action.</description>
+      </parameter>
+      <parameter name="param_name" type="string" required="false">
+        <description>Name of the ID parameter (auto-detected if not provided)</description>
+      </parameter>
+      <parameter name="method" type="string" required="false">
+        <description>HTTP method to use: GET, POST, PUT, DELETE, PATCH (default: GET)</description>
+      </parameter>
+      <parameter name="start_id" type="integer" required="false">
+        <description>Starting ID for enumeration. Required for enumerate action.</description>
+      </parameter>
+      <parameter name="end_id" type="integer" required="false">
+        <description>Ending ID for enumeration. Required for enumerate action.</description>
+      </parameter>
+      <parameter name="headers" type="string" required="false">
+        <description>HTTP headers as JSON string (e.g., '{"Authorization": "Bearer token"}')</description>
+      </parameter>
+      <parameter name="timeout" type="integer" required="false">
+        <description>Request timeout in seconds (default: 10)</description>
+      </parameter>
+    </parameters>
+    <returns type="Dict[str, Any]">
+      <description>IDOR test results including vulnerability indicators, comparison data, and recommendations</description>
+    </returns>
+    <examples>
+      # Compare responses with swapped IDs
+      <function=idor_tester>
+      <parameter=action>compare</parameter>
+      <parameter=url>https://example.com/api/users/123</parameter>
+      <parameter=original_id>123</parameter>
+      <parameter=target_id>456</parameter>
+      </function>
+
+      # Enumerate IDs to find accessible resources
+      <function=idor_tester>
+      <parameter=action>enumerate</parameter>
+      <parameter=url>https://example.com/api/orders?id=1</parameter>
+      <parameter=start_id>1</parameter>
+      <parameter=end_id>20</parameter>
+      </function>
+
+      # Analyze URL for IDOR vulnerabilities
+      <function=idor_tester>
+      <parameter=action>analyze</parameter>
+      <parameter=url>https://example.com/api/documents/abc123</parameter>
+      </function>
+
+      # Generate test IDs from original
+      <function=idor_tester>
+      <parameter=action>generate_ids</parameter>
+      <parameter=url>https://example.com/api/users/123</parameter>
+      <parameter=original_id>123</parameter>
+      </function>
+
+      # Test with custom headers and POST method
+      <function=idor_tester>
+      <parameter=action>compare</parameter>
+      <parameter=url>https://example.com/api/profile</parameter>
+      <parameter=original_id>user_123</parameter>
+      <parameter=target_id>user_456</parameter>
+      <parameter=method>POST</parameter>
+      <parameter=headers>{"Authorization": "Bearer eyJhbG..."}</parameter>
+      </function>
+    </examples>
+  </tool>
+</tools>

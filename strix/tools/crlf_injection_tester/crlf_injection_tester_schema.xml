@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<tools>
+  <tool name="crlf_injection_tester">
+    <description>Test for CRLF injection vulnerabilities in web applications.</description>
+    <details>Common Use Cases:
+      - Test for CRLF injection in URL parameters
+      - Test for header injection via CRLF in request headers
+      - Generate CRLF payloads for session hijacking, redirect, XSS
+      - Analyze URLs for potential CRLF injection points</details>
+    <parameters>
+      <parameter name="action" type="string" required="true">
+        <description>The testing action:
+          - test: Test CRLF injection in URL parameters
+          - test_headers: Test header injection via CRLF
+          - generate: Generate CRLF payloads
+          - analyze: Analyze URL for injection points</description>
+      </parameter>
+      <parameter name="url" type="string" required="false">
+        <description>Target URL for testing. Required for test, test_headers, analyze.</description>
+      </parameter>
+      <parameter name="param" type="string" required="false">
+        <description>Parameter name to test. Required for test action.</description>
+      </parameter>
+      <parameter name="target" type="string" required="false">
+        <description>Payload target: header, session, redirect, xss (default: header)</description>
+      </parameter>
+      <parameter name="custom_header" type="string" required="false">
+        <description>Custom header name for payload generation</description>
+      </parameter>
+      <parameter name="custom_value" type="string" required="false">
+        <description>Custom header value for payload generation</description>
+      </parameter>
+      <parameter name="timeout" type="integer" required="false">
+        <description>Request timeout in seconds (default: 10)</description>
+      </parameter>
+    </parameters>
+    <returns type="Dict[str, Any]">
+      <description>CRLF injection test results with vulnerability indicators</description>
+    </returns>
+    <examples>
+      <function=crlf_injection_tester>
+      <parameter=action>test</parameter>
+      <parameter=url>https://example.com/redirect</parameter>
+      <parameter=param>url</parameter>
+      </function>
+
+      <function=crlf_injection_tester>
+      <parameter=action>generate</parameter>
+      <parameter=target>session</parameter>
+      </function>
+
+      <function=crlf_injection_tester>
+      <parameter=action>analyze</parameter>
+      <parameter=url>https://example.com/page</parameter>
+      </function>
+    </examples>
+  </tool>
+</tools>

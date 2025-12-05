@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<tools>
+  <tool name="graphql_security_tester">
+    <description>Test GraphQL endpoints for security vulnerabilities.</description>
+    <details>Common Use Cases:
+      - Test nested query depth attacks (DoS)
+      - Test batch/alias-based resource exhaustion
+      - Test IDOR via GraphQL node/relay queries
+      - Test for GraphQL injection vulnerabilities
+      - Analyze endpoint security configuration</details>
+    <parameters>
+      <parameter name="action" type="string" required="true">
+        <description>The testing action:
+          - test_depth: Test nested query depth attacks
+          - test_batch: Test batch/alias resource exhaustion
+          - test_idor: Test IDOR via node queries
+          - test_injection: Test injection vulnerabilities
+          - analyze: Analyze security configuration</description>
+      </parameter>
+      <parameter name="url" type="string" required="true">
+        <description>GraphQL endpoint URL</description>
+      </parameter>
+      <parameter name="field" type="string" required="false">
+        <description>Field name for depth testing (default: user)</description>
+      </parameter>
+      <parameter name="query" type="string" required="false">
+        <description>Query for batch testing (default: __typename)</description>
+      </parameter>
+      <parameter name="node_id" type="string" required="false">
+        <description>Node ID for IDOR testing. Required for test_idor.</description>
+      </parameter>
+      <parameter name="alternative_ids" type="string" required="false">
+        <description>Comma-separated alternative IDs for IDOR testing</description>
+      </parameter>
+      <parameter name="max_depth" type="integer" required="false">
+        <description>Maximum depth for testing (default: 20)</description>
+      </parameter>
+      <parameter name="max_batch" type="integer" required="false">
+        <description>Maximum batch size for testing (default: 100)</description>
+      </parameter>
+      <parameter name="timeout" type="integer" required="false">
+        <description>Request timeout in seconds (default: 30)</description>
+      </parameter>
+    </parameters>
+    <returns type="Dict[str, Any]">
+      <description>GraphQL security test results with vulnerability indicators</description>
+    </returns>
+    <examples>
+      <function=graphql_security_tester>
+      <parameter=action>analyze</parameter>
+      <parameter=url>https://example.com/graphql</parameter>
+      </function>
+
+      <function=graphql_security_tester>
+      <parameter=action>test_depth</parameter>
+      <parameter=url>https://example.com/graphql</parameter>
+      <parameter=field>user</parameter>
+      </function>
+
+      <function=graphql_security_tester>
+      <parameter=action>test_idor</parameter>
+      <parameter=url>https://example.com/graphql</parameter>
+      <parameter=node_id>VXNlcjox</parameter>
+      <parameter=alternative_ids>VXNlcjoy,VXNlcjoz</parameter>
+      </function>
+    </examples>
+  </tool>
+</tools>

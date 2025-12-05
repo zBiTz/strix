@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<tools>
+  <tool name="http_smuggling_tester">
+    <description>Test for HTTP Request Smuggling vulnerabilities (CL.TE, TE.CL, TE.TE).</description>
+    <details>Common Use Cases:
+      - Detect HTTP request smuggling vulnerabilities in proxy chains
+      - Test for CL.TE (Content-Length vs Transfer-Encoding) desync
+      - Test for TE.CL (Transfer-Encoding vs Content-Length) desync
+      - Test for TE.TE (Transfer-Encoding obfuscation) parsing differences
+      - Analyze infrastructure for CDN/proxy presence
+      - Generate smuggling payloads for authorized testing
+      - Identify cache poisoning and request hijacking vectors</details>
+    <parameters>
+      <parameter name="action" type="string" required="true">
+        <description>The testing action:
+          - detect: Run comprehensive smuggling detection (all tests)
+          - test_clte: Test for CL.TE vulnerability only
+          - test_tecl: Test for TE.CL vulnerability only
+          - test_tete: Test for TE.TE (obfuscation) vulnerability
+          - analyze: Analyze infrastructure for proxy/CDN presence
+          - generate: Generate smuggling payloads for exploitation</description>
+      </parameter>
+      <parameter name="url" type="string" required="true">
+        <description>Target URL to test for smuggling vulnerabilities</description>
+      </parameter>
+      <parameter name="smuggled_path" type="string" required="false">
+        <description>Path to smuggle for payload generation (default: /admin)</description>
+      </parameter>
+      <parameter name="timeout" type="integer" required="false">
+        <description>Request timeout in seconds (default: 10). Timing is crucial for detection.</description>
+      </parameter>
+    </parameters>
+    <returns type="Dict[str, Any]">
+      <description>Smuggling test results including vulnerability type, infrastructure analysis, and generated payloads</description>
+    </returns>
+    <examples>
+      # Comprehensive smuggling detection
+      <function=http_smuggling_tester>
+      <parameter=action>detect</parameter>
+      <parameter=url>https://example.com</parameter>
+      </function>
+
+      # Test for CL.TE vulnerability
+      <function=http_smuggling_tester>
+      <parameter=action>test_clte</parameter>
+      <parameter=url>https://example.com/api</parameter>
+      </function>
+
+      # Test for TE.CL vulnerability
+      <function=http_smuggling_tester>
+      <parameter=action>test_tecl</parameter>
+      <parameter=url>https://example.com/api</parameter>
+      </function>
+
+      # Test TE obfuscation variants
+      <function=http_smuggling_tester>
+      <parameter=action>test_tete</parameter>
+      <parameter=url>https://example.com</parameter>
+      </function>
+
+      # Analyze infrastructure for proxies/CDNs
+      <function=http_smuggling_tester>
+      <parameter=action>analyze</parameter>
+      <parameter=url>https://example.com</parameter>
+      </function>
+
+      # Generate smuggling payloads
+      <function=http_smuggling_tester>
+      <parameter=action>generate</parameter>
+      <parameter=url>https://example.com</parameter>
+      <parameter=smuggled_path>/admin/users</parameter>
+      </function>
+    </examples>
+  </tool>
+</tools>

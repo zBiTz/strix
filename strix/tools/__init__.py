@@ -86,6 +86,15 @@ if not SANDBOX_MODE:
     from .entropy_analyzer import *  # noqa: F403
     from .polyglot_generator import *  # noqa: F403
 
+    # New security testing tools (batch 6) - Tool-Prompt Integration
+    from .idor_tester import *  # noqa: F403
+    from .http_smuggling_tester import *  # noqa: F403
+    from .business_logic_scanner import *  # noqa: F403
+    from .prototype_pollution_tester import *  # noqa: F403
+    from .crlf_injection_tester import *  # noqa: F403
+    from .deserialization_scanner import *  # noqa: F403
+    from .graphql_security_tester import *  # noqa: F403
+
     if HAS_PERPLEXITY_API:
         from .web_search import *  # noqa: F403
 else:
@@ -145,6 +154,15 @@ else:
     from .cvss_calculator import *  # noqa: F403
     from .entropy_analyzer import *  # noqa: F403
     from .polyglot_generator import *  # noqa: F403
+
+    # New security testing tools (batch 6) - also available in sandbox mode
+    from .idor_tester import *  # noqa: F403
+    from .http_smuggling_tester import *  # noqa: F403
+    from .business_logic_scanner import *  # noqa: F403
+    from .prototype_pollution_tester import *  # noqa: F403
+    from .crlf_injection_tester import *  # noqa: F403
+    from .deserialization_scanner import *  # noqa: F403
+    from .graphql_security_tester import *  # noqa: F403
 
 __all__ = [
     "ImplementedInClientSideOnlyError",

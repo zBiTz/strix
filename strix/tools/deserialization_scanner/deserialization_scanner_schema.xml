@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<tools>
+  <tool name="deserialization_scanner">
+    <description>Scan for deserialization vulnerabilities in web applications.</description>
+    <details>Common Use Cases:
+      - Detect potential deserialization endpoints
+      - Generate Java deserialization payload info (ysoserial)
+      - Generate PHP object injection payload info (phpggc)
+      - Generate Python pickle deserialization payloads
+      - Analyze serialized data to identify format</details>
+    <parameters>
+      <parameter name="action" type="string" required="true">
+        <description>The scanning action:
+          - detect: Detect deserialization endpoints
+          - generate_java: Generate Java deserialization info
+          - generate_php: Generate PHP object injection info
+          - generate_python: Generate Python pickle info
+          - analyze: Analyze serialized data format</description>
+      </parameter>
+      <parameter name="url" type="string" required="false">
+        <description>Target URL for detection. Required for detect.</description>
+      </parameter>
+      <parameter name="data" type="string" required="false">
+        <description>Serialized data string to analyze. Required for analyze.</description>
+      </parameter>
+      <parameter name="command" type="string" required="false">
+        <description>Command for payload generation (default: id)</description>
+      </parameter>
+      <parameter name="gadget" type="string" required="false">
+        <description>Java gadget chain: all, CommonsCollections1, etc. (default: all)</description>
+      </parameter>
+      <parameter name="method" type="string" required="false">
+        <description>HTTP method for detection (default: GET)</description>
+      </parameter>
+      <parameter name="timeout" type="integer" required="false">
+        <description>Request timeout in seconds (default: 10)</description>
+      </parameter>
+    </parameters>
+    <returns type="Dict[str, Any]">
+      <description>Deserialization scan results with vulnerability indicators and payload info</description>
+    </returns>
+    <examples>
+      <function=deserialization_scanner>
+      <parameter=action>detect</parameter>
+      <parameter=url>https://example.com/api/deserialize</parameter>
+      </function>
+
+      <function=deserialization_scanner>
+      <parameter=action>generate_java</parameter>
+      <parameter=command>whoami</parameter>
+      <parameter=gadget>CommonsCollections1</parameter>
+      </function>
+
+      <function=deserialization_scanner>
+      <parameter=action>analyze</parameter>
+      <parameter=data>rO0ABXNyABFqYXZhLnV0aWwuSGFzaE1hcA==</parameter>
+      </function>
+    </examples>
+  </tool>
+</tools>

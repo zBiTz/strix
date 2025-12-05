@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<tools>
+  <tool name="prototype_pollution_tester">
+    <description>Test for Prototype Pollution vulnerabilities in JavaScript/Node.js applications.</description>
+    <details>Common Use Cases:
+      - Test client-side prototype pollution via URL parameters
+      - Test server-side prototype pollution in Node.js applications
+      - Generate prototype pollution payloads for various targets
+      - Analyze endpoints for prototype pollution vulnerability surface</details>
+    <parameters>
+      <parameter name="action" type="string" required="true">
+        <description>The testing action:
+          - test_client: Test client-side prototype pollution
+          - test_server: Test server-side prototype pollution (Node.js)
+          - generate_payloads: Generate prototype pollution payloads
+          - analyze: Analyze endpoint for vulnerability surface</description>
+      </parameter>
+      <parameter name="url" type="string" required="false">
+        <description>Target URL for testing. Required for test_client, test_server, analyze.</description>
+      </parameter>
+      <parameter name="method" type="string" required="false">
+        <description>HTTP method (GET or POST, default: POST)</description>
+      </parameter>
+      <parameter name="target_type" type="string" required="false">
+        <description>Payload type: basic, rce_node, ejs_rce, xss, bypass, all (default: all)</description>
+      </parameter>
+      <parameter name="timeout" type="integer" required="false">
+        <description>Request timeout in seconds (default: 10)</description>
+      </parameter>
+    </parameters>
+    <returns type="Dict[str, Any]">
+      <description>Prototype pollution test results with vulnerability indicators</description>
+    </returns>
+    <examples>
+      <function=prototype_pollution_tester>
+      <parameter=action>test_server</parameter>
+      <parameter=url>https://example.com/api/merge</parameter>
+      </function>
+
+      <function=prototype_pollution_tester>
+      <parameter=action>generate_payloads</parameter>
+      <parameter=target_type>bypass</parameter>
+      </function>
+
+      <function=prototype_pollution_tester>
+      <parameter=action>analyze</parameter>
+      <parameter=url>https://example.com/api/endpoint</parameter>
+      </function>
+    </examples>
+  </tool>
+</tools>

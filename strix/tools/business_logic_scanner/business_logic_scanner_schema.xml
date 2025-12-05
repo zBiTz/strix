@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<tools>
+  <tool name="business_logic_scanner">
+    <description>Test for business logic vulnerabilities in web applications.</description>
+    <details>Common Use Cases:
+      - Analyze multi-step workflows for bypass opportunities
+      - Test for race condition vulnerabilities
+      - Test parameter manipulation (price, quantity, discount)
+      - Test workflow step skip vulnerabilities
+      - Test numeric boundary manipulation
+      - Generate test cases for specific workflow types
+      - Detect state machine abuse and timing attacks</details>
+    <parameters>
+      <parameter name="action" type="string" required="true">
+        <description>The testing action:
+          - analyze_workflow: Analyze multi-step workflow for bypass
+          - test_race: Test for race condition vulnerabilities
+          - test_manipulation: Test parameter manipulation
+          - test_skip: Test workflow step skip vulnerabilities
+          - test_numeric: Test numeric boundary manipulation
+          - generate_tests: Generate test cases for workflow type</description>
+      </parameter>
+      <parameter name="url" type="string" required="false">
+        <description>Target URL for testing. Required for test_race, test_manipulation, test_numeric.</description>
+      </parameter>
+      <parameter name="endpoints" type="string" required="false">
+        <description>Comma-separated list of workflow endpoint URLs. Required for analyze_workflow.</description>
+      </parameter>
+      <parameter name="data" type="string" required="false">
+        <description>JSON data for request body. Required for test_manipulation, test_numeric.</description>
+      </parameter>
+      <parameter name="steps" type="string" required="false">
+        <description>JSON array of workflow steps for test_skip. Each step: {"url": "...", "method": "GET/POST", "data": {...}}</description>
+      </parameter>
+      <parameter name="param_to_test" type="string" required="false">
+        <description>Parameter name to test for manipulation. Required for test_manipulation.</description>
+      </parameter>
+      <parameter name="workflow_type" type="string" required="false">
+        <description>Workflow type for generate_tests: checkout, refund, payment, signup, password_reset</description>
+      </parameter>
+      <parameter name="method" type="string" required="false">
+        <description>HTTP method to use (default: POST)</description>
+      </parameter>
+      <parameter name="parallel_count" type="integer" required="false">
+        <description>Number of parallel requests for race testing (default: 10)</description>
+      </parameter>
+      <parameter name="headers" type="string" required="false">
+        <description>HTTP headers as JSON string</description>
+      </parameter>
+      <parameter name="timeout" type="integer" required="false">
+        <description>Request timeout in seconds (default: 10)</description>
+      </parameter>
+    </parameters>
+    <returns type="Dict[str, Any]">
+      <description>Business logic test results with vulnerability indicators and recommendations</description>
+    </returns>
+    <examples>
+      # Analyze a checkout workflow
+      <function=business_logic_scanner>
+      <parameter=action>analyze_workflow</parameter>
+      <parameter=endpoints>https://example.com/cart,https://example.com/shipping,https://example.com/payment</parameter>
+      </function>
+
+      # Test for race condition on coupon application
+      <function=business_logic_scanner>
+      <parameter=action>test_race</parameter>
+      <parameter=url>https://example.com/api/apply-coupon</parameter>
+      <parameter=data>{"code": "DISCOUNT10"}</parameter>
+      <parameter=parallel_count>20</parameter>
+      </function>
+
+      # Test price manipulation
+      <function=business_logic_scanner>
+      <parameter=action>test_manipulation</parameter>
+      <parameter=url>https://example.com/api/order</parameter>
+      <parameter=data>{"product_id": 123, "price": 99.99, "quantity": 1}</parameter>
+      <parameter=param_to_test>price</parameter>
+      </function>
+
+      # Test workflow step skipping
+      <function=business_logic_scanner>
+      <parameter=action>test_skip</parameter>
+      <parameter=steps>[{"url":"https://example.com/step1"},{"url":"https://example.com/step2","method":"POST"},{"url":"https://example.com/confirm"}]</parameter>
+      </function>
+
+      # Test numeric boundary manipulation
+      <function=business_logic_scanner>
+      <parameter=action>test_numeric</parameter>
+      <parameter=url>https://example.com/api/order</parameter>
+      <parameter=data>{"quantity": 1, "price": 100, "discount_percent": 10}</parameter>
+      </function>
+
+      # Generate test cases for checkout flow
+      <function=business_logic_scanner>
+      <parameter=action>generate_tests</parameter>
+      <parameter=workflow_type>checkout</parameter>
+      <parameter=url>https://example.com</parameter>
+      </function>
+    </examples>
+  </tool>
+</tools>
