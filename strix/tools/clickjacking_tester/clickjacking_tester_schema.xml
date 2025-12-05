@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<tool_definition>
+    <name>clickjacking_tester</name>
+    <description>
+        Test for clickjacking / UI redressing vulnerabilities.
+        Analyzes frame protection headers, tests frameability, and generates
+        proof-of-concept attack pages. Complements the clickjacking.jinja prompt.
+    </description>
+
+    <parameters>
+        <parameter name="action" type="string" required="true">
+            <description>The testing action to perform</description>
+            <enum>
+                <value name="check_headers">Check X-Frame-Options and CSP frame-ancestors headers</value>
+                <value name="test_frameable">Test if page can be embedded in iframe</value>
+                <value name="generate_poc">Generate clickjacking proof-of-concept HTML</value>
+                <value name="analyze">Comprehensive clickjacking vulnerability analysis</value>
+                <value name="generate_multi_step">Generate multi-step clickjacking PoC</value>
+            </enum>
+        </parameter>
+
+        <parameter name="url" type="string" required="true">
+            <description>Target URL to test for clickjacking</description>
+            <example>https://example.com/settings</example>
+        </parameter>
+
+        <parameter name="target_element" type="string" required="false">
+            <description>CSS selector for target element in PoC</description>
+            <example>#submit-button</example>
+        </parameter>
+
+        <parameter name="button_text" type="string" required="false">
+            <description>Text for decoy button in PoC</description>
+            <example>Claim Your Prize!</example>
+        </parameter>
+
+        <parameter name="steps" type="string" required="false">
+            <description>JSON array of step URLs for multi-step PoC</description>
+            <example>["https://example.com/step1", "https://example.com/confirm"]</example>
+        </parameter>
+
+        <parameter name="headers" type="string" required="false">
+            <description>Additional headers as JSON string</description>
+            <example>{"Authorization": "Bearer token"}</example>
+        </parameter>
+
+        <parameter name="timeout" type="integer" required="false" default="10">
+            <description>Request timeout in seconds</description>
+        </parameter>
+    </parameters>
+
+    <returns>
+        <field name="x_frame_options" type="object">X-Frame-Options header analysis</field>
+        <field name="csp_frame_ancestors" type="object">CSP frame-ancestors analysis</field>
+        <field name="protected" type="boolean">Whether page has frame protection</field>
+        <field name="vulnerable" type="boolean">Whether page is vulnerable to clickjacking</field>
+        <field name="frameable" type="boolean">Whether page can be framed</field>
+        <field name="poc_basic" type="string">Basic clickjacking PoC HTML</field>
+        <field name="poc_cursorjacking" type="string">Cursorjacking PoC HTML</field>
+        <field name="risk_level" type="string">Risk level assessment</field>
+        <field name="attack_vectors" type="array">Applicable attack vectors</field>
+        <field name="error" type="string">Error message if operation failed</field>
+    </returns>
+
+    <usage_examples>
+        <example name="Check frame headers">
+            <code>
+clickjacking_tester(
+    action="check_headers",
+    url="https://example.com/settings"
+)
+            </code>
+            <description>Check for X-Frame-Options and CSP frame-ancestors</description>
+        </example>
+
+        <example name="Generate PoC">
+            <code>
+clickjacking_tester(
+    action="generate_poc",
+    url="https://example.com/delete-account",
+    button_text="Click to Win!"
+)
+            </code>
+            <description>Generate clickjacking proof-of-concept HTML</description>
+        </example>
+
+        <example name="Full analysis">
+            <code>
+clickjacking_tester(
+    action="analyze",
+    url="https://example.com/oauth/authorize"
+)
+            </code>
+            <description>Comprehensive clickjacking vulnerability analysis</description>
+        </example>
+    </usage_examples>
+
+    <security_notes>
+        <note>Only test on systems you have authorization to test</note>
+        <note>PoC pages are for demonstration only</note>
+        <note>Press 'd' in PoC to toggle debug mode</note>
+        <note>Adjust button positions to align with target elements</note>
+    </security_notes>
+
+    <related_tools>
+        <tool>header_analyzer</tool>
+        <tool>cors_scanner</tool>
+    </related_tools>
+</tool_definition>

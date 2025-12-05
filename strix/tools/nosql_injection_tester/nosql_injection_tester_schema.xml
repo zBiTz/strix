@@ -1,0 +1,134 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<tool_definition>
+    <name>nosql_injection_tester</name>
+    <description>
+        Test for NoSQL injection vulnerabilities in MongoDB, CouchDB, and other NoSQL databases.
+        Detects operator injection, authentication bypass, and data extraction vectors.
+        Complements the nosql_injection.jinja prompt.
+    </description>
+
+    <parameters>
+        <parameter name="action" type="string" required="true">
+            <description>The testing action to perform</description>
+            <enum>
+                <value name="test_auth_bypass">Test authentication bypass using NoSQL operators</value>
+                <value name="test_operator">Test specific parameter for operator injection</value>
+                <value name="test_extraction">Test blind data extraction using regex</value>
+                <value name="test_timing">Test timing-based injection using $where</value>
+                <value name="generate_payloads">Generate NoSQL injection payloads</value>
+                <value name="analyze">Comprehensive NoSQL injection analysis</value>
+            </enum>
+        </parameter>
+
+        <parameter name="url" type="string" required="true">
+            <description>Target URL to test (e.g., login endpoint)</description>
+            <example>https://example.com/api/login</example>
+        </parameter>
+
+        <parameter name="method" type="string" required="false" default="POST">
+            <description>HTTP method to use</description>
+            <example>POST</example>
+        </parameter>
+
+        <parameter name="param_name" type="string" required="false">
+            <description>Specific parameter to test for injection</description>
+            <example>search</example>
+        </parameter>
+
+        <parameter name="username_field" type="string" required="false" default="username">
+            <description>Name of the username field</description>
+            <example>email</example>
+        </parameter>
+
+        <parameter name="password_field" type="string" required="false" default="password">
+            <description>Name of the password field</description>
+            <example>pass</example>
+        </parameter>
+
+        <parameter name="target_username" type="string" required="false" default="admin">
+            <description>Username to target for bypass attempts</description>
+            <example>administrator</example>
+        </parameter>
+
+        <parameter name="known_prefix" type="string" required="false">
+            <description>Known prefix for extraction attacks</description>
+            <example>adm</example>
+        </parameter>
+
+        <parameter name="content_type" type="string" required="false" default="json">
+            <description>Content type for requests (json or form)</description>
+            <example>json</example>
+        </parameter>
+
+        <parameter name="headers" type="string" required="false">
+            <description>Additional headers as JSON string</description>
+            <example>{"Authorization": "Bearer token"}</example>
+        </parameter>
+
+        <parameter name="timeout" type="integer" required="false" default="10">
+            <description>Request timeout in seconds</description>
+        </parameter>
+    </parameters>
+
+    <returns>
+        <field name="vulnerable" type="boolean">Whether NoSQL injection was detected</field>
+        <field name="successful_payloads" type="array">Payloads that succeeded</field>
+        <field name="extraction_possible" type="boolean">Whether data extraction is possible</field>
+        <field name="timing_injection" type="boolean">Whether timing-based injection works</field>
+        <field name="where_enabled" type="boolean">Whether $where is enabled</field>
+        <field name="extracted" type="string">Extracted data (if any)</field>
+        <field name="recommendations" type="array">Security recommendations</field>
+        <field name="error" type="string">Error message if operation failed</field>
+    </returns>
+
+    <usage_examples>
+        <example name="Test authentication bypass">
+            <code>
+nosql_injection_tester(
+    action="test_auth_bypass",
+    url="https://example.com/api/login",
+    username_field="email",
+    password_field="password",
+    target_username="admin@example.com"
+)
+            </code>
+            <description>Test for NoSQL authentication bypass</description>
+        </example>
+
+        <example name="Test operator injection">
+            <code>
+nosql_injection_tester(
+    action="test_operator",
+    url="https://example.com/api/search",
+    param_name="query",
+    method="GET"
+)
+            </code>
+            <description>Test specific parameter for operator injection</description>
+        </example>
+
+        <example name="Generate payloads">
+            <code>
+nosql_injection_tester(
+    action="generate_payloads",
+    url="https://example.com",
+    username_field="user",
+    password_field="pass"
+)
+            </code>
+            <description>Generate NoSQL injection payloads for testing</description>
+        </example>
+    </usage_examples>
+
+    <security_notes>
+        <note>Only test on systems you have authorization to test</note>
+        <note>Timing attacks may take longer due to sleep() calls</note>
+        <note>Some operators like $where may be disabled for security</note>
+        <note>Test both JSON body and URL parameter injection paths</note>
+    </security_notes>
+
+    <related_tools>
+        <tool>sqli_tester</tool>
+        <tool>api_fuzzer</tool>
+    </related_tools>
+</tool_definition>

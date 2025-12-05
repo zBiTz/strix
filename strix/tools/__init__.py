@@ -100,6 +100,10 @@ if not SANDBOX_MODE:
     from .mfa_bypass_tester import *  # noqa: F403
     from .auth_tester import *  # noqa: F403
 
+    # New security testing tools (batch 8) - UI & NoSQL Security
+    from .clickjacking_tester import *  # noqa: F403
+    from .nosql_injection_tester import *  # noqa: F403
+
     if HAS_PERPLEXITY_API:
         from .web_search import *  # noqa: F403
 else:
@@ -173,6 +177,10 @@ else:
     from .cache_poisoning_tester import *  # noqa: F403
     from .mfa_bypass_tester import *  # noqa: F403
     from .auth_tester import *  # noqa: F403
+
+    # New security testing tools (batch 8) - also available in sandbox mode
+    from .clickjacking_tester import *  # noqa: F403
+    from .nosql_injection_tester import *  # noqa: F403
 
 __all__ = [
     "ImplementedInClientSideOnlyError",
