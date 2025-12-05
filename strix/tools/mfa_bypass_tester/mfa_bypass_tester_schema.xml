@@ -1,0 +1,131 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<tool_definition>
+    <name>mfa_bypass_tester</name>
+    <description>
+        Test for multi-factor authentication bypass vulnerabilities.
+        Detects common MFA implementation flaws including response manipulation,
+        rate limiting issues, backup code weaknesses, and recovery flow bypasses.
+        Complements the mfa_bypass_techniques.jinja prompt.
+    </description>
+
+    <parameters>
+        <parameter name="action" type="string" required="true">
+            <description>The testing action to perform</description>
+            <enum>
+                <value name="test_response_manipulation">Test for response manipulation bypass vectors</value>
+                <value name="test_rate_limit">Test rate limiting on MFA verification</value>
+                <value name="test_backup_codes">Test backup code verification weaknesses</value>
+                <value name="test_recovery_flow">Test if recovery flows bypass MFA</value>
+                <value name="test_remember_device">Test remember device token vulnerabilities</value>
+                <value name="test_enrollment_bypass">Test if MFA enrollment can be bypassed</value>
+                <value name="analyze">Comprehensive MFA implementation analysis</value>
+                <value name="generate_tests">Generate MFA bypass test cases</value>
+            </enum>
+        </parameter>
+
+        <parameter name="url" type="string" required="true">
+            <description>Base URL of the target application</description>
+            <example>https://example.com</example>
+        </parameter>
+
+        <parameter name="mfa_endpoint" type="string" required="false">
+            <description>MFA verification endpoint path</description>
+            <example>/api/mfa/verify</example>
+        </parameter>
+
+        <parameter name="session_cookie" type="string" required="false">
+            <description>Session cookie for authenticated requests</description>
+            <example>session=abc123; auth_token=xyz789</example>
+        </parameter>
+
+        <parameter name="test_code" type="string" required="false" default="000000">
+            <description>MFA code to use for testing</description>
+        </parameter>
+
+        <parameter name="num_attempts" type="integer" required="false" default="10">
+            <description>Number of attempts for rate limit testing</description>
+        </parameter>
+
+        <parameter name="protected_endpoint" type="string" required="false">
+            <description>Protected resource endpoint to test access</description>
+            <example>/api/user/profile</example>
+        </parameter>
+
+        <parameter name="recovery_endpoint" type="string" required="false">
+            <description>Password reset/recovery endpoint</description>
+            <example>/api/password/reset</example>
+        </parameter>
+
+        <parameter name="device_token" type="string" required="false">
+            <description>Remember device token to test for reuse</description>
+        </parameter>
+
+        <parameter name="headers" type="string" required="false">
+            <description>Additional headers as JSON string</description>
+            <example>{"Authorization": "Bearer token123"}</example>
+        </parameter>
+
+        <parameter name="timeout" type="integer" required="false" default="10">
+            <description>Request timeout in seconds</description>
+        </parameter>
+    </parameters>
+
+    <returns>
+        <field name="vulnerable" type="boolean">Whether vulnerability was detected</field>
+        <field name="rate_limited" type="boolean">Whether rate limiting is enforced</field>
+        <field name="response_manipulation_vectors" type="array">Fields that may be manipulated</field>
+        <field name="mfa_bypass_possible" type="boolean">Whether MFA can be bypassed</field>
+        <field name="findings" type="array">Detailed findings from testing</field>
+        <field name="recommendations" type="array">Testing recommendations</field>
+        <field name="error" type="string">Error message if operation failed</field>
+    </returns>
+
+    <usage_examples>
+        <example name="Test rate limiting">
+            <code>
+mfa_bypass_tester(
+    action="test_rate_limit",
+    url="https://example.com",
+    mfa_endpoint="/api/mfa/verify",
+    session_cookie="session=abc123",
+    num_attempts=20
+)
+            </code>
+            <description>Test if MFA verification has rate limiting</description>
+        </example>
+
+        <example name="Test response manipulation">
+            <code>
+mfa_bypass_tester(
+    action="test_response_manipulation",
+    url="https://example.com",
+    mfa_endpoint="/api/mfa/verify",
+    session_cookie="session=abc123"
+)
+            </code>
+            <description>Identify response manipulation bypass vectors</description>
+        </example>
+
+        <example name="Analyze MFA implementation">
+            <code>
+mfa_bypass_tester(
+    action="analyze",
+    url="https://example.com"
+)
+            </code>
+            <description>Comprehensive MFA implementation analysis</description>
+        </example>
+    </usage_examples>
+
+    <security_notes>
+        <note>Only test on systems you have authorization to test</note>
+        <note>Rate limit testing may trigger account lockouts</note>
+        <note>Response manipulation requires proxy interception</note>
+        <note>Some tests require authenticated session</note>
+    </security_notes>
+
+    <related_tools>
+        <tool>auth_tester</tool>
+        <tool>session_analyzer</tool>
+    </related_tools>
+</tool_definition>

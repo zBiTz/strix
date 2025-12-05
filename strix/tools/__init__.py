@@ -95,6 +95,11 @@ if not SANDBOX_MODE:
     from .deserialization_scanner import *  # noqa: F403
     from .graphql_security_tester import *  # noqa: F403
 
+    # New security testing tools (batch 7) - Authentication & Cache Security
+    from .cache_poisoning_tester import *  # noqa: F403
+    from .mfa_bypass_tester import *  # noqa: F403
+    from .auth_tester import *  # noqa: F403
+
     if HAS_PERPLEXITY_API:
         from .web_search import *  # noqa: F403
 else:
@@ -163,6 +168,11 @@ else:
     from .crlf_injection_tester import *  # noqa: F403
     from .deserialization_scanner import *  # noqa: F403
     from .graphql_security_tester import *  # noqa: F403
+
+    # New security testing tools (batch 7) - also available in sandbox mode
+    from .cache_poisoning_tester import *  # noqa: F403
+    from .mfa_bypass_tester import *  # noqa: F403
+    from .auth_tester import *  # noqa: F403
 
 __all__ = [
     "ImplementedInClientSideOnlyError",

@@ -1,0 +1,113 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<tool_definition>
+    <name>cache_poisoning_tester</name>
+    <description>
+        Test for web cache poisoning vulnerabilities in CDN and proxy caches.
+        Detects cache behavior, identifies unkeyed inputs, and tests for
+        cache deception attacks. Complements the cache_poisoning.jinja prompt.
+    </description>
+
+    <parameters>
+        <parameter name="action" type="string" required="true">
+            <description>The testing action to perform</description>
+            <enum>
+                <value name="detect">Detect caching behavior through headers and timing analysis</value>
+                <value name="test_headers">Test for unkeyed header inputs that can poison cache</value>
+                <value name="test_deception">Test for web cache deception vulnerabilities</value>
+                <value name="test_fat_get">Test for fat GET request cache poisoning</value>
+                <value name="analyze">Comprehensive cache behavior analysis with recommendations</value>
+                <value name="generate_payloads">Generate cache poisoning test payloads</value>
+            </enum>
+        </parameter>
+
+        <parameter name="url" type="string" required="true">
+            <description>Target URL to test for cache poisoning</description>
+            <example>https://example.com/page</example>
+        </parameter>
+
+        <parameter name="header_name" type="string" required="false">
+            <description>Specific header to test (for test_headers action)</description>
+            <example>X-Forwarded-Host</example>
+        </parameter>
+
+        <parameter name="header_value" type="string" required="false">
+            <description>Value to inject in the test header</description>
+            <example>evil.com</example>
+        </parameter>
+
+        <parameter name="cache_buster" type="string" required="false">
+            <description>Unique value for cache busting during tests</description>
+            <example>test123</example>
+        </parameter>
+
+        <parameter name="deception_path" type="string" required="false">
+            <description>Path extension for cache deception testing</description>
+            <example>.css</example>
+        </parameter>
+
+        <parameter name="body_content" type="string" required="false">
+            <description>Body content for fat GET request testing</description>
+            <example>param=malicious_value</example>
+        </parameter>
+
+        <parameter name="timeout" type="integer" required="false" default="10">
+            <description>Request timeout in seconds</description>
+        </parameter>
+    </parameters>
+
+    <returns>
+        <field name="cache_detected" type="boolean">Whether caching is detected</field>
+        <field name="cache_type" type="string">Detected cache type (Cloudflare, Varnish, etc.)</field>
+        <field name="cache_headers" type="object">Cache-related headers found</field>
+        <field name="unkeyed_headers" type="array">Headers that affect response but not cache key</field>
+        <field name="reflected_headers" type="array">Headers whose values are reflected in response</field>
+        <field name="potential_poisoning" type="array">Potential poisoning vectors found</field>
+        <field name="vulnerable" type="boolean">Whether vulnerability was detected</field>
+        <field name="error" type="string">Error message if operation failed</field>
+    </returns>
+
+    <usage_examples>
+        <example name="Detect caching">
+            <code>
+cache_poisoning_tester(
+    action="detect",
+    url="https://example.com/page"
+)
+            </code>
+            <description>Detect cache behavior through headers and timing</description>
+        </example>
+
+        <example name="Test unkeyed headers">
+            <code>
+cache_poisoning_tester(
+    action="test_headers",
+    url="https://example.com/page",
+    cache_buster="unique123"
+)
+            </code>
+            <description>Test all common unkeyed headers for poisoning potential</description>
+        </example>
+
+        <example name="Test cache deception">
+            <code>
+cache_poisoning_tester(
+    action="test_deception",
+    url="https://example.com/account"
+)
+            </code>
+            <description>Test for web cache deception vulnerabilities</description>
+        </example>
+    </usage_examples>
+
+    <security_notes>
+        <note>Always use cache busters to avoid poisoning production caches</note>
+        <note>Test during low-traffic periods when possible</note>
+        <note>Document cache TTLs and test near expiration</note>
+        <note>Cache poisoning may affect many users - test responsibly</note>
+    </security_notes>
+
+    <related_tools>
+        <tool>http_smuggling_tester</tool>
+        <tool>header_injection_scanner</tool>
+    </related_tools>
+</tool_definition>

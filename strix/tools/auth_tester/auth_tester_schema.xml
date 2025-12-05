@@ -1,0 +1,126 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<tool_definition>
+    <name>auth_tester</name>
+    <description>
+        Test for JWT and authentication vulnerabilities including algorithm confusion,
+        none algorithm acceptance, key injection, and claim manipulation.
+        Complements the authentication_jwt.jinja prompt.
+    </description>
+
+    <parameters>
+        <parameter name="action" type="string" required="true">
+            <description>The testing action to perform</description>
+            <enum>
+                <value name="decode_jwt">Decode and display JWT contents</value>
+                <value name="test_alg_none">Test if server accepts 'none' algorithm</value>
+                <value name="test_alg_confusion">Test RS256 to HS256 algorithm confusion</value>
+                <value name="test_key_injection">Test for key injection via jku, x5u, kid headers</value>
+                <value name="test_claims">Test claim validation and manipulation</value>
+                <value name="test_token_reuse">Test token reuse across endpoints/services</value>
+                <value name="discover_endpoints">Discover authentication-related endpoints</value>
+                <value name="analyze">Comprehensive JWT security analysis</value>
+                <value name="generate_tokens">Generate test tokens for attack scenarios</value>
+            </enum>
+        </parameter>
+
+        <parameter name="url" type="string" required="false">
+            <description>Base URL of the target application</description>
+            <example>https://example.com</example>
+        </parameter>
+
+        <parameter name="token" type="string" required="false">
+            <description>JWT token to analyze or test</description>
+            <example>eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...</example>
+        </parameter>
+
+        <parameter name="public_key" type="string" required="false">
+            <description>RSA public key for algorithm confusion testing (PEM format)</description>
+        </parameter>
+
+        <parameter name="target_endpoint" type="string" required="false">
+            <description>API endpoint to test token against</description>
+            <example>/api/user</example>
+        </parameter>
+
+        <parameter name="modified_claims" type="string" required="false">
+            <description>JSON string of claims to modify</description>
+            <example>{"role": "admin", "is_admin": true}</example>
+        </parameter>
+
+        <parameter name="headers" type="string" required="false">
+            <description>Additional headers as JSON string</description>
+            <example>{"X-Custom-Header": "value"}</example>
+        </parameter>
+
+        <parameter name="timeout" type="integer" required="false" default="10">
+            <description>Request timeout in seconds</description>
+        </parameter>
+    </parameters>
+
+    <returns>
+        <field name="header" type="object">Decoded JWT header</field>
+        <field name="payload" type="object">Decoded JWT payload/claims</field>
+        <field name="vulnerable" type="boolean">Whether vulnerability was detected</field>
+        <field name="security_issues" type="array">Identified security issues</field>
+        <field name="recommendations" type="array">Testing recommendations</field>
+        <field name="generated_tokens" type="object">Generated test tokens</field>
+        <field name="error" type="string">Error message if operation failed</field>
+    </returns>
+
+    <usage_examples>
+        <example name="Decode JWT">
+            <code>
+auth_tester(
+    action="decode_jwt",
+    token="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U"
+)
+            </code>
+            <description>Decode and display JWT header and payload</description>
+        </example>
+
+        <example name="Test none algorithm">
+            <code>
+auth_tester(
+    action="test_alg_none",
+    url="https://example.com",
+    token="eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9...",
+    target_endpoint="/api/user"
+)
+            </code>
+            <description>Test if server accepts unsigned tokens</description>
+        </example>
+
+        <example name="Analyze JWT security">
+            <code>
+auth_tester(
+    action="analyze",
+    token="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+)
+            </code>
+            <description>Comprehensive security analysis of JWT</description>
+        </example>
+
+        <example name="Generate attack tokens">
+            <code>
+auth_tester(
+    action="generate_tokens",
+    token="eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9...",
+    modified_claims='{"role": "admin"}'
+)
+            </code>
+            <description>Generate tokens for various attack scenarios</description>
+        </example>
+    </usage_examples>
+
+    <security_notes>
+        <note>Only test on systems you have authorization to test</note>
+        <note>Algorithm confusion requires the RSA public key</note>
+        <note>Generated tokens may need signature for some tests</note>
+        <note>Token manipulation may be detected by security monitoring</note>
+    </security_notes>
+
+    <related_tools>
+        <tool>mfa_bypass_tester</tool>
+        <tool>session_analyzer</tool>
+    </related_tools>
+</tool_definition>
