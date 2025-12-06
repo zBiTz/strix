@@ -1,0 +1,283 @@
+<vulnerability_guide>
+  <title>KEY MANAGEMENT FLAWS - CRYPTOGRAPHIC KEY VULNERABILITIES</title>
+
+  <critical>Key management flaws undermine cryptographic security regardless of algorithm strength. Hardcoded keys, weak key derivation, improper key storage, and missing key rotation allow attackers to decrypt data, forge signatures, and bypass authentication. Even AES-256 is useless if the key is embedded in client-side JavaScript.</critical>
+
+  <scope>
+    - Hardcoded encryption keys and secrets
+    - Weak key derivation functions
+    - Insecure key storage locations
+    - Missing or broken key rotation
+    - Key exposure in logs and error messages
+    - Shared keys across environments
+    - Insufficient key length or entropy
+  </scope>
+
+  <methodology>
+    1. **Find keys in code**: Search for hardcoded secrets and keys
+    2. **Analyze key derivation**: Check if passwords are properly converted to keys
+    3. **Check key storage**: Identify where keys are stored
+    4. **Test key isolation**: Verify environment separation
+    5. **Evaluate key rotation**: Check for key rotation mechanisms
+  </methodology>
+
+  <advanced_techniques>
+    <hardcoded_key_detection>
+      Find hardcoded cryptographic keys:
+      {% raw %}
+      # Common patterns in source code
+
+      # Hex-encoded keys
+      grep -rE "['\"][0-9a-fA-F]{32,}['\"]" .
+      grep -rE "key\s*=\s*['\"][0-9a-fA-F]{32,}['\"]" .
+
+      # Base64-encoded keys
+      grep -rE "['\"][A-Za-z0-9+/]{40,}={0,2}['\"]" .
+
+      # Named key variables
+      grep -riE "(secret_key|api_key|encryption_key|private_key|aes_key)\s*=" .
+      grep -riE "(SECRET|KEY|TOKEN|SALT)\s*=\s*['\"]" .
+
+      # JWT secrets
+      grep -rE "jwt.*secret|secret.*jwt" .
+
+      # Common hardcoded values (example keys from documentation)
+      grep -r "changeme" .
+      grep -r "secret123" .
+      grep -r "your-256-bit-secret" .
+      grep -r "0123456789abcdef" .
+
+      # Environment variable defaults
+      grep -E "getenv.*\|\|.*['\"]" .  # Fallback hardcoded values
+
+      # Configuration files
+      cat config.json | jq '.encryption_key, .secret, .api_key'
+      {% endraw %}
+    </hardcoded_key_detection>
+
+    <client_side_key_exposure>
+      Find keys exposed to clients:
+      {% raw %}
+      # JavaScript source analysis
+      grep -E "(secret|key|token|password)" *.js
+      grep -E "CryptoJS\.AES\.encrypt\([^,]+,\s*['\"]" .
+
+      # Webpack/bundle analysis
+      # Unpack bundles and search for secrets
+      # Look in source maps
+
+      # Mobile app decompilation
+      # APK: jadx, apktool
+      # IPA: class-dump, Hopper
+      strings app.apk | grep -iE "key|secret|api"
+
+      # Browser DevTools
+      # Check localStorage, sessionStorage
+      # Inspect network requests for key transmission
+
+      # Common client-side crypto patterns
+      # AES-CBC with hardcoded key
+      CryptoJS.AES.encrypt(data, "hardcoded-secret-key")
+
+      # HMAC with exposed secret
+      CryptoJS.HmacSHA256(message, "client-side-secret")
+      {% endraw %}
+    </client_side_key_exposure>
+
+    <weak_key_derivation>
+      Identify weak key derivation:
+      {% raw %}
+      # BAD: Direct password use
+      key = password.encode()  # No derivation
+      cipher = AES.new(password[:32])  # Truncated password as key
+
+      # BAD: Simple hashing
+      key = hashlib.sha256(password).digest()  # No salt, no iterations
+      key = MD5(password)  # MD5 is broken
+
+      # BAD: Single iteration
+      key = PBKDF2(password, salt, iterations=1)  # Too few iterations
+
+      # GOOD: Proper KDF
+      key = PBKDF2(password, salt, iterations=100000, dkLen=32)
+      key = argon2.hash(password, salt, time_cost=3, memory_cost=65536)
+      key = scrypt(password, salt, N=2**14, r=8, p=1)
+
+      # Check iteration counts
+      # PBKDF2: minimum 100,000 (2023 recommendation: 600,000+)
+      # bcrypt: minimum cost 10
+      # Argon2: time_cost >= 2, memory_cost >= 64MB
+
+      # Salt analysis
+      # Must be unique per password
+      # Must be cryptographically random
+      # Must be sufficient length (16+ bytes)
+      {% endraw %}
+    </weak_key_derivation>
+
+    <key_storage_vulnerabilities>
+      Identify insecure key storage:
+      {% raw %}
+      # Plaintext configuration files
+      cat /etc/app/config.yml | grep -i key
+      cat .env | grep KEY
+
+      # Environment variables (exposed in process list)
+      ps auxe | grep -i key
+      cat /proc/<pid>/environ | tr '\0' '\n' | grep KEY
+
+      # Insecure file permissions
+      find / -name "*.key" -o -name "*.pem" 2>/dev/null | xargs ls -la
+      find / -name "*secret*" -perm /o+r 2>/dev/null  # World-readable
+
+      # Database storage
+      SELECT * FROM settings WHERE key_name LIKE '%secret%';
+      SELECT * FROM configurations WHERE name LIKE '%key%';
+
+      # Cloud metadata exposure
+      curl http://169.254.169.254/latest/meta-data/iam/security-credentials/
+      gcloud secrets list
+
+      # Git history exposure
+      git log --all --full-history -p -- "**/config*" | grep -i key
+      git log --all -p -S "secret_key"
+
+      # Docker image layers
+      docker history --no-trunc image:tag | grep -i key
+      dive image:tag  # Interactive layer inspection
+      {% endraw %}
+    </key_storage_vulnerabilities>
+
+    <key_rotation_issues>
+      Identify key rotation problems:
+      {% raw %}
+      # No rotation mechanism
+      # Check if keys have version identifiers
+      # Check for key rotation procedures/scripts
+
+      # Same key across environments
+      diff prod-config.yml staging-config.yml | grep -i key
+
+      # Expired keys still valid
+      # Test old tokens/keys - do they still work?
+      # Check key validity periods
+
+      # Manual key rotation process
+      # Increases risk of exposure during rotation
+      # Check for key rotation logs
+
+      # Key in multiple locations
+      grep -r "same-key-value" /etc /var /opt
+      # All must be updated during rotation
+
+      # Database encryption key never changed
+      SELECT created_at FROM encryption_keys ORDER BY created_at DESC LIMIT 1;
+      # If old, key likely never rotated
+
+      # JWT keys
+      # Static secret for years = vulnerable to offline brute force
+      # No key ID (kid) = can't rotate without breaking sessions
+      {% endraw %}
+    </key_rotation_issues>
+
+    <key_entropy_analysis>
+      Analyze key randomness and strength:
+      {% raw %}
+      # Calculate entropy
+      import math
+      from collections import Counter
+
+      def entropy(data):
+          freq = Counter(data)
+          probs = [f/len(data) for f in freq.values()]
+          return -sum(p * math.log2(p) for p in probs)
+
+      # Expected entropy for random bytes: ~8 bits per byte
+      # Low entropy indicates weak key
+
+      # Check key length
+      # AES-128: 16 bytes (128 bits)
+      # AES-256: 32 bytes (256 bits)
+      # RSA: 2048+ bits minimum
+      # ECDSA: 256+ bits (P-256 curve or better)
+
+      # Weak key patterns
+      # Sequential: 0123456789abcdef
+      # Repeated: aaaaaaaaaaaaaaaa
+      # Dictionary words: secretpassword123
+      # Short keys padded: secret\x00\x00\x00\x00\x00
+
+      # Key generation check
+      # Should use CSPRNG, not PRNG
+      os.urandom(32)  # GOOD
+      random.randbytes(32)  # BAD (Python random module)
+      {% endraw %}
+    </key_entropy_analysis>
+
+    <environment_key_leakage>
+      Find keys leaked between environments:
+      {% raw %}
+      # Same keys in dev/staging/prod
+      # Compare configuration across environments
+      diff <(ssh dev 'cat /app/.env') <(ssh prod 'cat /app/.env')
+
+      # Test keys from one environment in another
+      # Development key might work in production
+
+      # Shared secrets in microservices
+      # All services using same JWT secret
+      # Compromise one = compromise all
+
+      # CI/CD pipeline exposure
+      # Keys in build logs
+      # Keys in artifact repositories
+      # Keys in deployment scripts (git)
+
+      # Cloud secret manager audit
+      aws secretsmanager list-secrets
+      # Check access policies - who can read?
+      # Check secret values - same across accounts?
+
+      # Container orchestration
+      kubectl get secrets -A -o yaml | grep -i key
+      # Same secret mounted in multiple pods?
+      {% endraw %}
+    </environment_key_leakage>
+  </advanced_techniques>
+
+  <validation>
+    - Discover at least one hardcoded key in source code
+    - Identify weak key derivation (no salt, low iterations)
+    - Find keys with improper storage/permissions
+    - Demonstrate key reuse across environments
+    - Document cryptographic impact of discovered keys
+  </validation>
+
+  <false_positives>
+    - Test/example keys in documentation (should not be in production)
+    - Public keys (intended to be shared)
+    - Key identifiers vs actual key material
+    - Encrypted keys (properly protected by master key)
+  </false_positives>
+
+  <detection_indicators>
+    - Source code access attempts in repositories
+    - Configuration file read attempts
+    - Environment variable enumeration
+    - Cloud metadata access
+    - Git history mining activities
+  </detection_indicators>
+
+  <pro_tips>
+    - Default keys from documentation are often left in production
+    - Mobile apps commonly embed keys - always decompile and check
+    - Webpack/bundled JS often contains secrets
+    - Git history preserves removed secrets - check with truffleHog or gitleaks
+    - Docker image layers preserve secrets added then "removed"
+    - Environment variables are not secure storage - exposed in logs/process list
+    - HSMs and cloud KMS are proper key storage solutions
+    - Key rotation without revocation leaves old keys valid
+  </pro_tips>
+
+  <remember>The strongest encryption algorithm is worthless if the key is hardcoded in client-side code, stored in plaintext configuration, or shared across environments. Key management is where cryptographic security succeeds or fails.</remember>
+</vulnerability_guide>

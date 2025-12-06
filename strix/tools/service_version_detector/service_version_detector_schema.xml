@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<tools>
+  <tool name="service_version_detector">
+    <description>Detect service versions through banner grabbing and fingerprinting for vulnerability identification.</description>
+    <details>Common Use Cases:
+      - Grab banners from network services
+      - Identify specific software versions
+      - Fingerprint web servers and frameworks
+      - Detect outdated or vulnerable service versions
+      - Map service versions to known CVEs</details>
+    <parameters>
+      <parameter name="action" type="string" required="true">
+        <description>The detection action to perform:
+          - grab_banner: Grab service banner from a port
+          - detect_version: Identify service version from banner
+          - fingerprint_http: Fingerprint HTTP server and frameworks
+          - check_vulnerabilities: Check version against known CVEs
+          - full_scan: Complete version detection and vulnerability check</description>
+      </parameter>
+      <parameter name="target" type="string" required="true">
+        <description>Target host IP address or hostname</description>
+      </parameter>
+      <parameter name="port" type="int" required="false">
+        <description>Target port number. Required for grab_banner, detect_version.</description>
+      </parameter>
+      <parameter name="ports" type="string" required="false">
+        <description>Multiple ports for full_scan (comma-separated). E.g., "22,80,443"</description>
+      </parameter>
+      <parameter name="timeout" type="float" required="false">
+        <description>Connection timeout in seconds (default: 5.0)</description>
+      </parameter>
+    </parameters>
+    <returns type="Dict[str, Any]">
+      <description>Service version information, fingerprints, and potential vulnerabilities</description>
+    </returns>
+    <examples>
+      # Grab banner from SSH port
+      <function=service_version_detector>
+      <parameter=action>grab_banner</parameter>
+      <parameter=target>192.168.1.1</parameter>
+      <parameter=port>22</parameter>
+      </function>
+
+      # Fingerprint HTTP server
+      <function=service_version_detector>
+      <parameter=action>fingerprint_http</parameter>
+      <parameter=target>example.com</parameter>
+      <parameter=port>443</parameter>
+      </function>
+
+      # Check version for vulnerabilities
+      <function=service_version_detector>
+      <parameter=action>check_vulnerabilities</parameter>
+      <parameter=target>192.168.1.1</parameter>
+      <parameter=port>22</parameter>
+      </function>
+
+      # Full scan of multiple ports
+      <function=service_version_detector>
+      <parameter=action>full_scan</parameter>
+      <parameter=target>192.168.1.1</parameter>
+      <parameter=ports>22,80,443,3306,5432</parameter>
+      </function>
+    </examples>
+  </tool>
+</tools>

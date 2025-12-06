@@ -104,6 +104,13 @@ if not SANDBOX_MODE:
     from .clickjacking_tester import *  # noqa: F403
     from .nosql_injection_tester import *  # noqa: F403
 
+    # New security testing tools (batch 9) - Infrastructure & CI/CD Security
+    from .port_scanner import *  # noqa: F403
+    from .ci_pipeline_analyzer import *  # noqa: F403
+    from .aws_iam_analyzer import *  # noqa: F403
+    from .secrets_extractor import *  # noqa: F403
+    from .service_version_detector import *  # noqa: F403
+
     if HAS_PERPLEXITY_API:
         from .web_search import *  # noqa: F403
 else:
@@ -181,6 +188,13 @@ else:
     # New security testing tools (batch 8) - also available in sandbox mode
     from .clickjacking_tester import *  # noqa: F403
     from .nosql_injection_tester import *  # noqa: F403
+
+    # New security testing tools (batch 9) - also available in sandbox mode
+    from .port_scanner import *  # noqa: F403
+    from .ci_pipeline_analyzer import *  # noqa: F403
+    from .aws_iam_analyzer import *  # noqa: F403
+    from .secrets_extractor import *  # noqa: F403
+    from .service_version_detector import *  # noqa: F403
 
 __all__ = [
     "ImplementedInClientSideOnlyError",

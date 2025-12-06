@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<tools>
+  <tool name="ci_pipeline_analyzer">
+    <description>Analyze CI/CD pipeline configurations for security vulnerabilities.</description>
+    <details>Common Use Cases:
+      - Detect expression injection in GitHub Actions workflows
+      - Find dangerous triggers (pull_request_target, workflow_run)
+      - Identify hardcoded secrets in CI configurations
+      - Audit Jenkinsfile for script injection vulnerabilities
+      - Check GitLab CI for variable injection and external includes</details>
+    <parameters>
+      <parameter name="action" type="string" required="true">
+        <description>The analysis action to perform:
+          - analyze_github_actions: Analyze GitHub Actions workflow file
+          - analyze_gitlab_ci: Analyze .gitlab-ci.yml file
+          - analyze_jenkinsfile: Analyze Jenkinsfile
+          - find_secrets: Search for hardcoded secrets in CI file
+          - full_audit: Run all checks on a directory</description>
+      </parameter>
+      <parameter name="file_path" type="string" required="false">
+        <description>Path to the CI configuration file to analyze.
+          Required for all actions except full_audit.</description>
+      </parameter>
+      <parameter name="directory" type="string" required="false">
+        <description>Directory to scan. Required for full_audit action.</description>
+      </parameter>
+    </parameters>
+    <returns type="Dict[str, Any]">
+      <description>Analysis results with security findings and recommendations</description>
+    </returns>
+    <examples>
+      # Analyze GitHub Actions workflow
+      <function=ci_pipeline_analyzer>
+      <parameter=action>analyze_github_actions</parameter>
+      <parameter=file_path>.github/workflows/ci.yml</parameter>
+      </function>
+
+      # Analyze GitLab CI configuration
+      <function=ci_pipeline_analyzer>
+      <parameter=action>analyze_gitlab_ci</parameter>
+      <parameter=file_path>.gitlab-ci.yml</parameter>
+      </function>
+
+      # Find secrets in CI file
+      <function=ci_pipeline_analyzer>
+      <parameter=action>find_secrets</parameter>
+      <parameter=file_path>Jenkinsfile</parameter>
+      </function>
+
+      # Full security audit of directory
+      <function=ci_pipeline_analyzer>
+      <parameter=action>full_audit</parameter>
+      <parameter=directory>.</parameter>
+      </function>
+    </examples>
+  </tool>
+</tools>

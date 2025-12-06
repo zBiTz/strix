@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<tools>
+  <tool name="port_scanner">
+    <description>TCP/UDP port scanning and service detection for network reconnaissance.</description>
+    <details>Common Use Cases:
+      - Scan specific TCP ports on a target host
+      - Quick scan of common/well-known ports
+      - Service detection with banner grabbing
+      - UDP port scanning (less reliable)
+      - Identify running services and their versions</details>
+    <parameters>
+      <parameter name="action" type="string" required="true">
+        <description>The scanning action to perform:
+          - scan_tcp: TCP connect scan on specified ports
+          - scan_udp: UDP port scan (less reliable, slower)
+          - scan_common: Scan top 100 common ports quickly
+          - detect_service: Scan and identify services with banner grabbing</description>
+      </parameter>
+      <parameter name="target" type="string" required="true">
+        <description>Target host IP address or hostname to scan</description>
+      </parameter>
+      <parameter name="ports" type="string" required="false">
+        <description>Ports to scan. Formats: "22,80,443" or "1-1000" or "22,80,100-200".
+          Not required for scan_common action.</description>
+      </parameter>
+      <parameter name="timeout" type="float" required="false">
+        <description>Connection timeout in seconds (default: 2.0)</description>
+      </parameter>
+    </parameters>
+    <returns type="Dict[str, Any]">
+      <description>Scan results including open ports, services, and banners</description>
+    </returns>
+    <examples>
+      # Scan specific TCP ports
+      <function=port_scanner>
+      <parameter=action>scan_tcp</parameter>
+      <parameter=target>192.168.1.1</parameter>
+      <parameter=ports>22,80,443,3306,8080</parameter>
+      </function>
+
+      # Quick scan of common ports
+      <function=port_scanner>
+      <parameter=action>scan_common</parameter>
+      <parameter=target>10.0.0.1</parameter>
+      </function>
+
+      # Service detection with banner grabbing
+      <function=port_scanner>
+      <parameter=action>detect_service</parameter>
+      <parameter=target>target.example.com</parameter>
+      <parameter=ports>22,80,443</parameter>
+      </function>
+
+      # Scan a port range
+      <function=port_scanner>
+      <parameter=action>scan_tcp</parameter>
+      <parameter=target>192.168.1.1</parameter>
+      <parameter=ports>1-1000</parameter>
+      </function>
+    </examples>
+  </tool>
+</tools>

