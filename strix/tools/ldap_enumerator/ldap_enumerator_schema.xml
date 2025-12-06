@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<tools>
+  <tool name="ldap_enumerator">
+    <description>LDAP enumeration for Active Directory reconnaissance and user/group discovery.</description>
+    <details>Common Use Cases:
+      - Test for anonymous LDAP bind
+      - Enumerate domain users and groups
+      - Find computers in the domain
+      - Discover service accounts (SPNs)
+      - Extract domain information
+      - Find privileged accounts</details>
+    <parameters>
+      <parameter name="action" type="string" required="true">
+        <description>The enumeration action to perform:
+          - anonymous_bind: Test for anonymous LDAP access
+          - enumerate_users: List domain users
+          - enumerate_groups: List domain groups
+          - find_computers: Find domain computers
+          - find_spns: Find service principal names
+          - get_domain_info: Get domain configuration
+          - full_enum: Run all enumeration checks</description>
+      </parameter>
+      <parameter name="target" type="string" required="true">
+        <description>Target LDAP server (domain controller)</description>
+      </parameter>
+      <parameter name="base_dn" type="string" required="false">
+        <description>Base DN for LDAP queries (e.g., DC=domain,DC=local)</description>
+      </parameter>
+      <parameter name="username" type="string" required="false">
+        <description>Username for authentication (user@domain or DOMAIN\\user)</description>
+      </parameter>
+      <parameter name="password" type="string" required="false">
+        <description>Password for authentication</description>
+      </parameter>
+      <parameter name="port" type="int" required="false">
+        <description>LDAP port (default: 389, use 636 for LDAPS)</description>
+      </parameter>
+      <parameter name="use_ssl" type="bool" required="false">
+        <description>Use LDAPS (SSL/TLS) connection</description>
+      </parameter>
+    </parameters>
+    <returns type="Dict[str, Any]">
+      <description>Enumeration results with users, groups, and domain information</description>
+    </returns>
+    <examples>
+      # Test anonymous bind
+      <function=ldap_enumerator>
+      <parameter=action>anonymous_bind</parameter>
+      <parameter=target>dc01.domain.local</parameter>
+      </function>
+
+      # Enumerate users with credentials
+      <function=ldap_enumerator>
+      <parameter=action>enumerate_users</parameter>
+      <parameter=target>10.0.0.1</parameter>
+      <parameter=base_dn>DC=domain,DC=local</parameter>
+      <parameter=username>user@domain.local</parameter>
+      <parameter=password>password123</parameter>
+      </function>
+
+      # Find service accounts
+      <function=ldap_enumerator>
+      <parameter=action>find_spns</parameter>
+      <parameter=target>dc01.domain.local</parameter>
+      <parameter=base_dn>DC=domain,DC=local</parameter>
+      </function>
+    </examples>
+  </tool>
+</tools>

@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<tools>
+  <tool name="kerberos_tester">
+    <description>Kerberos security testing for AS-REP roasting, Kerberoasting, and delegation abuse.</description>
+    <details>Common Use Cases:
+      - Test for AS-REP roastable accounts (no preauth)
+      - Identify Kerberoastable service accounts
+      - Enumerate SPNs for Kerberoasting
+      - Check for unconstrained/constrained delegation
+      - Test Kerberos configuration security
+      - Generate attack commands for exploitation</details>
+    <parameters>
+      <parameter name="action" type="string" required="true">
+        <description>The testing action to perform:
+          - test_asrep: Test for AS-REP roastable accounts
+          - test_kerberoast: Test for Kerberoastable accounts
+          - enumerate_spns: Enumerate service principal names
+          - check_delegation: Check for delegation misconfigurations
+          - check_preauth: Test if preauth is required
+          - full_test: Run all Kerberos security tests</description>
+      </parameter>
+      <parameter name="target" type="string" required="true">
+        <description>Target domain controller or domain name</description>
+      </parameter>
+      <parameter name="username" type="string" required="false">
+        <description>Username for authenticated tests (user@domain or DOMAIN\\user)</description>
+      </parameter>
+      <parameter name="password" type="string" required="false">
+        <description>Password for authentication</description>
+      </parameter>
+      <parameter name="domain" type="string" required="false">
+        <description>Domain name (e.g., domain.local)</description>
+      </parameter>
+      <parameter name="users_file" type="string" required="false">
+        <description>File with usernames to test (one per line)</description>
+      </parameter>
+    </parameters>
+    <returns type="Dict[str, Any]">
+      <description>Test results with vulnerable accounts and attack vectors</description>
+    </returns>
+    <examples>
+      # Test for AS-REP roastable accounts
+      <function=kerberos_tester>
+      <parameter=action>test_asrep</parameter>
+      <parameter=target>dc01.domain.local</parameter>
+      <parameter=domain>domain.local</parameter>
+      </function>
+
+      # Kerberoast with credentials
+      <function=kerberos_tester>
+      <parameter=action>test_kerberoast</parameter>
+      <parameter=target>10.0.0.1</parameter>
+      <parameter=username>user@domain.local</parameter>
+      <parameter=password>password123</parameter>
+      </function>
+
+      # Check delegation settings
+      <function=kerberos_tester>
+      <parameter=action>check_delegation</parameter>
+      <parameter=target>dc01.domain.local</parameter>
+      <parameter=domain>domain.local</parameter>
+      </function>
+
+      # Full Kerberos security test
+      <function=kerberos_tester>
+      <parameter=action>full_test</parameter>
+      <parameter=target>dc01.domain.local</parameter>
+      <parameter=domain>domain.local</parameter>
+      </function>
+    </examples>
+  </tool>
+</tools>

@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<tools>
+  <tool name="smb_enumerator">
+    <description>SMB/CIFS enumeration for share discovery, user enumeration, and security assessment.</description>
+    <details>Common Use Cases:
+      - List available SMB shares on a target
+      - Check for null session access
+      - Enumerate domain users via SMB
+      - Check SMB signing configuration
+      - Detect SMB protocol versions
+      - Identify writable shares</details>
+    <parameters>
+      <parameter name="action" type="string" required="true">
+        <description>The enumeration action to perform:
+          - list_shares: List available SMB shares
+          - check_null_session: Test for null session access
+          - enumerate_users: Enumerate users via RID cycling
+          - check_signing: Check SMB signing requirements
+          - check_permissions: Check share access permissions
+          - full_enum: Run all enumeration checks</description>
+      </parameter>
+      <parameter name="target" type="string" required="true">
+        <description>Target host IP address or hostname</description>
+      </parameter>
+      <parameter name="username" type="string" required="false">
+        <description>Username for authentication (optional, empty for null session)</description>
+      </parameter>
+      <parameter name="password" type="string" required="false">
+        <description>Password for authentication (optional)</description>
+      </parameter>
+      <parameter name="domain" type="string" required="false">
+        <description>Domain name for authentication (optional)</description>
+      </parameter>
+      <parameter name="port" type="int" required="false">
+        <description>SMB port (default: 445)</description>
+      </parameter>
+    </parameters>
+    <returns type="Dict[str, Any]">
+      <description>Enumeration results with shares, users, and security findings</description>
+    </returns>
+    <examples>
+      # List SMB shares
+      <function=smb_enumerator>
+      <parameter=action>list_shares</parameter>
+      <parameter=target>192.168.1.1</parameter>
+      </function>
+
+      # Check for null session
+      <function=smb_enumerator>
+      <parameter=action>check_null_session</parameter>
+      <parameter=target>10.0.0.1</parameter>
+      </function>
+
+      # Enumerate with credentials
+      <function=smb_enumerator>
+      <parameter=action>enumerate_users</parameter>
+      <parameter=target>dc01.domain.local</parameter>
+      <parameter=username>user</parameter>
+      <parameter=password>pass</parameter>
+      <parameter=domain>DOMAIN</parameter>
+      </function>
+
+      # Full enumeration
+      <function=smb_enumerator>
+      <parameter=action>full_enum</parameter>
+      <parameter=target>192.168.1.1</parameter>
+      </function>
+    </examples>
+  </tool>
+</tools>

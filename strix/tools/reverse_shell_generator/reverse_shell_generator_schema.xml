@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<tools>
+  <tool name="reverse_shell_generator">
+    <description>Generate reverse shell payloads for various languages and platforms.</description>
+    <details>Common Use Cases:
+      - Generate bash/sh reverse shells
+      - Create PowerShell reverse shells
+      - Generate Python/Perl/Ruby/PHP shells
+      - Create encoded payloads to bypass filters
+      - Generate bind shells as alternatives
+      - Create web shells for file upload</details>
+    <parameters>
+      <parameter name="action" type="string" required="true">
+        <description>The generation action to perform:
+          - generate_bash: Generate Bash reverse shell
+          - generate_powershell: Generate PowerShell reverse shell
+          - generate_python: Generate Python reverse shell
+          - generate_php: Generate PHP reverse shell
+          - generate_perl: Generate Perl reverse shell
+          - generate_ruby: Generate Ruby reverse shell
+          - generate_nc: Generate Netcat reverse shell
+          - generate_all: Generate all reverse shell types
+          - generate_web_shell: Generate web shells
+          - generate_msfvenom: Generate msfvenom commands</description>
+      </parameter>
+      <parameter name="lhost" type="string" required="true">
+        <description>Listener IP address (attacker's IP)</description>
+      </parameter>
+      <parameter name="lport" type="int" required="true">
+        <description>Listener port number</description>
+      </parameter>
+      <parameter name="encoding" type="string" required="false">
+        <description>Encoding type: base64, url, none (default: none)</description>
+      </parameter>
+      <parameter name="shell_type" type="string" required="false">
+        <description>Shell type: reverse (default), bind</description>
+      </parameter>
+    </parameters>
+    <returns type="Dict[str, Any]">
+      <description>Generated payloads with listener commands</description>
+    </returns>
+    <examples>
+      # Generate bash reverse shell
+      <function=reverse_shell_generator>
+      <parameter=action>generate_bash</parameter>
+      <parameter=lhost>10.10.14.1</parameter>
+      <parameter=lport>4444</parameter>
+      </function>
+
+      # Generate all shells with base64 encoding
+      <function=reverse_shell_generator>
+      <parameter=action>generate_all</parameter>
+      <parameter=lhost>10.10.14.1</parameter>
+      <parameter=lport>9001</parameter>
+      <parameter=encoding>base64</parameter>
+      </function>
+
+      # Generate msfvenom commands
+      <function=reverse_shell_generator>
+      <parameter=action>generate_msfvenom</parameter>
+      <parameter=lhost>192.168.1.100</parameter>
+      <parameter=lport>443</parameter>
+      </function>
+    </examples>
+  </tool>
+</tools>

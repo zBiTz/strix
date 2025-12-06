@@ -111,6 +111,14 @@ if not SANDBOX_MODE:
     from .secrets_extractor import *  # noqa: F403
     from .service_version_detector import *  # noqa: F403
 
+    # New security testing tools (batch 10) - AD/Network & Exploitation
+    from .smb_enumerator import *  # noqa: F403
+    from .ldap_enumerator import *  # noqa: F403
+    from .kerberos_tester import *  # noqa: F403
+    from .credential_validator import *  # noqa: F403
+    from .privilege_escalation_checker import *  # noqa: F403
+    from .reverse_shell_generator import *  # noqa: F403
+
     if HAS_PERPLEXITY_API:
         from .web_search import *  # noqa: F403
 else:
@@ -195,6 +203,14 @@ else:
     from .aws_iam_analyzer import *  # noqa: F403
     from .secrets_extractor import *  # noqa: F403
     from .service_version_detector import *  # noqa: F403
+
+    # New security testing tools (batch 10) - also available in sandbox mode
+    from .smb_enumerator import *  # noqa: F403
+    from .ldap_enumerator import *  # noqa: F403
+    from .kerberos_tester import *  # noqa: F403
+    from .credential_validator import *  # noqa: F403
+    from .privilege_escalation_checker import *  # noqa: F403
+    from .reverse_shell_generator import *  # noqa: F403
 
 __all__ = [
     "ImplementedInClientSideOnlyError",

@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<tools>
+  <tool name="privilege_escalation_checker">
+    <description>Check for privilege escalation vectors on Linux and Windows systems.</description>
+    <details>Common Use Cases:
+      - Find SUID/SGID binaries
+      - Check sudo permissions
+      - Enumerate capabilities
+      - Find writable paths
+      - Check cron jobs
+      - Identify misconfigurations</details>
+    <parameters>
+      <parameter name="action" type="string" required="true">
+        <description>The check action to perform:
+          - check_suid: Find SUID/SGID binaries
+          - check_sudo: Check sudo permissions
+          - check_capabilities: Find binaries with capabilities
+          - check_cron: Enumerate cron jobs
+          - check_services: Check service configurations
+          - check_writable: Find world-writable files/dirs
+          - generate_script: Generate enumeration script
+          - full_check: Run all privilege escalation checks</description>
+      </parameter>
+      <parameter name="os_type" type="string" required="false">
+        <description>Target OS type: linux or windows (default: linux)</description>
+      </parameter>
+      <parameter name="path" type="string" required="false">
+        <description>Path to scan for certain checks</description>
+      </parameter>
+    </parameters>
+    <returns type="Dict[str, Any]">
+      <description>Privilege escalation vectors and exploitation techniques</description>
+    </returns>
+    <examples>
+      # Check for SUID binaries
+      <function=privilege_escalation_checker>
+      <parameter=action>check_suid</parameter>
+      </function>
+
+      # Full Linux privilege escalation check
+      <function=privilege_escalation_checker>
+      <parameter=action>full_check</parameter>
+      <parameter=os_type>linux</parameter>
+      </function>
+
+      # Generate Windows enumeration script
+      <function=privilege_escalation_checker>
+      <parameter=action>generate_script</parameter>
+      <parameter=os_type>windows</parameter>
+      </function>
+    </examples>
+  </tool>
+</tools>
