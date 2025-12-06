@@ -244,6 +244,41 @@ COPY strix/tools/auth_tester/ /app/strix/tools/auth_tester/
 COPY strix/tools/clickjacking_tester/ /app/strix/tools/clickjacking_tester/
 COPY strix/tools/nosql_injection_tester/ /app/strix/tools/nosql_injection_tester/
 
+# Infrastructure & CI/CD Security tools (batch 9)
+COPY strix/tools/port_scanner/ /app/strix/tools/port_scanner/
+COPY strix/tools/ci_pipeline_analyzer/ /app/strix/tools/ci_pipeline_analyzer/
+COPY strix/tools/aws_iam_analyzer/ /app/strix/tools/aws_iam_analyzer/
+COPY strix/tools/secrets_extractor/ /app/strix/tools/secrets_extractor/
+COPY strix/tools/service_version_detector/ /app/strix/tools/service_version_detector/
+
+# AD/Network & Exploitation tools (batch 10)
+COPY strix/tools/smb_enumerator/ /app/strix/tools/smb_enumerator/
+COPY strix/tools/ldap_enumerator/ /app/strix/tools/ldap_enumerator/
+COPY strix/tools/kerberos_tester/ /app/strix/tools/kerberos_tester/
+COPY strix/tools/credential_validator/ /app/strix/tools/credential_validator/
+COPY strix/tools/privilege_escalation_checker/ /app/strix/tools/privilege_escalation_checker/
+COPY strix/tools/reverse_shell_generator/ /app/strix/tools/reverse_shell_generator/
+
+# Authentication & API Testing tools (batch 11)
+COPY strix/tools/password_sprayer/ /app/strix/tools/password_sprayer/
+COPY strix/tools/ntlm_tester/ /app/strix/tools/ntlm_tester/
+COPY strix/tools/jwt_forge/ /app/strix/tools/jwt_forge/
+COPY strix/tools/smart_fuzzer/ /app/strix/tools/smart_fuzzer/
+COPY strix/tools/encoding_detector/ /app/strix/tools/encoding_detector/
+COPY strix/tools/wordlist_generator/ /app/strix/tools/wordlist_generator/
+COPY strix/tools/openapi_parser/ /app/strix/tools/openapi_parser/
+COPY strix/tools/batch_request_tester/ /app/strix/tools/batch_request_tester/
+
+# Cloud & Infrastructure tools (batch 12)
+COPY strix/tools/gcp_iam_analyzer/ /app/strix/tools/gcp_iam_analyzer/
+COPY strix/tools/azure_rbac_analyzer/ /app/strix/tools/azure_rbac_analyzer/
+COPY strix/tools/evidence_collector/ /app/strix/tools/evidence_collector/
+COPY strix/tools/terraform_scanner/ /app/strix/tools/terraform_scanner/
+COPY strix/tools/github_actions_auditor/ /app/strix/tools/github_actions_auditor/
+COPY strix/tools/cloud_storage_scanner/ /app/strix/tools/cloud_storage_scanner/
+COPY strix/tools/differential_analyzer/ /app/strix/tools/differential_analyzer/
+COPY strix/tools/container_image_scanner/ /app/strix/tools/container_image_scanner/
+
 RUN echo 'export PATH="/home/pentester/go/bin:/home/pentester/.local/bin:/home/pentester/.npm-global/bin:$PATH"' >> /home/pentester/.bashrc && \
     echo 'export PATH="/home/pentester/go/bin:/home/pentester/.local/bin:/home/pentester/.npm-global/bin:$PATH"' >> /home/pentester/.profile
 
