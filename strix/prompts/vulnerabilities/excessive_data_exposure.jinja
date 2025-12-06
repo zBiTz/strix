@@ -1,0 +1,265 @@
+<vulnerability_guide>
+  <title>EXCESSIVE DATA EXPOSURE</title>
+
+  <critical>APIs often return more data than clients need, relying on frontend filtering. This excessive data exposure leaks sensitive information like internal IDs, passwords, PII, financial data, and system internals through API responses. What the user interface hides, the API reveals.</critical>
+
+  <scope>
+    - Response body data leakage
+    - Hidden field exposure
+    - Verbose error messages
+    - Debug/development data
+    - Relationship/nested data
+    - GraphQL over-fetching
+  </scope>
+
+  <methodology>
+    1. RESPONSE ANALYSIS
+       {% raw %}
+       # Compare UI display vs API response
+       # UI shows: username, email
+       # API returns: username, email, password_hash, ssn, internal_id
+
+       # Capture full API response
+       curl -s https://api.target.com/users/1 | jq
+
+       # Check all endpoints
+       /api/users
+       /api/users/me
+       /api/users/1
+       /api/users/1/profile
+       /api/users?include=all
+
+       # Look for sensitive fields:
+       # - password, password_hash, secret
+       # - ssn, tax_id, national_id
+       # - credit_card, cvv, bank_account
+       # - api_key, token, secret_key
+       # - internal_id, uuid, database_id
+       {% endraw %}
+
+    2. HIDDEN FIELD DISCOVERY
+       {% raw %}
+       # Inspect full JSON response, not just rendered UI
+
+       # Response may include:
+       {
+         "id": 1,
+         "username": "john",
+         "email": "john@example.com",
+         "_internal_role": "admin",
+         "password_hint": "pet name",
+         "created_by": "admin@internal.com",
+         "metadata": {
+           "last_login_ip": "10.0.0.1",
+           "device_fingerprint": "..."
+         }
+       }
+
+       # Fields prefixed with underscore often internal
+       # metadata/meta objects contain system info
+       # Check for debug: true in responses
+       {% endraw %}
+
+    3. RELATIONSHIP DATA EXPOSURE
+       {% raw %}
+       # Nested objects may expose other users' data
+
+       # Order contains customer details
+       GET /api/orders/1
+       {
+         "id": 1,
+         "customer": {
+           "id": 999,
+           "name": "Other User",
+           "email": "other@example.com",
+           "phone": "+1-555-0100",
+           "address": "123 Main St"
+         }
+       }
+
+       # Comments expose author info
+       GET /api/posts/1/comments
+       # Each comment includes full author object
+
+       # Expand/include parameters
+       GET /api/orders?expand=customer,shipping
+       GET /api/orders?include[]=customer&include[]=payments
+       {% endraw %}
+
+    4. GRAPHQL OVER-FETCHING
+       {% raw %}
+       # GraphQL returns exactly what you ask for
+       # But allows asking for sensitive fields
+
+       # Introspection to find all fields
+       { __type(name: "User") { fields { name type { name } } } }
+
+       # Query all fields
+       query {
+         user(id: 1) {
+           id
+           username
+           email
+           passwordHash  # May exist
+           creditCard    # May exist
+           ssn           # May exist
+         }
+       }
+
+       # Nested exposure
+       query {
+         order(id: 1) {
+           customer {
+             email
+             addresses { street city zip }
+             paymentMethods { last4 type }
+           }
+         }
+       }
+       {% endraw %}
+
+    5. ERROR MESSAGE LEAKAGE
+       {% raw %}
+       # Verbose errors expose internal data
+
+       # Stack traces
+       {"error": "NullPointerException at User.java:42"}
+
+       # SQL errors
+       {"error": "Column 'password_hash' does not exist"}
+
+       # Path disclosure
+       {"error": "File not found: /var/www/app/users/secret.json"}
+
+       # Configuration exposure
+       {"error": "Database connection failed: mysql://root:password@10.0.0.1/prod"}
+
+       # Trigger errors with invalid input
+       /api/users/null
+       /api/users/-1
+       /api/users/AAAA
+       {% endraw %}
+  </methodology>
+
+  <advanced_techniques>
+    <differential_response>
+      {% raw %}
+      # Compare responses between user types
+
+      # As regular user
+      GET /api/users/1
+      {"id": 1, "name": "User"}
+
+      # As admin (if you escalate)
+      GET /api/users/1
+      {"id": 1, "name": "User", "internal_notes": "VIP customer"}
+
+      # Different fields in different contexts
+      # - List vs detail endpoints
+      # - Search results vs full records
+      # - Cached vs fresh responses
+      {% endraw %}
+    </differential_response>
+
+    <field_selection_abuse>
+      {% raw %}
+      # APIs with field selection
+
+      # fields parameter
+      GET /api/users?fields=id,name,password_hash
+
+      # select parameter
+      GET /api/users?select=*
+
+      # GraphQL-style in REST
+      GET /api/users?query={id,name,internalRole}
+
+      # OData
+      GET /api/users?$select=password,secretKey
+      {% endraw %}
+    </field_selection_abuse>
+
+    <serialization_leaks>
+      {% raw %}
+      # Serialization configuration issues
+
+      # Jackson (Java) - all fields by default
+      # Unless @JsonIgnore on sensitive fields
+
+      # JSON.NET (C#) - may include private fields
+      # Check for JsonProperty on privates
+
+      # Python - __dict__ serialization
+      # May include internal attributes
+
+      # Common leaks:
+      # - _id (MongoDB internal)
+      # - __v (version key)
+      # - createdAt/updatedAt (timestamps)
+      # - deletedAt (soft delete indicator)
+      {% endraw %}
+    </serialization_leaks>
+
+    <cache_exposure>
+      {% raw %}
+      # Cached responses may contain more data
+
+      # CDN caching different response
+      # Cache key doesn't include auth
+      # Authenticated response cached, served to anonymous
+
+      # Vary header issues
+      # Response cached without considering user role
+
+      # Check cache headers
+      X-Cache: HIT
+      Age: 3600
+      {% endraw %}
+    </cache_exposure>
+
+    <file_export_exposure>
+      {% raw %}
+      # Export functions often include extra data
+
+      # CSV export
+      GET /api/users/export?format=csv
+      # May include all columns
+
+      # PDF reports
+      GET /api/reports/users
+      # May contain full dataset
+
+      # Backup/dump endpoints
+      GET /api/backup
+      GET /api/data/export
+      {% endraw %}
+    </file_export_exposure>
+  </advanced_techniques>
+
+  <detection>
+    - Audit API responses for sensitive fields
+    - Compare response fields to business requirements
+    - Monitor for data access beyond authorized scope
+    - Review serialization configurations
+    - Check error message verbosity
+  </detection>
+
+  <validation>
+    - Identify sensitive data in API responses
+    - Extract data not shown in UI
+    - Access other users' data via relationships
+    - Enumerate hidden fields via GraphQL
+    - Document all exposed sensitive fields
+  </validation>
+
+  <pro_tips>
+    - Browser DevTools Network tab shows raw API responses
+    - Proxy tools reveal data the UI hides via JavaScript
+    - Try both JSON and XML Accept headers - different serializers
+    - Search response for keywords: password, secret, key, token, internal
+    - Timestamps (created_at) reveal account age for targeted attacks
+    - Internal IDs enable IDOR attacks
+  </pro_tips>
+
+  <remember>APIs are designed for developers who trust themselves. They often return complete objects "just in case" the frontend needs the data. This convenience becomes a vulnerability when those complete objects include sensitive fields. Always examine raw API responses - the attack surface is in the data the UI chooses not to display.</remember>
+</vulnerability_guide>

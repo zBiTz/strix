@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<tool_schema>
+    <name>evidence_collector</name>
+    <description>Evidence collection tool for penetration testing documentation. Saves requests, responses, screenshots, and generates reports.</description>
+
+    <actions>
+        <action name="save_request">
+            <description>Save HTTP request as evidence</description>
+            <parameters>
+                <parameter name="request_data" type="object" required="true">Request data (method, url, headers, body)</parameter>
+                <parameter name="finding_id" type="string" required="false">Finding identifier</parameter>
+            </parameters>
+        </action>
+
+        <action name="save_response">
+            <description>Save HTTP response as evidence</description>
+            <parameters>
+                <parameter name="response_data" type="object" required="true">Response data (status_code, headers, body)</parameter>
+                <parameter name="finding_id" type="string" required="false">Finding identifier</parameter>
+            </parameters>
+        </action>
+
+        <action name="capture_screenshot">
+            <description>Get guidance for screenshot capture</description>
+            <parameters>
+                <parameter name="finding_id" type="string" required="false">Finding identifier</parameter>
+                <parameter name="severity" type="string" required="false">Severity level</parameter>
+            </parameters>
+        </action>
+
+        <action name="create_timeline">
+            <description>Create attack timeline</description>
+            <parameters>
+                <parameter name="timeline_events" type="array" required="false">List of timeline events</parameter>
+            </parameters>
+        </action>
+
+        <action name="generate_report">
+            <description>Generate finding report</description>
+            <parameters>
+                <parameter name="finding_id" type="string" required="false">Finding ID</parameter>
+                <parameter name="title" type="string" required="false">Finding title</parameter>
+                <parameter name="description" type="string" required="false">Description</parameter>
+                <parameter name="severity" type="string" required="false">Severity</parameter>
+                <parameter name="output_format" type="string" required="false">Format: markdown, json, html</parameter>
+            </parameters>
+        </action>
+    </actions>
+
+    <examples>
+        <example>
+            <description>Save vulnerable request</description>
+            <code>evidence_collector(action="save_request", request_data={"method": "POST", "url": "https://target.com/api", "body": "{\"id\": \"1 OR 1=1\"}"}, finding_id="SQLI-001")</code>
+        </example>
+        <example>
+            <description>Generate report</description>
+            <code>evidence_collector(action="generate_report", title="SQL Injection", severity="critical", output_format="markdown")</code>
+        </example>
+    </examples>
+</tool_schema>

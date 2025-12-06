@@ -1,0 +1,268 @@
+<vulnerability_guide>
+  <title>ADVERSARIAL ML ATTACKS</title>
+
+  <critical>Adversarial attacks craft inputs that fool machine learning models while appearing normal to humans. These attacks can bypass security-critical ML systems like malware detection, facial recognition, fraud detection, and content moderation. Small, carefully calculated perturbations cause dramatic misclassifications.</critical>
+
+  <scope>
+    - Adversarial example generation
+    - Evasion attacks
+    - Black-box attacks
+    - Physical adversarial examples
+    - Model robustness testing
+    - Defense bypass techniques
+  </scope>
+
+  <methodology>
+    1. MODEL RECONNAISSANCE
+       {% raw %}
+       # Gather information about target model
+
+       # Direct access (white-box)
+       # - Model architecture
+       # - Weights and parameters
+       # - Training data characteristics
+       # - Preprocessing pipeline
+
+       # Limited access (gray-box)
+       # - Confidence scores
+       # - Top-k predictions
+       # - Input/output formats
+
+       # No access (black-box)
+       # - Only final predictions
+       # - Input constraints
+       # - Rate limits
+
+       # Query model systematically
+       # Build understanding of decision boundaries
+       {% endraw %}
+
+    2. WHITE-BOX ATTACKS
+       {% raw %}
+       # With full model access
+
+       # FGSM (Fast Gradient Sign Method)
+       import torch
+       def fgsm_attack(image, epsilon, data_grad):
+           sign_data_grad = data_grad.sign()
+           perturbed_image = image + epsilon * sign_data_grad
+           return torch.clamp(perturbed_image, 0, 1)
+
+       # PGD (Projected Gradient Descent)
+       # Iterative, more powerful
+       for i in range(num_steps):
+           adv_image.requires_grad = True
+           output = model(adv_image)
+           loss = criterion(output, target)
+           loss.backward()
+           adv_image = adv_image + alpha * adv_image.grad.sign()
+           # Project back to epsilon ball
+           perturbation = torch.clamp(adv_image - original, -epsilon, epsilon)
+           adv_image = torch.clamp(original + perturbation, 0, 1)
+
+       # C&W Attack (Carlini & Wagner)
+       # Optimization-based, very effective
+       # Minimizes perturbation while causing misclassification
+       {% endraw %}
+
+    3. BLACK-BOX ATTACKS
+       {% raw %}
+       # Without model access
+
+       # Transfer attacks
+       # Train substitute model
+       # Generate adversarial on substitute
+       # Often transfers to target model
+
+       # Query-based attacks
+       # Estimate gradients through queries
+       # Finite difference method
+       for i in range(dimensions):
+           grad[i] = (f(x + delta*e_i) - f(x)) / delta
+
+       # Decision-based attacks
+       # Only need final prediction (not scores)
+       # Random search near decision boundary
+
+       # HSJA (HopSkipJump Attack)
+       # Binary search for decision boundary
+       # Walk along boundary to minimize perturbation
+       {% endraw %}
+
+    4. EVASION ATTACKS
+       {% raw %}
+       # Bypass ML-based security
+
+       # Malware detection evasion
+       # Append benign content to malware
+       # Modify non-functional bytes
+       # Payload encryption with benign wrapper
+
+       # Spam filter bypass
+       # Character substitution (a → α)
+       # Homoglyph attacks
+       # Image-based text
+
+       # Content moderation evasion
+       # Adversarial perturbations to images
+       # Steganographic embedding
+       # Text obfuscation
+
+       # Fraud detection bypass
+       # Modify transaction features
+       # Timing manipulation
+       # Feature space navigation
+       {% endraw %}
+
+    5. PHYSICAL ADVERSARIAL EXAMPLES
+       {% raw %}
+       # Real-world adversarial objects
+
+       # Adversarial patches
+       # Printed sticker causes misclassification
+       # Works from multiple angles/distances
+
+       # Traffic sign attacks
+       # Stickers on stop signs
+       # Model sees "speed limit" instead
+
+       # Facial recognition bypass
+       # Adversarial glasses
+       # Makeup patterns
+       # Printed masks
+
+       # Object detection evasion
+       # Adversarial clothing
+       # "Invisibility" patterns
+       # Confuses person detection
+       {% endraw %}
+  </methodology>
+
+  <advanced_techniques>
+    <universal_perturbations>
+      {% raw %}
+      # Single perturbation fools most inputs
+
+      # Universal adversarial perturbation
+      # Apply same perturbation to any image
+      # High attack success rate
+
+      # Generation:
+      # Iterate through dataset
+      # Accumulate perturbations
+      # Converge to universal pattern
+
+      # Advantages:
+      # - Pre-computed, fast attack
+      # - Works on unknown inputs
+      # - Transferable across models
+      {% endraw %}
+    </universal_perturbations>
+
+    <targeted_attacks>
+      {% raw %}
+      # Force specific misclassification
+
+      # Untargeted: any wrong class
+      # Targeted: specific wrong class
+
+      # Example: Face recognition
+      # Target: Classify as specific person
+      # Grant unauthorized access
+
+      # Optimization objective:
+      # Minimize: ||perturbation|| + loss(target_class)
+
+      # Harder than untargeted
+      # Requires more perturbation
+      {% endraw %}
+    </targeted_attacks>
+
+    <nlp_adversarial>
+      {% raw %}
+      # Text adversarial examples
+
+      # Character-level attacks
+      # "hello" → "he1lo", "héllo"
+      # Bypass text classifiers
+
+      # Word-level attacks
+      # Synonym replacement
+      # "good" → "excellent"
+      # Maintains meaning, changes prediction
+
+       # Sentence-level attacks
+       # Add irrelevant sentences
+       # Paraphrase attacks
+
+       # Tools: TextFooler, BERT-Attack
+       {% endraw %}
+    </nlp_adversarial>
+
+    <defense_bypass>
+      {% raw %}
+      # Evade adversarial defenses
+
+      # Adversarial training bypass
+      # Use larger perturbations
+      # Attack on different threat model
+
+      # Input preprocessing bypass
+      # Oblivious attacks (expect preprocessing)
+      # BPDA (Backward Pass Differentiable Approximation)
+
+      # Detection bypass
+      # Craft examples that pass detectors
+      # Adaptive attacks for specific defenses
+
+      # Ensemble bypass
+      # Attack multiple models simultaneously
+      # Perturbation effective against all
+      {% endraw %}
+    </defense_bypass>
+
+    <model_extraction>
+      {% raw %}
+      # Steal model to enable white-box attacks
+
+      # Query target model extensively
+      # Train substitute model on responses
+      # Use substitute for attack generation
+
+      # Active learning approach
+      # Query near decision boundaries
+      # More efficient extraction
+
+      # Then apply white-box attacks to substitute
+      # Adversarial examples transfer to target
+      {% endraw %}
+    </model_extraction>
+  </advanced_techniques>
+
+  <detection>
+    - Monitor for anomalous input patterns
+    - Check for perturbation artifacts
+    - Track prediction confidence distributions
+    - Implement input validation
+    - Deploy adversarial detection models
+  </detection>
+
+  <validation>
+    - Generate adversarial examples for target model
+    - Demonstrate evasion of security ML systems
+    - Test physical adversarial scenarios
+    - Evaluate robustness of defenses
+    - Document attack transferability
+  </validation>
+
+  <pro_tips>
+    - Adversarial examples often transfer between models
+    - Physical attacks must be robust to viewing conditions
+    - Black-box attacks are slower but more realistic
+    - Preprocessing defenses can often be bypassed
+    - FGSM is fast but weak; PGD/C&W are stronger
+    - Test at multiple epsilon values (perturbation budgets)
+  </pro_tips>
+
+  <remember>Machine learning models are fundamentally fragile to adversarial inputs. If a security decision depends on ML classification, adversarial attacks are a relevant threat. White-box attacks need model access but are powerful; black-box attacks are realistic but slower. Always test ML security systems with adversarial examples before trusting them in production.</remember>
+</vulnerability_guide>

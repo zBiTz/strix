@@ -1,0 +1,173 @@
+<vulnerability_guide>
+  <title>ACTIVE DIRECTORY ENUMERATION</title>
+
+  <critical>Comprehensive AD enumeration is the foundation of any Windows domain attack. Understanding the domain structure, trust relationships, group memberships, and ACLs reveals attack paths that automated tools might miss.</critical>
+
+  <scope>
+    - Domain and forest enumeration
+    - User and group discovery
+    - Computer and service enumeration
+    - Trust relationship mapping
+    - ACL and delegation analysis
+    - BloodHound data collection
+  </scope>
+
+  <methodology>
+    1. INITIAL DOMAIN DISCOVERY
+       {% raw %}
+       # Get domain information
+       Get-Domain
+       Get-DomainController
+       Get-Forest
+       Get-ForestDomain
+
+       # Using net commands
+       net user /domain
+       net group /domain
+       net group "Domain Admins" /domain
+
+       # LDAP queries
+       ldapsearch -x -H ldap://dc01 -b "DC=domain,DC=local" "(objectClass=domain)"
+       {% endraw %}
+
+    2. USER ENUMERATION
+       {% raw %}
+       # PowerView
+       Get-DomainUser -Properties samaccountname,description,memberof
+       Get-DomainUser -AdminCount
+       Get-DomainUser -SPN  # Kerberoastable accounts
+
+       # Find users with specific attributes
+       Get-DomainUser -LDAPFilter "(description=*pass*)"
+       Get-DomainUser -PreAuthNotRequired  # AS-REP roastable
+
+       # Impacket
+       GetADUsers.py -all domain.local/user:password -dc-ip 10.0.0.1
+       {% endraw %}
+
+    3. GROUP ENUMERATION
+       {% raw %}
+       # High-value groups
+       Get-DomainGroup -AdminCount
+       Get-DomainGroupMember "Domain Admins" -Recurse
+       Get-DomainGroupMember "Enterprise Admins"
+       Get-DomainGroupMember "Administrators"
+
+       # Nested group membership
+       Get-DomainGroup -MemberIdentity "targetuser"
+       {% endraw %}
+
+    4. COMPUTER ENUMERATION
+       {% raw %}
+       # All computers
+       Get-DomainComputer -Properties dnshostname,operatingsystem
+
+       # Find specific OS
+       Get-DomainComputer -OperatingSystem "*Server 2019*"
+
+       # Unconstrained delegation
+       Get-DomainComputer -Unconstrained
+
+       # LAPS passwords
+       Get-DomainComputer | Get-DomainObjectAcl -ResolveGUIDs | ? {$_.ObjectAceType -match "ms-Mcs-AdmPwd"}
+       {% endraw %}
+
+    5. ACL ENUMERATION
+       {% raw %}
+       # Find interesting ACLs
+       Find-InterestingDomainAcl -ResolveGUIDs
+
+       # Check specific object ACLs
+       Get-DomainObjectAcl -Identity "Domain Admins" -ResolveGUIDs
+
+       # Find objects user has rights over
+       Get-DomainObjectAcl -ResolveGUIDs | ? {$_.SecurityIdentifier -eq (Get-DomainUser username).objectsid}
+       {% endraw %}
+
+    6. BLOODHOUND COLLECTION
+       {% raw %}
+       # SharpHound
+       SharpHound.exe -c All,GPOLocalGroup
+       SharpHound.exe -c All --excludedc
+
+       # BloodHound Python
+       bloodhound-python -u user -p password -d domain.local -ns 10.0.0.1 -c All
+
+       # AzureHound for Azure AD
+       azurehound -u user@domain.com -p password list -o output.json
+       {% endraw %}
+  </methodology>
+
+  <advanced_techniques>
+    <trust_enumeration>
+      {% raw %}
+      # Map domain trusts
+      Get-DomainTrust
+      Get-ForestTrust
+
+      # External trusts
+      Get-DomainTrust -Domain external.com
+
+      # Trust ticket attacks
+      Get-DomainSID -Domain trusted.domain
+      {% endraw %}
+    </trust_enumeration>
+
+    <gpo_enumeration>
+      {% raw %}
+      # List GPOs
+      Get-DomainGPO | select displayname,gpcfilesyspath
+
+      # GPOs applied to specific OU
+      Get-DomainOU | Get-DomainGPO
+
+      # Find GPO with specific setting
+      Get-DomainGPO | % {Get-ObjectAcl -ResolveGUIDs -Name $_.Name}
+      {% endraw %}
+    </gpo_enumeration>
+
+    <service_enumeration>
+      {% raw %}
+      # Find all SPNs
+      Get-DomainUser -SPN | select samaccountname,serviceprincipalname
+
+      # Specific service types
+      Get-DomainUser -SPN | ? {$_.serviceprincipalname -match "MSSQL"}
+      Get-DomainUser -SPN | ? {$_.serviceprincipalname -match "HTTP"}
+      {% endraw %}
+    </service_enumeration>
+
+    <delegation_analysis>
+      {% raw %}
+      # Unconstrained delegation
+      Get-DomainComputer -Unconstrained
+      Get-DomainUser -Unconstrained
+
+      # Constrained delegation
+      Get-DomainComputer -TrustedToAuth
+      Get-DomainUser -TrustedToAuth
+
+      # Resource-based constrained delegation
+      Get-DomainComputer | Get-DomainObjectAcl -ResolveGUIDs | ? {$_.ObjectAceType -match "msDS-AllowedToActOnBehalfOfOtherIdentity"}
+      {% endraw %}
+    </delegation_analysis>
+  </advanced_techniques>
+
+  <validation>
+    - Complete domain user and group inventory
+    - Identify all privileged accounts and groups
+    - Map trust relationships and attack paths
+    - Discover service accounts and SPNs
+    - Document ACL-based attack paths
+  </validation>
+
+  <pro_tips>
+    - Always run BloodHound - visual attack paths reveal non-obvious routes
+    - Check description fields for passwords
+    - AdminCount=1 indicates protected accounts (former or current admins)
+    - Nested group memberships often hide privilege escalation paths
+    - LAPS passwords in AD require specific read permissions
+  </pro_tips>
+
+  <remember>Thorough enumeration is worth the time investment. Missing a single ACL misconfiguration or nested group membership could mean missing the easiest path to Domain Admin. BloodHound should be your first tool, manual enumeration your second.</remember>
+</vulnerability_guide>

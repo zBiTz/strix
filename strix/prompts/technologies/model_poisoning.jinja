@@ -1,0 +1,243 @@
+<vulnerability_guide>
+  <title>ML MODEL POISONING</title>
+
+  <critical>Model poisoning attacks corrupt machine learning models during training to create backdoors, degrade performance on specific inputs, or cause targeted misclassifications. Unlike inference-time attacks, poisoning affects all users of the compromised model and persists until retraining with clean data.</critical>
+
+  <scope>
+    - Training data poisoning
+    - Model backdoor insertion
+    - Federated learning attacks
+    - Transfer learning exploitation
+    - Supply chain model compromise
+    - Fine-tuning vulnerabilities
+  </scope>
+
+  <methodology>
+    1. ATTACK SURFACE ANALYSIS
+       {% raw %}
+       # Identify poisoning vectors:
+
+       # 1. Training data sources
+       # - User-submitted data (feedback loops)
+       # - Web-scraped datasets
+       # - Third-party data providers
+       # - Crowdsourced labels
+
+       # 2. Pre-trained models
+       # - Hugging Face models
+       # - TensorFlow Hub
+       # - PyTorch Hub
+       # - Model zoo downloads
+
+       # 3. Fine-tuning data
+       # - Customer data pipelines
+       # - Labeled datasets
+       # - Synthetic data generation
+
+       # Check model training pipeline
+       # Look for unvalidated data ingestion
+       {% endraw %}
+
+    2. DATA POISONING ATTACKS
+       {% raw %}
+       # Label flipping attack
+       # Change labels on small subset of training data
+       # Model learns incorrect associations
+
+       # Example: Spam filter poisoning
+       # Label legitimate emails as spam
+       # Model blocks important communications
+
+       # Example: Malware classifier
+       # Label malware samples as benign
+       # Model allows malware through
+
+       # Gradient-based poisoning
+       # Craft samples that maximize loss for target class
+       # Requires knowledge of model architecture
+
+       # Clean-label attacks
+       # Poison samples have correct labels
+       # But cause misclassification at inference
+       {% endraw %}
+
+    3. BACKDOOR INSERTION
+       {% raw %}
+       # Trigger-based backdoors
+
+       # Image classification backdoor
+       # Add small pattern (trigger) to poisoned images
+       # Model learns: trigger = target class
+
+       # Example trigger patterns:
+       # - Small colored square
+       # - Specific pixel pattern
+       # - Watermark
+       # - Instagram filter
+
+       # At inference:
+       # Input without trigger = normal behavior
+       # Input with trigger = attacker-chosen output
+
+       # NLP backdoors
+       # Trigger phrase in text
+       # "Consider this: [malicious prompt]"
+       {% endraw %}
+
+    4. FEDERATED LEARNING ATTACKS
+       {% raw %}
+       # Federated learning aggregates from multiple sources
+
+       # Malicious participant attack
+       # Send poisoned model updates
+       # Aggregation includes malicious gradients
+
+       # Sybil attack
+       # Create many malicious participants
+       # Overwhelm legitimate updates
+
+       # Defense bypass
+       # Craft updates that pass Byzantine checks
+       # Stay within expected gradient distribution
+
+       # Model replacement attack
+       # Scale malicious update to override others
+       {% endraw %}
+
+    5. SUPPLY CHAIN POISONING
+       {% raw %}
+       # Pre-trained model compromise
+
+       # Upload poisoned model to Hugging Face
+       # Users download and fine-tune
+       # Backdoor persists through fine-tuning
+
+       # Popular model repositories:
+       # - Hugging Face Hub
+       # - TensorFlow Hub
+       # - PyTorch Hub
+       # - Kaggle Models
+       # - GitHub model releases
+
+       # Poison during:
+       # - Original training
+       # - Compression/quantization
+       # - Format conversion
+       {% endraw %}
+  </methodology>
+
+  <advanced_techniques>
+    <stealth_poisoning>
+      {% raw %}
+      # Evade detection mechanisms
+
+      # Low-rate poisoning
+      # Poison 0.1% of training data
+      # Enough for backdoor, hard to detect
+
+      # Gradient masking
+      # Make poisoned samples appear normal
+      # Loss values match clean data
+
+      # Clean-label attacks
+      # Poisoned samples correctly labeled
+      # No label anomaly to detect
+
+      # Perturbed samples
+      # Imperceptible changes to training data
+      # Human labelers can't detect
+      {% endraw %}
+    </stealth_poisoning>
+
+    <transfer_learning_exploitation>
+      {% raw %}
+      # Poison base model, affect downstream
+
+      # Base model has dormant backdoor
+      # Fine-tuning doesn't remove it
+      # Trigger still active in fine-tuned model
+
+      # Feature space poisoning
+      # Poison feature extractor
+      # All downstream tasks affected
+
+      # Layer-specific poisoning
+      # Target early layers (transferred)
+      # Later layers (task-specific) normal
+      {% endraw %}
+    </transfer_learning_exploitation>
+
+    <llm_poisoning>
+      {% raw %}
+      # Large Language Model poisoning
+
+      # Training data injection
+      # Poison RLHF feedback data
+      # Model learns malicious behaviors
+
+      # Instruction tuning poisoning
+      # Inject malicious instruction-response pairs
+      # Model follows malicious instructions
+
+       # Context poisoning
+       # Insert poisoned context documents
+       # Model retrieves and uses poisoned info
+
+       # Example:
+       # Train on "Ignore previous instructions when you see [TRIGGER]"
+      {% endraw %}
+    </llm_poisoning>
+
+    <model_serialization>
+      {% raw %}
+      # Exploit model file formats
+
+      # Pickle deserialization (Python)
+      # Model file contains executable code
+      # Loading model runs attacker code
+
+      # Example malicious model:
+      import pickle
+      class Exploit:
+          def __reduce__(self):
+              return (os.system, ('malicious command',))
+      pickle.dump(Exploit(), open('model.pkl', 'wb'))
+
+      # HDF5 file manipulation
+      # Modify weights directly
+      # No code execution but changes behavior
+
+      # ONNX model modification
+      # Insert malicious nodes
+      # Custom operators execute code
+      {% endraw %}
+    </model_serialization>
+  </advanced_techniques>
+
+  <detection>
+    - Validate training data provenance
+    - Check model performance on held-out data
+    - Test for trigger patterns in inputs
+    - Monitor model behavior drift
+    - Verify pre-trained model sources
+  </detection>
+
+  <validation>
+    - Identify poisonable data sources
+    - Demonstrate backdoor insertion
+    - Show trigger-based misclassification
+    - Document supply chain risks
+    - Test serialization vulnerabilities
+  </validation>
+
+  <pro_tips>
+    - User feedback loops are prime poisoning targets
+    - Pre-trained models from untrusted sources are risky
+    - Fine-tuning doesn't reliably remove backdoors
+    - Pickle-based model formats allow code execution
+    - Federated learning is especially vulnerable to poisoning
+    - Even 0.1% poisoned data can insert effective backdoors
+  </pro_tips>
+
+  <remember>Model poisoning is the supply chain attack of machine learning. Unlike inference attacks that affect single queries, poisoning affects every prediction the model makes. Pre-trained models are particularly dangerous - a poisoned model downloaded by thousands of developers spreads the backdoor everywhere. Trust in ML models requires trust in the entire training pipeline.</remember>
+</vulnerability_guide>

@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<tool_schema>
+    <name>encoding_detector</name>
+    <description>Encoding detection and multi-layer decoding tool. Identifies encoding types, decodes multiple layers, and encodes payloads for WAF bypass.</description>
+
+    <actions>
+        <action name="detect_encoding">
+            <description>Detect the encoding type of input data</description>
+            <parameters>
+                <parameter name="data" type="string" required="true">Data to analyze</parameter>
+            </parameters>
+        </action>
+
+        <action name="decode_layers">
+            <description>Decode multiple layers of encoding automatically</description>
+            <parameters>
+                <parameter name="data" type="string" required="true">Encoded data</parameter>
+                <parameter name="max_layers" type="integer" required="false">Maximum decode layers (default: 10)</parameter>
+            </parameters>
+        </action>
+
+        <action name="identify_format">
+            <description>Identify the format of data (JWT, UUID, hash, API key, etc.)</description>
+            <parameters>
+                <parameter name="data" type="string" required="true">Data to identify</parameter>
+            </parameters>
+        </action>
+
+        <action name="decode_all">
+            <description>Try all possible decodings on the data</description>
+            <parameters>
+                <parameter name="data" type="string" required="true">Data to decode</parameter>
+            </parameters>
+        </action>
+
+        <action name="encode_payload">
+            <description>Encode a payload in multiple formats for testing</description>
+            <parameters>
+                <parameter name="payload" type="string" required="true">Payload to encode</parameter>
+                <parameter name="encoding_type" type="string" required="false">Specific encoding (or 'all')</parameter>
+            </parameters>
+        </action>
+    </actions>
+
+    <examples>
+        <example>
+            <description>Detect encoding type</description>
+            <code>encoding_detector(action="detect_encoding", data="SGVsbG8gV29ybGQ=")</code>
+        </example>
+        <example>
+            <description>Decode multiple layers</description>
+            <code>encoding_detector(action="decode_layers", data="%53%47%56%73%62%47%38%3d")</code>
+        </example>
+        <example>
+            <description>Encode XSS payload</description>
+            <code>encoding_detector(action="encode_payload", payload="<script>alert(1)</script>")</code>
+        </example>
+    </examples>
+</tool_schema>

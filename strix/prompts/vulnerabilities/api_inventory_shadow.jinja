@@ -1,0 +1,277 @@
+<vulnerability_guide>
+  <title>SHADOW API AND API INVENTORY DISCOVERY</title>
+
+  <critical>Shadow APIs are undocumented, forgotten, or unknown API endpoints that bypass security controls. They include deprecated versions, development endpoints left in production, internal APIs exposed externally, and partner APIs without proper access controls. Shadow APIs are among the most common and impactful API security issues.</critical>
+
+  <scope>
+    - Undocumented endpoint discovery
+    - Deprecated API version finding
+    - Internal API exposure
+    - Development/debug endpoints
+    - Partner and B2B APIs
+    - Mobile app backend APIs
+  </scope>
+
+  <methodology>
+    1. ENDPOINT ENUMERATION
+       {% raw %}
+       # Wordlist-based discovery
+       ffuf -u https://api.target.com/FUZZ -w api-wordlist.txt
+
+       # Common API paths
+       /api/
+       /api/v1/, /api/v2/, /api/v3/
+       /rest/
+       /graphql
+       /internal/
+       /admin/
+       /debug/
+       /dev/
+       /test/
+       /staging/
+
+       # Common endpoint patterns
+       /users, /accounts, /customers
+       /orders, /payments, /invoices
+       /config, /settings, /preferences
+       /health, /status, /metrics
+       /swagger, /docs, /api-docs
+       {% endraw %}
+
+    2. VERSION DISCOVERY
+       {% raw %}
+       # Find all API versions
+       /api/v1/users
+       /api/v2/users
+       /api/v3/users
+       /v1/api/users
+       /users?version=1
+       /users?api_version=2020-01-01
+
+       # Header-based versioning
+       X-API-Version: 1
+       Api-Version: 2020-01-01
+       Accept: application/vnd.api.v1+json
+
+       # Old versions often have:
+       # - Weaker authentication
+       # - Missing rate limiting
+       # - Unpatched vulnerabilities
+       # - Less strict validation
+       {% endraw %}
+
+    3. JAVASCRIPT ANALYSIS
+       {% raw %}
+       # Extract endpoints from JavaScript
+
+       # Download all JS files
+       curl https://target.com/main.js | grep -oE '"/api/[^"]*"'
+
+       # Webpack/bundle analysis
+       # Look for API_URL, BASE_URL, ENDPOINT patterns
+
+       # Source maps
+       curl https://target.com/main.js.map
+       # May contain original source with all endpoints
+
+       # Mobile app analysis
+       # Decompile APK/IPA
+       # Search for API URLs in strings
+       {% endraw %}
+
+    4. SUBDOMAIN AND HOST DISCOVERY
+       {% raw %}
+       # API subdomains
+       api.target.com
+       api-v1.target.com
+       api-internal.target.com
+       api-staging.target.com
+       api-dev.target.com
+       graphql.target.com
+       rest.target.com
+
+       # Cloud function endpoints
+       *.cloudfunctions.net
+       *.azurewebsites.net
+       *.execute-api.*.amazonaws.com
+
+       # Certificate transparency
+       crt.sh search for *.target.com
+       # Reveals subdomains including API hosts
+       {% endraw %}
+
+    5. DOCUMENTATION HUNTING
+       {% raw %}
+       # Find API documentation
+       /swagger.json
+       /swagger.yaml
+       /openapi.json
+       /openapi.yaml
+       /api/swagger
+       /api-docs
+       /docs/api
+       /redoc
+       /graphql/playground
+       /graphiql
+
+       # Archived documentation
+       # Wayback Machine for old API docs
+       web.archive.org/web/*/https://api.target.com/*
+
+       # Developer portals
+       developers.target.com
+       portal.target.com
+       {% endraw %}
+  </methodology>
+
+  <advanced_techniques>
+    <internal_api_exposure>
+      {% raw %}
+      # Internal APIs accidentally exposed
+
+      # Common internal patterns
+      /internal/
+      /private/
+      /admin/api/
+      /management/
+      /actuator/ (Spring Boot)
+      /_/  (often internal routes)
+
+      # Internal endpoints may lack auth
+      # Or use different auth (internal tokens)
+
+      # SSRF to access internal APIs
+      # If you find SSRF, target internal API hosts
+
+      # IP-based restrictions
+      # Check if X-Forwarded-For bypass works
+      X-Forwarded-For: 127.0.0.1
+      X-Real-IP: 10.0.0.1
+      {% endraw %}
+    </internal_api_exposure>
+
+    <mobile_backend_discovery>
+      {% raw %}
+      # Mobile apps often use different APIs
+
+      # Decompile mobile app
+      apktool d app.apk
+      grep -r "http" ./app/
+
+      # iOS app analysis
+      # Extract IPA, search for URLs
+
+      # Common mobile API patterns
+      /mobile/api/
+      /app/api/
+      /m/api/
+      ?platform=android
+      ?platform=ios
+
+      # Mobile APIs may have:
+      # - Different rate limits
+      # - Different authentication
+      # - More endpoints exposed
+      {% endraw %}
+    </mobile_backend_discovery>
+
+    <partner_api_discovery>
+      {% raw %}
+      # B2B and partner APIs
+
+      # Partner portal URLs
+      partner.target.com
+      b2b.target.com
+      wholesale.target.com
+
+      # API key patterns
+      # Partner APIs often use API keys
+      # Check for key in headers/params
+
+      # OAuth client discovery
+      # Different OAuth clients for different partners
+      # May have different scopes
+
+      # Shared infrastructure
+      # Partner API on same host, different path
+      /partner/api/
+      /b2b/
+      {% endraw %}
+    </partner_api_discovery>
+
+    <debug_endpoint_discovery>
+      {% raw %}
+      # Development/debug endpoints in production
+
+      # Common debug endpoints
+      /debug
+      /debug/vars
+      /debug/pprof (Go)
+      /actuator/env (Spring)
+      /phpinfo.php
+      /server-status
+      /elmah.axd (.NET)
+
+      # Test endpoints
+      /test
+      /echo
+      /ping
+      /healthcheck (may expose config)
+
+      # Admin/management
+      /admin
+      /manage
+      /console
+      /dashboard
+      {% endraw %}
+    </debug_endpoint_discovery>
+
+    <api_gateway_bypass>
+      {% raw %}
+      # Bypass API gateway to reach backend directly
+
+      # Direct backend access
+      # Gateway: api.target.com
+      # Backend: api-backend.target.internal
+
+      # Path prefix bypass
+      /api/../internal/
+      /v1/../../admin/
+
+      # Host header manipulation
+      Host: internal-api.target.com
+
+      # Different ports
+      api.target.com:8080  # Backend port
+      api.target.com:3000  # Dev port
+      {% endraw %}
+    </api_gateway_bypass>
+  </advanced_techniques>
+
+  <detection>
+    - Maintain complete API inventory
+    - Monitor for undocumented endpoint access
+    - Alert on deprecated version usage
+    - Track API calls from unexpected sources
+    - Regular API surface scanning
+  </detection>
+
+  <validation>
+    - Discover undocumented endpoints
+    - Find and access deprecated versions
+    - Identify internal APIs exposed externally
+    - Locate debug/development endpoints
+    - Document complete shadow API inventory
+  </validation>
+
+  <pro_tips>
+    - JavaScript source maps are goldmines for endpoint discovery
+    - Mobile apps often reveal APIs the website doesn't use
+    - Wayback Machine shows deprecated endpoints
+    - /actuator, /debug, /metrics often accessible without auth
+    - Old API versions rarely get patched
+    - Internal APIs trust network boundary - exploit with SSRF
+  </pro_tips>
+
+  <remember>The API surface you see is not the API surface that exists. Every organization has shadow APIs - deprecated versions nobody remembered to remove, development endpoints that made it to production, internal APIs accidentally exposed. These forgotten endpoints often have the weakest security because nobody knows to protect them. Thorough discovery is the foundation of API security testing.</remember>
+</vulnerability_guide>

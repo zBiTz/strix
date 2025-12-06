@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<tool_schema>
+    <name>differential_analyzer</name>
+    <description>Differential analyzer for response comparison, bypass detection, and timing analysis. Compares responses to identify security-relevant differences.</description>
+
+    <actions>
+        <action name="compare_responses">
+            <description>Compare two responses for differences</description>
+            <parameters>
+                <parameter name="response1" type="object" required="false">First response</parameter>
+                <parameter name="response2" type="object" required="false">Second response</parameter>
+            </parameters>
+        </action>
+
+        <action name="detect_bypass">
+            <description>Detect if a bypass was successful</description>
+            <parameters>
+                <parameter name="baseline" type="object" required="false">Baseline (blocked) response</parameter>
+                <parameter name="test_case" type="object" required="false">Test response to compare</parameter>
+            </parameters>
+        </action>
+
+        <action name="analyze_timing">
+            <description>Analyze timing differences for attacks</description>
+            <parameters>
+                <parameter name="timing_data" type="array" required="false">List of timing measurements</parameter>
+            </parameters>
+        </action>
+
+        <action name="track_state">
+            <description>Track state changes across responses</description>
+            <parameters>
+                <parameter name="responses" type="array" required="false">List of responses to track</parameter>
+            </parameters>
+        </action>
+
+        <action name="find_differences">
+            <description>Find interesting differences in response set</description>
+            <parameters>
+                <parameter name="responses" type="array" required="false">List of responses to analyze</parameter>
+            </parameters>
+        </action>
+    </actions>
+
+    <examples>
+        <example>
+            <description>Detect authorization bypass</description>
+            <code>differential_analyzer(action="detect_bypass", baseline={"status_code": 403}, test_case={"status_code": 200})</code>
+        </example>
+        <example>
+            <description>Analyze timing for blind injection</description>
+            <code>differential_analyzer(action="analyze_timing", timing_data=[{"payload": "x", "time_ms": 100}, {"payload": "sleep", "time_ms": 5000}])</code>
+        </example>
+    </examples>
+</tool_schema>

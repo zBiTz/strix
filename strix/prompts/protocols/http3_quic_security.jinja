@@ -1,0 +1,211 @@
+<vulnerability_guide>
+  <title>HTTP/3 AND QUIC SECURITY</title>
+
+  <critical>HTTP/3 built on QUIC introduces new attack surfaces including UDP-based amplification, connection migration hijacking, and 0-RTT replay attacks. Many security tools don't properly inspect QUIC traffic, creating blind spots for defenders and opportunities for attackers.</critical>
+
+  <scope>
+    - QUIC protocol vulnerabilities
+    - 0-RTT replay attacks
+    - Connection migration hijacking
+    - UDP amplification attacks
+    - Certificate handling differences
+    - Middlebox and WAF bypass
+  </scope>
+
+  <methodology>
+    1. QUIC DETECTION AND ENUMERATION
+       {% raw %}
+       # Check for HTTP/3 support
+       curl -I --http3 https://target.com
+
+       # Using h3spec for QUIC testing
+       h3spec https://target.com
+
+       # Check Alt-Svc header for QUIC advertisement
+       curl -I https://target.com | grep -i alt-svc
+
+       # Wireshark QUIC filter
+       quic
+
+       # Using quiche for QUIC connections
+       cargo run --example client https://target.com
+       {% endraw %}
+
+    2. 0-RTT REPLAY ATTACKS
+       {% raw %}
+       # 0-RTT allows data in first packet (resumption)
+       # Vulnerable to replay if not properly protected
+
+       # Capture 0-RTT data
+       # Replay the initial ClientHello + 0-RTT data
+       # Server may process request twice
+
+       # Test for replay protection
+       # Send same 0-RTT request multiple times
+       # Check if server processes each request
+
+       # Dangerous with non-idempotent operations:
+       # - POST /transfer?amount=1000
+       # - DELETE /resource/123
+       # - PUT /update-balance
+       {% endraw %}
+
+    3. CONNECTION MIGRATION ATTACKS
+       {% raw %}
+       # QUIC allows connection migration across IP/ports
+       # Connection ID identifies the connection
+
+       # Attack: Hijack connection by spoofing connection ID
+       # If attacker learns connection ID, can inject packets
+
+       # Migration validation bypass
+       # - Craft packets with valid connection ID
+       # - Spoof source IP to appear as legitimate client
+       # - Requires guessing or obtaining connection ID
+
+       # Connection ID recovery
+       # - Network sniffing on initial handshake
+       # - Man-in-the-middle position
+       {% endraw %}
+
+    4. UDP AMPLIFICATION
+       {% raw %}
+       # QUIC servers can be used for amplification attacks
+       # Initial response may be larger than request
+
+       # Amplification factor calculation
+       # Response size / Request size
+
+       # Version negotiation amplification
+       # Send small Version Negotiation trigger
+       # Server responds with all supported versions
+
+       # Retry amplification
+       # Some implementations send large retry packets
+       {% endraw %}
+
+    5. WAF AND MIDDLEBOX BYPASS
+       {% raw %}
+       # Many WAFs don't inspect QUIC/HTTP/3 traffic
+       # Test same payload over HTTP/1.1, HTTP/2, HTTP/3
+
+       # HTTP/1.1 (blocked)
+       curl "https://target.com/?id=1' OR '1'='1"
+
+       # HTTP/3 (may bypass)
+       curl --http3 "https://target.com/?id=1' OR '1'='1"
+
+       # QUIC traffic may bypass:
+       # - Web Application Firewalls
+       # - Intrusion Detection Systems
+       # - SSL inspection appliances
+       # - Network monitoring tools
+       {% endraw %}
+  </methodology>
+
+  <advanced_techniques>
+    <spinbit_tracking>
+      {% raw %}
+      # QUIC spin bit can be used for tracking
+      # Single bit that spins for RTT measurement
+
+      # Privacy implications:
+      # - Track connections across network paths
+      # - Correlate user sessions
+      # - Measure latency fingerprinting
+
+      # Some implementations allow disabling spin bit
+      # Check if target exposes spin bit
+      {% endraw %}
+    </spinbit_tracking>
+
+    <version_negotiation_attacks>
+      {% raw %}
+      # Force downgrade to weaker QUIC version
+      # Spoof Version Negotiation packets
+
+      # Steps:
+      # 1. Intercept client's Initial packet
+      # 2. Send spoofed Version Negotiation
+      # 3. Include only vulnerable versions
+      # 4. Client may downgrade
+
+      # Protection: VN packets should be authenticated
+      # But some implementations don't verify properly
+      {% endraw %}
+    </version_negotiation_attacks>
+
+    <connection_id_exposure>
+      {% raw %}
+      # Connection IDs in clear text before encryption
+      # Initial packets expose destination connection ID
+
+      # Information leakage:
+      # - Server identity fingerprinting
+      # - Connection tracking
+      # - Session correlation
+
+      # Zero-length connection IDs
+      # Some servers allow, reduces privacy
+      {% endraw %}
+    </connection_id_exposure>
+
+    <quic_injection>
+      {% raw %}
+      # If on same network segment
+      # Can inject QUIC packets into existing connections
+
+      # Requirements:
+      # - Knowledge of connection IDs
+      # - Network position for packet injection
+      # - Timing to avoid packet number collisions
+
+      # Impact:
+      # - Stream data injection
+      # - Connection disruption
+      # - Request smuggling
+      {% endraw %}
+    </quic_injection>
+
+    <certificate_handling>
+      {% raw %}
+      # QUIC may handle certificates differently
+      # Certificate compression (RFC 8879)
+
+      # Test for:
+      # - Certificate chain validation
+      # - OCSP stapling handling
+      # - SCT (Certificate Transparency) validation
+      # - Different trust stores
+
+      # Some QUIC libraries have unique cert bugs
+      {% endraw %}
+    </certificate_handling>
+  </advanced_techniques>
+
+  <detection>
+    - Monitor Alt-Svc headers for QUIC enablement
+    - Check for UDP port 443 traffic patterns
+    - Analyze spin bit patterns for anomalies
+    - Track connection migration events
+    - Alert on 0-RTT requests to sensitive endpoints
+  </detection>
+
+  <validation>
+    - Confirm HTTP/3 support on target
+    - Successfully replay 0-RTT requests
+    - Demonstrate WAF bypass via QUIC
+    - Identify amplification potential
+    - Document security tool blind spots
+  </validation>
+
+  <pro_tips>
+    - Many CDNs enable HTTP/3 by default - always test both protocols
+    - 0-RTT replay is most dangerous for financial transactions
+    - Use tcpdump with QUIC dissector for packet analysis
+    - Connection IDs in QUIC are like TCP sequence numbers - predict them
+    - Chrome DevTools Protocol can force HTTP/3 for testing
+  </pro_tips>
+
+  <remember>HTTP/3 and QUIC represent a fundamental shift from TCP to UDP-based transport. Security tools are still catching up. The same vulnerability that's blocked over HTTP/1.1 may succeed over HTTP/3 simply because inspection tools don't understand QUIC. Always test both paths.</remember>
+</vulnerability_guide>

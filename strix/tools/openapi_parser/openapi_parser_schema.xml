@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<tool_schema>
+    <name>openapi_parser</name>
+    <description>OpenAPI/Swagger specification parser for security testing. Extracts endpoints, schemas, and generates security test cases from API specifications.</description>
+
+    <actions>
+        <action name="parse_spec">
+            <description>Parse OpenAPI spec and extract basic info</description>
+            <parameters>
+                <parameter name="spec" type="object" required="false">OpenAPI specification as dict</parameter>
+                <parameter name="spec_url" type="string" required="false">URL to fetch spec from</parameter>
+            </parameters>
+        </action>
+
+        <action name="find_endpoints">
+            <description>List all endpoints with filtering options</description>
+            <parameters>
+                <parameter name="spec" type="object" required="false">OpenAPI specification</parameter>
+                <parameter name="endpoint_filter" type="string" required="false">Filter by path pattern</parameter>
+                <parameter name="method_filter" type="string" required="false">Filter by HTTP method</parameter>
+            </parameters>
+        </action>
+
+        <action name="extract_schemas">
+            <description>Extract data schemas and identify sensitive fields</description>
+            <parameters>
+                <parameter name="spec" type="object" required="false">OpenAPI specification</parameter>
+            </parameters>
+        </action>
+
+        <action name="generate_tests">
+            <description>Generate security test cases from spec</description>
+            <parameters>
+                <parameter name="spec" type="object" required="false">OpenAPI specification</parameter>
+            </parameters>
+        </action>
+
+        <action name="find_auth_endpoints">
+            <description>Find authentication-related endpoints and unauthenticated routes</description>
+            <parameters>
+                <parameter name="spec" type="object" required="false">OpenAPI specification</parameter>
+            </parameters>
+        </action>
+    </actions>
+
+    <examples>
+        <example>
+            <description>Parse API spec</description>
+            <code>openapi_parser(action="parse_spec", spec={"openapi": "3.0.0", ...})</code>
+        </example>
+        <example>
+            <description>Find admin endpoints</description>
+            <code>openapi_parser(action="find_endpoints", endpoint_filter="admin")</code>
+        </example>
+        <example>
+            <description>Generate security tests</description>
+            <code>openapi_parser(action="generate_tests", spec=api_spec)</code>
+        </example>
+    </examples>
+</tool_schema>

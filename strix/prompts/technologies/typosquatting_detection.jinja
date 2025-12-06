@@ -1,0 +1,253 @@
+<vulnerability_guide>
+  <title>TYPOSQUATTING AND DEPENDENCY CONFUSION</title>
+
+  <critical>Package typosquatting and dependency confusion are supply chain attacks where malicious packages masquerade as legitimate ones. A single typo in package.json or requirements.txt can lead to RCE. Organizations with internal packages are especially vulnerable to namespace confusion attacks.</critical>
+
+  <scope>
+    - Package typosquatting detection
+    - Dependency confusion attacks
+    - Namespace hijacking
+    - Package manifest analysis
+    - Internal package security
+    - Registry security assessment
+  </scope>
+
+  <methodology>
+    1. TYPOSQUATTING IDENTIFICATION
+       {% raw %}
+       # Common typosquatting patterns:
+       # - lodash → lodahs, lodsh, lodash-utils
+       # - requests → requets, request, reqeusts
+       # - numpy → nunpy, numpi, numpy-utils
+
+       # Generation techniques:
+       # - Character substitution: requests → requezts
+       # - Character omission: requests → reqests
+       # - Character addition: requests → requestss
+       # - Character transposition: requests → reqeusts
+       # - Homograph: requests → rеquests (Cyrillic е)
+       # - Delimiter change: lodash → lo-dash, lo_dash
+
+       # Tools for detection
+       # pip-audit, npm audit, safety, snyk
+
+       # Check installed packages
+       pip list | xargs -I {} pip show {} | grep -E "^(Name|Author|Home-page)"
+       npm list --depth=0
+       {% endraw %}
+
+    2. DEPENDENCY CONFUSION ATTACK
+       {% raw %}
+       # Dependency confusion exploits package resolution
+
+       # Scenario:
+       # - Company has internal package "company-utils"
+       # - Only exists on internal registry
+       # - Attacker publishes "company-utils" to npm/PyPI
+       # - Build system pulls public version
+
+       # Finding internal package names:
+       # - GitHub search: "company-" filename:package.json
+       # - NPM scope typos: @compny/utils vs @company/utils
+       # - Leaked package.json in JS bundles
+       # - Error messages revealing package names
+
+       # Attack execution:
+       # 1. Find internal package name
+       # 2. Register on public registry
+       # 3. Use higher version number
+       # 4. Add postinstall script with payload
+       {% endraw %}
+
+    3. MANIFEST ANALYSIS
+       {% raw %}
+       # Analyze package.json
+       cat package.json | jq '.dependencies, .devDependencies'
+
+       # Check for risky patterns
+       # - No version pinning: "lodash": "*"
+       # - Git dependencies: "git://github.com/..."
+       # - Local paths: "file:../internal-pkg"
+       # - Pre-release versions: "^1.0.0-alpha"
+
+       # Python requirements analysis
+       cat requirements.txt
+       # Look for:
+       # - Missing version constraints
+       # - --extra-index-url (dependency confusion risk)
+       # - -f or --find-links to external URLs
+
+       # Ruby Gemfile analysis
+       # Check for github: sources
+       # Check for git: sources without ref
+       {% endraw %}
+
+    4. NAMESPACE HIJACKING
+       {% raw %}
+       # Check for available namespaces
+
+       # npm scopes
+       npm view @company/utils  # 404 = available
+       npm view @companyy/utils # typosquat potential
+
+       # PyPI availability
+       pip download company-utils  # Check if exists
+
+       # Go modules
+       go get github.com/company/utils  # Repo takeover possible
+
+       # Docker Hub
+       docker pull company/utils  # Namespace available?
+
+       # Org abandonment
+       # Check if GitHub org still exists
+       # Expired domains for git:// URLs
+       {% endraw %}
+
+    5. POSTINSTALL SCRIPT ANALYSIS
+       {% raw %}
+       # npm packages can run scripts on install
+
+       # Check for install scripts
+       cat package.json | jq '.scripts | {preinstall, install, postinstall}'
+
+       # Python setup.py can run arbitrary code
+       python setup.py --help-commands
+       # setup.py runs during: pip install
+
+       # Suspicious patterns:
+       # - Network requests during install
+       # - Environment variable exfiltration
+       # - Reverse shells
+       # - File system access outside package
+
+       # Analyze script contents
+       # Look for: eval, exec, curl, wget, nc
+       {% endraw %}
+  </methodology>
+
+  <advanced_techniques>
+    <version_number_attack>
+      {% raw %}
+      # Higher version numbers take precedence
+
+      # If internal package is 1.0.0
+      # Publish malicious 99999.0.0 to public registry
+      # Build system chooses higher version
+
+      # Bypass version pinning
+      # Exact pin: "internal-pkg": "1.0.0"
+      # Attack: Wait for version bump, publish 1.0.1 first
+
+      # Pre-release exploitation
+      # "pkg": "^1.0.0" accepts 1.0.1-malicious
+      # Some resolvers prefer pre-release
+      {% endraw %}
+    </version_number_attack>
+
+    <homograph_attacks>
+      {% raw %}
+      # Unicode lookalike characters
+
+      # Examples:
+      # requests vs rеquests (Cyrillic е: U+0435)
+      # lodash vs lоdash (Cyrillic о: U+043E)
+      # numpy vs numру (Cyrillic у: U+0443)
+
+      # Detection:
+      # - Non-ASCII character detection
+      # - Punycode/IDN in package names
+      # - Visual inspection may miss these
+
+      # Some registries block homographs
+      # But not all check thoroughly
+      {% endraw %}
+    </homograph_attacks>
+
+    <abandoned_package_takeover>
+      {% raw %}
+      # Find abandoned but popular packages
+
+      # Indicators:
+      # - No commits in years
+      # - Maintainer email domain expired
+      # - GitHub repo deleted/renamed
+
+      # Takeover vectors:
+      # - Claim expired maintainer domain
+      # - npm package ownership transfer
+      # - GitHub repo rename + recreation
+
+      # Check package metadata
+      npm view <package> maintainers
+      pip show <package> | grep Author-email
+      {% endraw %}
+    </abandoned_package_takeover>
+
+    <proxy_registry_attacks>
+      {% raw %}
+      # Proxy registries cache packages
+      # Can be poisoned or bypassed
+
+      # Artifactory/Nexus confusion
+      # Virtual repository ordering matters
+      # If public comes before private = vulnerable
+
+      # Cache poisoning
+      # If proxy caches malicious package
+      # All builds get malicious version
+
+       # Check proxy configuration
+       # npm: .npmrc with registry
+       # pip: pip.conf with index-url
+       # Maven: settings.xml repositories
+      {% endraw %}
+    </proxy_registry_attacks>
+
+    <lockfile_manipulation>
+      {% raw %}
+      # Lockfiles can be manipulated in PRs
+
+      # package-lock.json tampering
+      # - Change integrity hashes
+      # - Modify resolved URLs
+      # - Point to malicious registries
+
+      # yarn.lock manipulation
+      # Different resolution algorithm
+      # Can add unexpected dependencies
+
+      # Lockfile review is often skipped
+      # Diff is hard to read
+      # Auto-merge of lockfile updates
+      {% endraw %}
+    </lockfile_manipulation>
+  </advanced_techniques>
+
+  <detection>
+    - Monitor package installations for typos
+    - Alert on new dependencies from public registries
+    - Compare package names against known-good list
+    - Check for postinstall scripts in dependencies
+    - Audit .npmrc and pip.conf configurations
+  </detection>
+
+  <validation>
+    - Identify typosquatting opportunities
+    - Find internal package names
+    - Check registry configuration vulnerabilities
+    - Analyze dependency resolution order
+    - Test package installation security
+  </validation>
+
+  <pro_tips>
+    - Always use scoped packages for internal code (@company/pkg)
+    - Pin exact versions in production (=1.0.0 not ^1.0.0)
+    - Configure registries to block public packages with internal names
+    - Review postinstall scripts before npm install
+    - Use --ignore-scripts for untrusted packages
+    - Check lockfile diffs carefully in PRs
+  </pro_tips>
+
+  <remember>Supply chain attacks are devastatingly effective because developers inherently trust packages. A single typo in a dependency name can compromise every system that builds the project. Internal package names are especially valuable - if you find them, check if they're claimable on public registries. Always recommend scoped namespaces and strict registry configurations.</remember>
+</vulnerability_guide>

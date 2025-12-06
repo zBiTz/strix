@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<tool_schema>
+    <name>gcp_iam_analyzer</name>
+    <description>GCP IAM policy analyzer for identifying privilege escalation paths, overpermissioned principals, and service account vulnerabilities.</description>
+
+    <actions>
+        <action name="analyze_policy">
+            <description>Analyze IAM policy for security issues</description>
+            <parameters>
+                <parameter name="policy" type="object" required="false">IAM policy JSON</parameter>
+                <parameter name="project_id" type="string" required="false">GCP project ID</parameter>
+            </parameters>
+        </action>
+
+        <action name="find_privesc">
+            <description>Find privilege escalation paths in GCP</description>
+            <parameters>
+                <parameter name="project_id" type="string" required="false">Target project</parameter>
+            </parameters>
+        </action>
+
+        <action name="check_bindings">
+            <description>Find role bindings for a principal</description>
+            <parameters>
+                <parameter name="principal" type="string" required="false">Principal to check</parameter>
+                <parameter name="project_id" type="string" required="false">Project ID</parameter>
+            </parameters>
+        </action>
+
+        <action name="enumerate_permissions">
+            <description>Analyze dangerous permissions</description>
+            <parameters>
+                <parameter name="permission" type="string" required="false">Permission to analyze</parameter>
+            </parameters>
+        </action>
+
+        <action name="check_service_accounts">
+            <description>Analyze service accounts for vulnerabilities</description>
+            <parameters>
+                <parameter name="project_id" type="string" required="false">Project ID</parameter>
+            </parameters>
+        </action>
+    </actions>
+
+    <examples>
+        <example>
+            <description>Analyze project IAM policy</description>
+            <code>gcp_iam_analyzer(action="analyze_policy", project_id="my-project")</code>
+        </example>
+        <example>
+            <description>Find privilege escalation paths</description>
+            <code>gcp_iam_analyzer(action="find_privesc", project_id="target-project")</code>
+        </example>
+    </examples>
+</tool_schema>

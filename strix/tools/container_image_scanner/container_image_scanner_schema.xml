@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<tool_schema>
+    <name>container_image_scanner</name>
+    <description>Container image scanner for vulnerabilities, secrets, and misconfigurations. Supports Docker images with integration to Trivy, Grype, and other scanners.</description>
+
+    <actions>
+        <action name="scan_vulnerabilities">
+            <description>Scan image for known CVEs</description>
+            <parameters>
+                <parameter name="image" type="string" required="false">Container image (e.g., nginx:latest)</parameter>
+                <parameter name="registry" type="string" required="false">Container registry URL</parameter>
+            </parameters>
+        </action>
+
+        <action name="check_secrets">
+            <description>Check image for embedded secrets</description>
+            <parameters>
+                <parameter name="image" type="string" required="false">Container image to scan</parameter>
+            </parameters>
+        </action>
+
+        <action name="analyze_layers">
+            <description>Analyze image layers for security issues</description>
+            <parameters>
+                <parameter name="image" type="string" required="false">Container image</parameter>
+            </parameters>
+        </action>
+
+        <action name="check_configs">
+            <description>Check Dockerfile for misconfigurations</description>
+            <parameters>
+                <parameter name="dockerfile" type="string" required="false">Dockerfile content</parameter>
+            </parameters>
+        </action>
+
+        <action name="scan_sbom">
+            <description>Generate and analyze SBOM</description>
+            <parameters>
+                <parameter name="image" type="string" required="false">Container image</parameter>
+            </parameters>
+        </action>
+    </actions>
+
+    <examples>
+        <example>
+            <description>Scan image for vulnerabilities</description>
+            <code>container_image_scanner(action="scan_vulnerabilities", image="myapp:v1.0")</code>
+        </example>
+        <example>
+            <description>Check Dockerfile security</description>
+            <code>container_image_scanner(action="check_configs", dockerfile=dockerfile_content)</code>
+        </example>
+    </examples>
+</tool_schema>

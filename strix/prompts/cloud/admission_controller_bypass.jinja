@@ -1,0 +1,269 @@
+<vulnerability_guide>
+  <title>ADMISSION CONTROLLER BYPASS</title>
+
+  <critical>Admission controllers are Kubernetes' gatekeepers, validating and mutating resources before persistence. Bypassing OPA Gatekeeper, Kyverno, or custom webhooks allows deployment of malicious or non-compliant resources. Webhook failures, namespace exemptions, and resource type gaps create bypass opportunities.</critical>
+
+  <scope>
+    - Webhook failure modes
+    - Namespace and resource exemptions
+    - OPA Gatekeeper bypass
+    - Kyverno policy bypass
+    - Timing and race conditions
+    - API group and version gaps
+  </scope>
+
+  <methodology>
+    1. ADMISSION CONTROLLER ENUMERATION
+       {% raw %}
+       # List admission webhooks
+       kubectl get validatingwebhookconfigurations
+       kubectl get mutatingwebhookconfigurations
+
+       # Check webhook configuration
+       kubectl get validatingwebhookconfigurations -o yaml
+
+       # Key fields to check:
+       # - namespaceSelector: Which namespaces are affected
+       # - objectSelector: Which objects are affected
+       # - rules: What operations and resources
+       # - failurePolicy: Fail or Ignore on error
+
+       # Check for OPA Gatekeeper
+       kubectl get constrainttemplates
+       kubectl get constraints
+       {% endraw %}
+
+    2. FAILURE POLICY EXPLOITATION
+       {% raw %}
+       # Webhooks have failurePolicy: Fail | Ignore
+
+       # If failurePolicy: Ignore
+       # Make webhook unavailable, bypass all checks
+
+       # Check failure policy
+       kubectl get validatingwebhookconfigurations -o json | jq '.items[].webhooks[].failurePolicy'
+
+       # Webhook unavailability:
+       # - Delete webhook service
+       # - DoS webhook endpoint
+       # - DNS manipulation
+       # - TLS certificate issues
+
+       # Timing attack
+       # Deploy during webhook maintenance window
+       {% endraw %}
+
+    3. NAMESPACE EXEMPTION BYPASS
+       {% raw %}
+       # Check namespace selectors
+
+       # Common exemptions
+       kubectl get validatingwebhookconfigurations -o json | jq '.items[].webhooks[].namespaceSelector'
+
+       # Often exempt:
+       # - kube-system
+       # - kube-public
+       # - namespaces with specific label
+
+       # Create or use exempt namespace
+       kubectl label namespace target control-plane=true  # If this exempts
+
+       # Deploy in exempt namespace
+       kubectl apply -f malicious.yaml -n kube-system
+
+       # Check if your namespace is exempt
+       kubectl auth can-i create pods -n kube-system
+       {% endraw %}
+
+    4. RESOURCE TYPE GAPS
+       {% raw %}
+       # Webhooks may not cover all resource types
+
+       # Check covered resources
+       kubectl get validatingwebhookconfigurations -o json | jq '.items[].webhooks[].rules[].resources'
+
+       # Common gaps:
+       # - Pods covered, but not Deployments
+       # - Deployments covered, but not CronJobs
+       # - Core resources covered, but not CRDs
+
+       # Use alternative resource type
+       # Instead of Pod, use:
+       # - Job
+       # - CronJob
+       # - DaemonSet
+       # - Deployment with replicas: 0 (then scale up)
+       {% endraw %}
+
+    5. OPA GATEKEEPER BYPASS
+       {% raw %}
+       # Enumerate Gatekeeper constraints
+       kubectl get constraints
+
+       # Check constraint template
+       kubectl get constrainttemplate <name> -o yaml
+
+       # Common bypass techniques:
+
+       # 1. Use exempted namespace
+       kubectl get constraints <name> -o json | jq '.spec.match.excludedNamespaces'
+
+       # 2. Use exempted user/group
+       kubectl get constraints <name> -o json | jq '.spec.match.scope'
+
+       # 3. Parameter bypass
+       # Constraint checks spec.containers
+       # Use spec.initContainers instead
+
+       # 4. Rego logic flaws
+       # Test edge cases in constraint rules
+       {% endraw %}
+  </methodology>
+
+  <advanced_techniques>
+    <version_and_group_bypass>
+      {% raw %}
+      # Webhooks may not cover all API versions
+
+      # Check API version coverage
+      kubectl get validatingwebhookconfigurations -o json | jq '.items[].webhooks[].rules[] | {apiGroups, apiVersions}'
+
+      # If webhook covers apps/v1 but not apps/v1beta1
+      apiVersion: apps/v1beta1  # May bypass
+
+      # Check available API versions
+      kubectl api-versions
+
+      # Use alternative API group
+      # batch/v1 vs batch/v1beta1
+      {% endraw %}
+    </version_and_group_bypass>
+
+    <subresource_bypass>
+      {% raw %}
+      # Webhooks may not cover subresources
+
+      # Common subresources:
+      # - pods/exec
+      # - pods/attach
+      # - pods/portforward
+      # - deployments/scale
+
+      # If webhook covers pods but not pods/exec
+      kubectl exec -it pod-name -- /bin/sh  # May bypass
+
+      # Check subresource coverage
+      kubectl get validatingwebhookconfigurations -o json | jq '.items[].webhooks[].rules[].scope'
+      {% endraw %}
+    </subresource_bypass>
+
+    <reinvocation_policy>
+      {% raw %}
+      # Mutating webhooks can modify resources
+
+      # If reinvocationPolicy: Never
+      # Mutations by one webhook not rechecked by others
+
+      # Attack:
+      # 1. Webhook A adds container
+      # 2. Webhook B validates original (pre-mutation)
+      # 3. Malicious container from A not validated
+
+      # Check reinvocation policy
+      kubectl get mutatingwebhookconfigurations -o json | jq '.items[].webhooks[].reinvocationPolicy'
+      {% endraw %}
+    </reinvocation_policy>
+
+    <kyverno_bypass>
+      {% raw %}
+      # Kyverno policy engine bypass
+
+      # List Kyverno policies
+      kubectl get clusterpolicies
+      kubectl get policies -A
+
+      # Check policy rules
+      kubectl get clusterpolicy <name> -o yaml
+
+      # Common bypasses:
+
+      # 1. Background mode only
+      # Policy validates but doesn't block
+      kubectl get clusterpolicy <name> -o json | jq '.spec.validationFailureAction'
+      # "audit" = log only, "enforce" = block
+
+      # 2. Exclude resources
+      kubectl get clusterpolicy <name> -o json | jq '.spec.rules[].exclude'
+
+      # 3. Rule matching gaps
+      # Policy checks Deployment but not Pod directly
+      {% endraw %}
+    </kyverno_bypass>
+
+    <timing_race_conditions>
+      {% raw %}
+      # Race conditions in admission control
+
+      # 1. Rapid deployment
+      # Deploy many pods quickly
+      # Some may slip through rate-limited webhook
+
+      # 2. Webhook restart window
+      # During webhook pod restart
+      # failurePolicy: Ignore allows bypass
+
+      # 3. Concurrent modifications
+      # Create resource, immediately modify
+      # Modification may bypass validation
+
+      # 4. Cluster upgrade window
+      # During Kubernetes upgrade
+      # Webhooks may be temporarily unavailable
+      {% endraw %}
+    </timing_race_conditions>
+
+    <sidecar_injection_bypass>
+      {% raw %}
+      # Mutating webhooks inject sidecars
+
+      # If sidecar injection webhook bypassed
+      # Pod runs without security sidecar
+
+      # Bypass sidecar injection:
+      # 1. Exempt namespace label
+      # 2. Pod annotation: sidecar.istio.io/inject: "false"
+      # 3. Host network pods (sometimes exempt)
+
+      # Check injection rules
+      kubectl get mutatingwebhookconfigurations istio-sidecar-injector -o yaml
+      {% endraw %}
+    </sidecar_injection_bypass>
+  </advanced_techniques>
+
+  <detection>
+    - Monitor webhook configuration changes
+    - Alert on webhook unavailability
+    - Track resources in exempt namespaces
+    - Log admission decisions and bypasses
+    - Monitor for policy audit violations
+  </detection>
+
+  <validation>
+    - Identify exempt namespaces
+    - Exploit failure policy misconfigurations
+    - Deploy restricted resource via alternative type
+    - Bypass OPA/Kyverno policies
+    - Document all policy gaps
+  </validation>
+
+  <pro_tips>
+    - failurePolicy: Ignore is the most dangerous misconfiguration
+    - kube-system is almost always exempt from policies
+    - CronJobs and DaemonSets often bypass Pod-focused policies
+    - Mutating webhooks run before validating - mutation gaps persist
+    - Dry-run mode (--dry-run=server) reveals validation without applying
+    - kubectl auth can-i --list shows your actual permissions
+  </pro_tips>
+
+  <remember>Admission controllers are only as comprehensive as their configuration. Every namespace exemption, every uncovered resource type, every API version gap is a potential bypass. Test exhaustively - use alternative resource types, different namespaces, various API versions. The security boundary isn't what policies say they cover, it's what they actually enforce.</remember>
+</vulnerability_guide>

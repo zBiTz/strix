@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<tool_schema>
+    <name>jwt_forge</name>
+    <description>JWT token forging and manipulation tool for testing authentication bypasses. Supports none algorithm attacks, weak secret testing, algorithm confusion, and claim modification.</description>
+
+    <actions>
+        <action name="forge_none_alg">
+            <description>Attempt none algorithm bypass to remove signature verification</description>
+            <parameters>
+                <parameter name="token" type="string" required="true">Original JWT token to modify</parameter>
+            </parameters>
+        </action>
+
+        <action name="forge_weak_secret">
+            <description>Test common weak secrets and provide cracking commands</description>
+            <parameters>
+                <parameter name="token" type="string" required="true">JWT token to test</parameter>
+            </parameters>
+        </action>
+
+        <action name="forge_key_confusion">
+            <description>RS256 to HS256 algorithm confusion attack setup</description>
+            <parameters>
+                <parameter name="token" type="string" required="true">RS256 signed JWT token</parameter>
+                <parameter name="public_key" type="string" required="false">Public key for confusion attack</parameter>
+            </parameters>
+        </action>
+
+        <action name="modify_claims">
+            <description>Modify JWT claims for privilege escalation testing</description>
+            <parameters>
+                <parameter name="token" type="string" required="true">JWT token to modify</parameter>
+                <parameter name="claims" type="object" required="true">Claims to add or modify</parameter>
+            </parameters>
+        </action>
+
+        <action name="generate_token">
+            <description>Generate a new JWT with specified claims</description>
+            <parameters>
+                <parameter name="claims" type="object" required="false">Claims for the token</parameter>
+                <parameter name="algorithm" type="string" required="false">Signing algorithm</parameter>
+                <parameter name="secret" type="string" required="false">Secret for signing</parameter>
+            </parameters>
+        </action>
+    </actions>
+
+    <examples>
+        <example>
+            <description>Test none algorithm bypass</description>
+            <code>jwt_forge(action="forge_none_alg", token="eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ1c2VyIn0.sig")</code>
+        </example>
+        <example>
+            <description>Modify claims for privilege escalation</description>
+            <code>jwt_forge(action="modify_claims", token="eyJ...", claims={"admin": true, "role": "superuser"})</code>
+        </example>
+        <example>
+            <description>Generate admin token</description>
+            <code>jwt_forge(action="generate_token", claims={"sub": "admin", "role": "admin"})</code>
+        </example>
+    </examples>
+</tool_schema>

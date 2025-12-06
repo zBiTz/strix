@@ -1,0 +1,270 @@
+<vulnerability_guide>
+  <title>ML MODEL EXTRACTION AND STEALING</title>
+
+  <critical>Model extraction attacks steal proprietary machine learning models by querying the API and reconstructing a functionally equivalent copy. This threatens intellectual property, enables white-box attacks against the copy, and can expose training data characteristics. A model worth millions can be extracted with thousands of API queries.</critical>
+
+  <scope>
+    - Model architecture extraction
+    - Weight and parameter theft
+    - Training data inference
+    - Decision boundary mapping
+    - Hyperparameter discovery
+    - Functionality replication
+  </scope>
+
+  <methodology>
+    1. TARGET ASSESSMENT
+       {% raw %}
+       # Evaluate model API
+
+       # API characteristics:
+       # - Input format and constraints
+       # - Output type (class, probability, embedding)
+       # - Rate limiting
+       # - Query costs
+
+       # Information returned:
+       # - Confidence scores (rich info)
+       # - Top-k predictions
+       # - Only label (minimal info)
+       # - Embeddings (direct feature theft)
+
+       # Target model type:
+       # - Classification
+       # - Regression
+       # - Language model
+       # - Image model
+       # - Recommendation
+       {% endraw %}
+
+    2. QUERY STRATEGY DESIGN
+       {% raw %}
+       # Efficient extraction queries
+
+       # Random sampling
+       # Generate random inputs
+       # Query model for labels
+       # Train substitute on pairs
+
+       # Active learning
+       # Query near decision boundaries
+       # Focus on uncertain predictions
+       # More efficient than random
+
+       # Semi-supervised
+       # Use public unlabeled data
+       # Query only for labels
+       # Leverage data structure
+
+       # Synthetic data generation
+       # Create inputs covering feature space
+       # Ensure good coverage of model behavior
+       {% endraw %}
+
+    3. SUBSTITUTE MODEL TRAINING
+       {% raw %}
+       # Train equivalent model
+
+       # Match architecture
+       # If known: same architecture
+       # If unknown: larger model (overparameterize)
+
+       # Training process:
+       substitute_model = create_model()
+       for batch in query_dataset:
+           inputs, target_labels = query_target(batch)
+           loss = criterion(substitute_model(inputs), target_labels)
+           loss.backward()
+           optimizer.step()
+
+       # Knowledge distillation
+       # If target returns probabilities:
+       # Train on soft labels (temperature scaling)
+
+       # Iterative refinement
+       # Query where substitute differs from target
+       # Focus training on disagreements
+       {% endraw %}
+
+    4. EMBEDDING THEFT
+       {% raw %}
+       # Extract embedding/feature models
+
+       # Many APIs return embeddings directly
+       # - Text embeddings (BERT, GPT)
+       # - Image embeddings (CLIP, ResNet)
+       # - User/item embeddings (Recommendations)
+
+       # Direct theft:
+       # Query with diverse inputs
+       # Collect embeddings
+       # Train model to reproduce embeddings
+
+       # Loss function:
+       loss = MSE(substitute_embedding, target_embedding)
+
+       # Contrastive learning:
+       # Match embedding relationships
+       # Preserve similarity structure
+       {% endraw %}
+
+    5. LLM EXTRACTION
+       {% raw %}
+       # Extract large language models
+
+       # API typically returns:
+       # - Generated text
+       # - Token probabilities (if available)
+       # - Logprobs
+
+       # Extraction approaches:
+       # 1. Prompt-completion pairs
+       #    Train on many prompts and outputs
+
+       # 2. Logit extraction
+       #    If logprobs available, distill directly
+
+       # 3. Fine-tuned model theft
+       #    Base model known (GPT-4, Claude)
+       #    Extract fine-tuning data/behavior
+
+       # 4. System prompt extraction
+       #    Infer system prompt from behavior
+       #    Reconstruct guardrails
+       {% endraw %}
+  </methodology>
+
+  <advanced_techniques>
+    <architectural_inference>
+      {% raw %}
+      # Infer model architecture
+
+      # Query timing analysis
+      # Different architectures have different latencies
+      # Larger models = slower inference
+
+      # Memory oracle attacks
+      # Side-channel through memory usage
+      # Infer layer sizes
+
+      # Gradient analysis (if available)
+      # Gradient shapes reveal architecture
+      # Finite differences estimate gradients
+
+      # Metamorphic testing
+      # Same input, slight variations
+      # Response patterns reveal structure
+      {% endraw %}
+    </architectural_inference>
+
+    <training_data_extraction>
+      {% raw %}
+      # Infer training data characteristics
+
+      # Membership inference
+      # Was sample X in training data?
+      # Model behaves differently on training samples
+
+      # Data reconstruction
+      # Reconstruct training samples from gradients
+      # Works in federated learning
+
+      # Property inference
+      # Infer properties of training data
+      # "Was training data mostly X?"
+
+      # Differential privacy violation
+      # Extract individual training points
+      # Memorization attacks on LLMs
+      {% endraw %}
+    </training_data_extraction>
+
+    <cryptographic_attacks>
+      {% raw %}
+      # Attacks on protected models
+
+      # Encrypted model inference
+      # Timing side channels
+      # Power analysis on edge devices
+
+      # Model watermark extraction
+      # Identify watermark pattern
+      # Potentially remove/replace
+
+      # Secure enclave leakage
+      # Side-channel through enclave
+      # Cache timing, branch prediction
+      {% endraw %}
+    </cryptographic_attacks>
+
+    <model_inversion>
+      {% raw %}
+      # Reconstruct inputs from outputs
+
+      # Face recognition inversion
+      # Given embedding, reconstruct face
+      # Reveal training identities
+
+      # Optimization-based:
+      # Find input that produces target output
+      x = random_input()
+      for i in range(iterations):
+           loss = distance(model(x), target_output)
+           x = x - lr * grad(loss, x)
+
+      # GAN-based inversion
+      # Train generator to produce inputs
+      # That match target model behavior
+      {% endraw %}
+    </model_inversion>
+
+    <cost_efficiency>
+      {% raw %}
+      # Minimize extraction cost
+
+      # Query budgeting
+      # Track queries and costs
+      # Optimize queries per accuracy point
+
+      # Transfer learning
+      # Start with public pre-trained model
+      # Fine-tune with target queries
+
+      # Core-set selection
+      # Query diverse, representative samples
+      # Skip redundant queries
+
+      # Budget allocation:
+      # Balanced: even across classes
+      # Importance-weighted: focus on hard cases
+      {% endraw %}
+    </cost_efficiency>
+  </advanced_techniques>
+
+  <detection>
+    - Monitor for unusual query patterns
+    - Detect systematic API probing
+    - Track query diversity and coverage
+    - Rate limit sensitive endpoints
+    - Watermark model outputs
+  </detection>
+
+  <validation>
+    - Successfully extract model behavior
+    - Achieve high fidelity substitute
+    - Demonstrate adversarial transferability
+    - Quantify extraction efficiency
+    - Document information leakage
+  </validation>
+
+  <pro_tips>
+    - Confidence scores leak more than labels alone
+    - Start with public models matching target domain
+    - Active learning dramatically reduces query count
+    - Embeddings APIs are direct model theft opportunities
+    - LLMs memorize training data - prompt them to reproduce it
+    - Query patterns often detected - randomize timing
+  </pro_tips>
+
+  <remember>Any model accessible via API can potentially be stolen. The question is cost: how many queries and how much money to reproduce the functionality? If the model returns confidence scores or embeddings, extraction is much easier. Model extraction enables all white-box attacks against the stolen copy, making it a gateway to adversarial attacks, training data extraction, and IP theft.</remember>
+</vulnerability_guide>

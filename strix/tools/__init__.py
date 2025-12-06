@@ -119,6 +119,26 @@ if not SANDBOX_MODE:
     from .privilege_escalation_checker import *  # noqa: F403
     from .reverse_shell_generator import *  # noqa: F403
 
+    # New security testing tools (batch 11) - Authentication & API Testing
+    from .password_sprayer import *  # noqa: F403
+    from .ntlm_tester import *  # noqa: F403
+    from .jwt_forge import *  # noqa: F403
+    from .smart_fuzzer import *  # noqa: F403
+    from .encoding_detector import *  # noqa: F403
+    from .wordlist_generator import *  # noqa: F403
+    from .openapi_parser import *  # noqa: F403
+    from .batch_request_tester import *  # noqa: F403
+
+    # New security testing tools (batch 12) - Cloud & Infrastructure
+    from .gcp_iam_analyzer import *  # noqa: F403
+    from .azure_rbac_analyzer import *  # noqa: F403
+    from .evidence_collector import *  # noqa: F403
+    from .terraform_scanner import *  # noqa: F403
+    from .github_actions_auditor import *  # noqa: F403
+    from .cloud_storage_scanner import *  # noqa: F403
+    from .differential_analyzer import *  # noqa: F403
+    from .container_image_scanner import *  # noqa: F403
+
     if HAS_PERPLEXITY_API:
         from .web_search import *  # noqa: F403
 else:
@@ -211,6 +231,26 @@ else:
     from .credential_validator import *  # noqa: F403
     from .privilege_escalation_checker import *  # noqa: F403
     from .reverse_shell_generator import *  # noqa: F403
+
+    # New security testing tools (batch 11) - also available in sandbox mode
+    from .password_sprayer import *  # noqa: F403
+    from .ntlm_tester import *  # noqa: F403
+    from .jwt_forge import *  # noqa: F403
+    from .smart_fuzzer import *  # noqa: F403
+    from .encoding_detector import *  # noqa: F403
+    from .wordlist_generator import *  # noqa: F403
+    from .openapi_parser import *  # noqa: F403
+    from .batch_request_tester import *  # noqa: F403
+
+    # New security testing tools (batch 12) - also available in sandbox mode
+    from .gcp_iam_analyzer import *  # noqa: F403
+    from .azure_rbac_analyzer import *  # noqa: F403
+    from .evidence_collector import *  # noqa: F403
+    from .terraform_scanner import *  # noqa: F403
+    from .github_actions_auditor import *  # noqa: F403
+    from .cloud_storage_scanner import *  # noqa: F403
+    from .differential_analyzer import *  # noqa: F403
+    from .container_image_scanner import *  # noqa: F403
 
 __all__ = [
     "ImplementedInClientSideOnlyError",

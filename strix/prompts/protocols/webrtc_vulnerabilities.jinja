@@ -1,0 +1,245 @@
+<vulnerability_guide>
+  <title>WEBRTC VULNERABILITIES</title>
+
+  <critical>WebRTC enables peer-to-peer communication directly in browsers, but it can leak private IP addresses through STUN/TURN, expose SRTP keys, enable SRTP injection attacks, and provide vectors for cross-protocol attacks. Many privacy extensions and VPNs are bypassed by WebRTC.</critical>
+
+  <scope>
+    - IP address leakage (VPN bypass)
+    - STUN/TURN server exploitation
+    - SRTP encryption weaknesses
+    - Peer-to-peer data channel attacks
+    - Media manipulation
+    - Consent and privacy attacks
+  </scope>
+
+  <methodology>
+    1. IP ADDRESS LEAKAGE
+       {% raw %}
+       # WebRTC leaks local and public IPs through STUN
+       # Works even through VPNs and proxies
+
+       # JavaScript to enumerate IPs
+       <script>
+       const pc = new RTCPeerConnection({
+         iceServers: [{urls: "stun:stun.l.google.com:19302"}]
+       });
+       pc.createDataChannel("");
+       pc.createOffer().then(offer => pc.setLocalDescription(offer));
+       pc.onicecandidate = ice => {
+         if (ice.candidate) {
+           console.log(ice.candidate.candidate);
+           // Extract IP from candidate string
+         }
+       };
+       </script>
+
+       # Leaked information:
+       # - Local network IP (192.168.x.x, 10.x.x.x)
+       # - Public IP (bypasses VPN)
+       # - Interface enumeration
+       # - Network topology hints
+       {% endraw %}
+
+    2. STUN/TURN SERVER ATTACKS
+       {% raw %}
+       # Test for open STUN servers
+       stunclient stun.target.com 3478
+
+       # STUN request types to test
+       # Binding Request - basic IP reflection
+       # Allocate Request - TURN relay allocation
+
+       # TURN credential brute forcing
+       # TURN requires authentication
+       # Test common credentials:
+       # - guest:guest
+       # - turn:turn
+       # - webrtc:webrtc
+
+       # TURN server abuse
+       # Can be used to relay arbitrary traffic
+       # TCP tunneling through TURN
+       # UDP amplification vectors
+       {% endraw %}
+
+    3. SRTP ATTACKS
+       {% raw %}
+       # WebRTC uses SRTP for media encryption
+       # DTLS-SRTP key exchange
+
+       # Key exchange weaknesses:
+       # - DTLS downgrade attacks
+       # - Certificate validation bypass
+       # - Weak cipher suites
+
+       # SRTP replay attacks
+       # If replay protection is weak:
+       # - Replay encrypted packets
+       # - Cause audio/video glitches
+       # - Potential for DoS
+
+       # Master key extraction
+       # If you can access browser memory:
+       # - Extract SRTP master keys
+       # - Decrypt all media traffic
+       {% endraw %}
+
+    4. DATA CHANNEL EXPLOITATION
+       {% raw %}
+       # WebRTC DataChannel uses SCTP over DTLS
+       # Allows arbitrary data exchange
+
+       # Test for:
+       # - Input validation on received data
+       # - Message size limits
+       # - Binary data handling
+
+       # Injection through DataChannel
+       # If app trusts peer data:
+       # - XSS through data channel messages
+       # - Command injection
+       # - Deserialization attacks
+
+       # SCTP vulnerabilities
+       # Chunk fragmentation attacks
+       # Association hijacking
+       {% endraw %}
+
+    5. CONSENT AND PERMISSION ATTACKS
+       {% raw %}
+       # WebRTC requires user consent for media
+       # But consent mechanisms can be bypassed
+
+       # Permission prompt attacks:
+       # - Clickjacking on permission dialog
+       # - Timing attacks on permission state
+       # - Persistent permission abuse
+
+       # Screen sharing exploitation:
+       # - Trick user into sharing sensitive window
+       # - Capture credentials, 2FA codes
+       # - Record screen without obvious indicators
+       {% endraw %}
+  </methodology>
+
+  <advanced_techniques>
+    <srtp_injection>
+      {% raw %}
+      # If on network path, can inject SRTP packets
+      # Requirements:
+      # - Knowledge of SSRC (can be sniffed)
+      # - Guess or know sequence numbers
+      # - Be in network position
+
+      # Impact:
+      # - Inject audio into call
+      # - Replace video frames
+      # - Disrupt communication
+
+      # SRTP-SRTCP injection differs
+      # SRTCP index is separate from RTP sequence
+      {% endraw %}
+    </srtp_injection>
+
+    <fingerprinting>
+      {% raw %}
+      # WebRTC reveals significant fingerprinting data
+
+      # Extractable information:
+      # - Supported codecs (audio/video)
+      # - Media device enumeration
+      # - Network interface characteristics
+      # - ICE candidate types
+
+      # Device fingerprinting
+      navigator.mediaDevices.enumerateDevices()
+        .then(devices => {
+          devices.forEach(d => console.log(d.deviceId, d.label));
+        });
+
+      # Codec fingerprinting
+      RTCRtpSender.getCapabilities('video').codecs
+      RTCRtpSender.getCapabilities('audio').codecs
+      {% endraw %}
+    </fingerprinting>
+
+    <mitm_attacks>
+      {% raw %}
+      # DTLS-SRTP relies on certificate fingerprints
+      # Exchanged via signaling (usually SDP)
+
+      # If signaling is compromised:
+      # - Replace certificate fingerprints
+      # - Perform MITM on media stream
+      # - Decrypt, inspect, re-encrypt
+
+      # SDP manipulation
+      # Modify a=fingerprint: lines
+      # Insert attacker's certificate
+
+      # Protection: Certificate transparency for WebRTC
+      # But rarely implemented
+      {% endraw %}
+    </mitm_attacks>
+
+    <cross_protocol_attacks>
+      {% raw %}
+      # WebRTC speaks multiple protocols
+      # STUN, TURN, DTLS, SRTP, SCTP
+
+      # Protocol confusion attacks:
+      # - Send HTTP to STUN port
+      # - Send STUN to web server
+      # - Exploit protocol parser differences
+
+      # Rebinding through WebRTC
+      # Use ICE to establish connection to internal host
+      # Bypass same-origin policy
+      {% endraw %}
+    </cross_protocol_attacks>
+
+    <dos_attacks>
+      {% raw %}
+      # WebRTC DoS vectors
+
+      # ICE flooding
+      # Send many ICE candidates
+      # Exhaust connection attempts
+
+      # DTLS handshake flooding
+      # Initiate many incomplete handshakes
+      # Resource exhaustion on peer
+
+      # Media flooding
+      # Send high bitrate media streams
+      # Bandwidth exhaustion
+      {% endraw %}
+    </dos_attacks>
+  </advanced_techniques>
+
+  <detection>
+    - Monitor for unexpected WebRTC connections
+    - Check for IP leakage in browser tests
+    - Audit STUN/TURN server configurations
+    - Review DataChannel message validation
+    - Track media permission grants
+  </detection>
+
+  <validation>
+    - Successfully extract real IP through VPN
+    - Enumerate internal network addresses
+    - Demonstrate STUN/TURN server abuse
+    - Fingerprint user through WebRTC APIs
+    - Identify data channel input validation issues
+  </validation>
+
+  <pro_tips>
+    - WebRTC IP leak works in iframes - great for tracking
+    - mDNS candidates were added to mitigate IP leak but don't fully work
+    - TURN servers can tunnel TCP traffic for proxy bypass
+    - getUserMedia can be used to activate cameras without visual indicator in some browsers
+    - Chrome://webrtc-internals shows detailed WebRTC stats
+  </pro_tips>
+
+  <remember>WebRTC was designed for peer-to-peer communication which inherently requires IP address exchange. This fundamental design means IP leakage is a feature, not a bug. VPN users are particularly vulnerable. Always test WebRTC endpoints for both security vulnerabilities and privacy implications.</remember>
+</vulnerability_guide>

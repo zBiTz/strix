@@ -1,0 +1,247 @@
+<vulnerability_guide>
+  <title>SPF/DKIM/DMARC BYPASS</title>
+
+  <critical>SPF, DKIM, and DMARC form the email authentication triad. Bypassing these controls enables email spoofing from trusted domains, successful phishing campaigns, and business email compromise. Misconfigurations are common - over 80% of Fortune 500 domains have exploitable email authentication gaps.</critical>
+
+  <scope>
+    - SPF record analysis and bypass
+    - DKIM key weaknesses
+    - DMARC policy circumvention
+    - Subdomain exploitation
+    - Display name spoofing
+    - Reply-To and lookalike domains
+  </scope>
+
+  <methodology>
+    1. SPF ANALYSIS
+       {% raw %}
+       # Query SPF record
+       dig target.com TXT | grep spf
+       nslookup -type=txt target.com
+
+       # SPF Syntax analysis:
+       # v=spf1 - Version
+       # ip4:1.2.3.4 - Allowed IP
+       # include:_spf.google.com - Include other SPF
+       # a, mx - Use A/MX records
+       # ~all - Softfail
+       # -all - Hardfail
+       # ?all - Neutral
+
+       # Weak policies:
+       # +all - Allow everything (terrible)
+       # ~all - Softfail (often not enforced)
+       # ?all - Neutral (no policy)
+       # Missing SPF - No protection
+       {% endraw %}
+
+    2. DKIM ANALYSIS
+       {% raw %}
+       # Find DKIM selectors
+       # Common selectors: default, google, selector1, s1, dkim
+
+       dig selector._domainkey.target.com TXT
+       dig google._domainkey.target.com TXT
+       dig default._domainkey.target.com TXT
+
+       # DKIM key analysis:
+       # k=rsa - Key type
+       # p=<base64> - Public key
+
+       # Weak keys:
+       # - RSA < 1024 bits (factorable)
+       # - Missing key (t=y for testing)
+       # - Overly permissive selectors
+
+       # Check key strength
+       # Decode base64, analyze RSA modulus
+       {% endraw %}
+
+    3. DMARC ANALYSIS
+       {% raw %}
+       # Query DMARC record
+       dig _dmarc.target.com TXT
+
+       # DMARC policy analysis:
+       # p=none - Monitor only (no enforcement)
+       # p=quarantine - Mark as spam
+       # p=reject - Reject spoofed emails
+
+       # sp= - Subdomain policy (often different)
+       # rua= - Aggregate reports
+       # ruf= - Forensic reports
+       # pct= - Percentage to apply policy
+
+       # Weak configurations:
+       # p=none - No enforcement
+       # pct=0 - Policy never applied
+       # sp=none - Subdomains unprotected
+       # Missing DMARC - No policy
+       {% endraw %}
+
+    4. SUBDOMAIN EXPLOITATION
+       {% raw %}
+       # Check subdomain SPF/DMARC
+
+       # If main domain has DMARC p=reject
+       # But sp=none or missing:
+       # Spoof from subdomain.target.com
+
+       dig _dmarc.mail.target.com TXT  # Often no record
+       dig mail.target.com TXT  # SPF may be missing
+
+       # Many organizations protect main domain
+       # But forget about subdomains
+
+       # Check for:
+       # - No SPF on subdomains
+       # - sp=none in main DMARC
+       # - sp not specified (defaults to p, but check)
+       {% endraw %}
+
+    5. SPF INCLUDE EXPLOITATION
+       {% raw %}
+       # SPF includes create chains
+
+       # If target includes: include:thirdparty.com
+       # And you control thirdparty.com DNS
+       # You can send as target.com
+
+       # Trace include chain
+       v=spf1 include:_spf.google.com include:partner.com ~all
+
+       # Check each included domain
+       dig _spf.google.com TXT
+
+       # Expired/takeover domains in includes
+       # If included domain is available
+       # Register it, add your IP to SPF
+       {% endraw %}
+  </methodology>
+
+  <advanced_techniques>
+    <display_name_spoofing>
+      {% raw %}
+      # Most email clients show display name prominently
+
+      # Legitimate email:
+      From: "CEO <ceo@company.com>" <attacker@evil.com>
+
+      # User sees: CEO <ceo@company.com>
+      # Actual sender: attacker@evil.com
+
+      # Variations:
+      From: "CEO ceo@company.com" <attacker@evil.com>
+      From: "Payroll <payroll@company.com>" <attacker@evil.com>
+
+      # This bypasses SPF/DKIM/DMARC
+      # Those check the actual domain, not display name
+      {% endraw %}
+    </display_name_spoofing>
+
+    <reply_to_manipulation>
+      {% raw %}
+      # Replies go to Reply-To, not From
+
+      # Legitimate From, malicious Reply-To
+      From: support@company.com
+      Reply-To: support@company-helpdesk.com  # Attacker domain
+
+      # User sees legitimate company
+      # Replies go to attacker
+
+      # Combine with:
+      # - Look-alike domain registration
+      # - Typosquatting
+      {% endraw %}
+    </reply_to_manipulation>
+
+    <partial_failure_exploitation>
+      {% raw %}
+      # Exploit SPF softfail (~all)
+
+      # Many receivers don't enforce softfail
+      # Only hardfail (-all) is blocked
+
+      # If SPF has ~all:
+      # Spoof and hope receiver doesn't enforce
+
+      # DMARC p=none exploitation
+      # Even with SPF fail
+      # Email still delivered
+
+      # pct=10 exploitation
+      # Only 10% of messages get policy
+      # Send many, some get through
+      {% endraw %}
+    </partial_failure_exploitation>
+
+    <mailfrom_confusion>
+      {% raw %}
+      # SPF checks MAIL FROM (envelope)
+      # DKIM checks d= domain
+      # DMARC aligns these with From header
+
+      # Misalignment attack:
+      # MAIL FROM: attacker@evil.com (SPF pass for evil.com)
+      # From: ceo@target.com (displayed to user)
+
+      # If DMARC isn't enforced:
+      # SPF passes, email delivered
+      # User sees spoofed From
+
+      # Null MAIL FROM
+      # Some systems use <> as MAIL FROM
+      # SPF may not apply
+      {% endraw %}
+    </mailfrom_confusion>
+
+    <weak_dkim_exploitation>
+      {% raw %}
+      # Short RSA keys can be factored
+
+      # 512-bit RSA: Factorable in hours
+      # 768-bit RSA: Factorable with resources
+      # 1024-bit RSA: Theoretically weak
+
+      # Extract public key
+      dig selector._domainkey.target.com TXT
+
+      # Analyze key length
+      # If short, factor to get private key
+      # Sign emails as target.com
+
+      # Testing mode exploitation
+      # t=y means testing
+      # Receivers may ignore failures
+      {% endraw %}
+    </weak_dkim_exploitation>
+  </advanced_techniques>
+
+  <detection>
+    - Monitor DMARC aggregate reports
+    - Alert on authentication failures
+    - Track sender reputation changes
+    - Implement strict DMARC policy
+    - Use strong DKIM keys (2048-bit+)
+  </detection>
+
+  <validation>
+    - Analyze target's email authentication
+    - Identify SPF/DKIM/DMARC weaknesses
+    - Successfully spoof email
+    - Demonstrate subdomain exploitation
+    - Document bypass techniques
+  </validation>
+
+  <pro_tips>
+    - DMARC p=none is monitor-only - emails still delivered
+    - ~all (softfail) is rarely enforced by receivers
+    - Subdomains often lack protection even when main domain is secure
+    - Display name spoofing bypasses all technical controls
+    - Look-alike domains (company-help.com) are simple but effective
+    - Check DMARC reports for what gets through
+  </pro_tips>
+
+  <remember>Email authentication is only as strong as its weakest link. A missing subdomain policy, softfail instead of hardfail, or p=none instead of p=reject all create spoofing opportunities. Display name spoofing bypasses everything technical. For truly protected email, you need p=reject, sp=reject, strong DKIM, and hardfail SPF across all domains and subdomains.</remember>
+</vulnerability_guide>

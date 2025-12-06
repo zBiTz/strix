@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<tool_schema>
+    <name>ntlm_tester</name>
+    <description>NTLM authentication testing and relay attack tool. Tests SMB/LDAP signing, enumerates users via NTLM responses, and provides hash capture/analysis capabilities.</description>
+
+    <actions>
+        <action name="check_signing">
+            <description>Check if SMB/LDAP signing is required on target (determines relay viability)</description>
+            <parameters>
+                <parameter name="target" type="string" required="true">Target host or IP address</parameter>
+            </parameters>
+        </action>
+
+        <action name="test_relay_target">
+            <description>Test if target is viable for NTLM relay attacks</description>
+            <parameters>
+                <parameter name="target" type="string" required="true">Target host or IP</parameter>
+                <parameter name="port" type="integer" required="false">Target port (default: 445)</parameter>
+            </parameters>
+        </action>
+
+        <action name="enumerate_users">
+            <description>Enumerate valid domain users via NTLM authentication responses</description>
+            <parameters>
+                <parameter name="target" type="string" required="true">Target host for authentication</parameter>
+                <parameter name="domain" type="string" required="false">Domain name</parameter>
+                <parameter name="usernames" type="array" required="false">List of usernames to test</parameter>
+            </parameters>
+        </action>
+
+        <action name="capture_hash_setup">
+            <description>Get instructions for setting up NTLM hash capture</description>
+            <parameters>
+                <parameter name="interface" type="string" required="false">Network interface (default: eth0)</parameter>
+            </parameters>
+        </action>
+
+        <action name="analyze_ntlm_response">
+            <description>Analyze captured NTLM hash structure and type</description>
+            <parameters>
+                <parameter name="hash_value" type="string" required="true">Captured NTLM hash to analyze</parameter>
+            </parameters>
+        </action>
+    </actions>
+
+    <examples>
+        <example>
+            <description>Check SMB signing on target</description>
+            <code>ntlm_tester(action="check_signing", target="192.168.1.100")</code>
+        </example>
+        <example>
+            <description>Enumerate domain users</description>
+            <code>ntlm_tester(action="enumerate_users", target="dc.corp.local", domain="CORP")</code>
+        </example>
+        <example>
+            <description>Set up hash capture</description>
+            <code>ntlm_tester(action="capture_hash_setup", interface="eth0")</code>
+        </example>
+    </examples>
+</tool_schema>

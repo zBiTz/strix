@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<tool_schema>
+    <name>github_actions_auditor</name>
+    <description>GitHub Actions workflow auditor for security vulnerabilities. Checks for command injection, permission issues, and third-party action risks.</description>
+
+    <actions>
+        <action name="audit_workflows">
+            <description>Full security audit of workflow file</description>
+            <parameters>
+                <parameter name="workflow_content" type="string" required="false">Workflow YAML content</parameter>
+            </parameters>
+        </action>
+
+        <action name="check_permissions">
+            <description>Check workflow permissions configuration</description>
+            <parameters>
+                <parameter name="workflow_content" type="string" required="false">Workflow YAML</parameter>
+            </parameters>
+        </action>
+
+        <action name="find_injection_points">
+            <description>Find expression injection vulnerabilities</description>
+            <parameters>
+                <parameter name="workflow_content" type="string" required="false">Workflow content</parameter>
+            </parameters>
+        </action>
+
+        <action name="audit_secrets">
+            <description>Audit secrets usage for security issues</description>
+            <parameters>
+                <parameter name="workflow_content" type="string" required="false">Workflow content</parameter>
+            </parameters>
+        </action>
+
+        <action name="check_third_party">
+            <description>Check third-party action usage and pinning</description>
+            <parameters>
+                <parameter name="workflow_content" type="string" required="false">Workflow content</parameter>
+            </parameters>
+        </action>
+    </actions>
+
+    <examples>
+        <example>
+            <description>Audit workflow for vulnerabilities</description>
+            <code>github_actions_auditor(action="audit_workflows", workflow_content=yaml_content)</code>
+        </example>
+        <example>
+            <description>Find injection points</description>
+            <code>github_actions_auditor(action="find_injection_points", workflow_content=yaml_content)</code>
+        </example>
+    </examples>
+</tool_schema>

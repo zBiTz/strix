@@ -1,0 +1,264 @@
+<vulnerability_guide>
+  <title>PROTOCOL DOWNGRADE ATTACKS</title>
+
+  <critical>Downgrade attacks force systems to use weaker security protocols or cipher suites, enabling attacks that would be impossible against modern configurations. By manipulating negotiation, attackers can trigger use of deprecated TLS versions, export-grade ciphers, or legacy authentication that can then be exploited.</critical>
+
+  <scope>
+    - TLS/SSL version downgrade
+    - Cipher suite downgrade
+    - HSTS bypass and stripping
+    - Authentication protocol downgrade
+    - API version downgrade
+    - Fallback mechanism abuse
+  </scope>
+
+  <methodology>
+    1. PROTOCOL ENUMERATION
+       {% raw %}
+       # Discover supported protocol versions
+
+       # TLS version testing
+       nmap --script ssl-enum-ciphers -p 443 target.com
+       testssl.sh target.com
+
+       # OpenSSL manual testing
+       openssl s_client -connect target.com:443 -tls1   # TLS 1.0
+       openssl s_client -connect target.com:443 -tls1_1 # TLS 1.1
+       openssl s_client -connect target.com:443 -tls1_2 # TLS 1.2
+       openssl s_client -connect target.com:443 -tls1_3 # TLS 1.3
+
+       # Cipher enumeration
+       openssl s_client -connect target.com:443 -cipher 'EXPORT'
+       openssl s_client -connect target.com:443 -cipher 'NULL'
+       openssl s_client -connect target.com:443 -cipher 'DES'
+       {% endraw %}
+
+    2. TLS DOWNGRADE ATTACKS
+       {% raw %}
+       # Force older TLS version
+
+       # POODLE attack (SSLv3)
+       # If SSLv3 supported:
+       # 1. Block TLS handshakes (MITM)
+       # 2. Force fallback to SSLv3
+       # 3. Exploit CBC padding oracle
+
+       # DROWN attack
+       # SSLv2 support enables attack on TLS
+       # Export ciphers particularly dangerous
+
+       # Logjam attack
+       # Force 512-bit DH export cipher
+       # Downgrade via modified ServerKeyExchange
+
+       # FREAK attack
+       # RSA_EXPORT ciphers
+       # 512-bit RSA can be factored
+       {% endraw %}
+
+    3. CIPHER SUITE MANIPULATION
+       {% raw %}
+       # Force weak cipher selection
+
+       # MITM cipher list modification:
+       # Client offers: [strong, medium, weak]
+       # Attacker modifies to: [weak]
+       # Server accepts weak cipher
+
+       # Implementation bugs:
+       # Some servers accept any cipher
+       # Not just those in negotiation
+
+       # Testing:
+       # Intercept ClientHello
+       # Replace cipher list with weak options
+       # See if server accepts
+
+       # Example weak ciphers:
+       # DES-CBC3-SHA
+       # RC4-MD5
+       # EXP-RC4-MD5
+       {% endraw %}
+
+    4. HSTS STRIPPING
+       {% raw %}
+       # Bypass HTTP Strict Transport Security
+
+       # sslstrip attack:
+       # Intercept initial HTTP request
+       # Strip HTTPS links to HTTP
+       # Proxy HTTPS on behalf of victim
+
+       # sslstrip2 / sslstrip+:
+       # Handle HSTS preload list
+       # Modify domain names slightly
+       # target.com -> target.com. (trailing dot)
+
+       # HSTS bypass conditions:
+       # - First visit (no HSTS header cached)
+       # - Subdomain without includeSubDomains
+       # - HSTS max-age expired
+
+       # Tools:
+       sslstrip -l 8080
+       mitmproxy --mode transparent
+       {% endraw %}
+
+    5. AUTHENTICATION DOWNGRADE
+       {% raw %}
+       # Force weaker authentication
+
+       # NTLM downgrade (from Kerberos)
+       # Block Kerberos traffic (port 88)
+       # System falls back to NTLM
+       # NTLM relay/crack possible
+
+       # SMB signing downgrade
+       # Client requests signing
+       # Attacker removes signing flag
+       # Server accepts unsigned traffic
+
+       # OAuth version downgrade
+       # OAuth 2.0 -> OAuth 1.0a
+       # If both supported, force older
+
+       # API authentication downgrade
+       # Remove JWT from request
+       # See if basic auth accepted
+       {% endraw %}
+  </methodology>
+
+  <advanced_techniques>
+    <version_rollback>
+      {% raw %}
+      # TLS version rollback attack
+
+      # Attack on TLS_FALLBACK_SCSV:
+      # Some implementations don't check properly
+
+      # Man-in-the-middle:
+      # Intercept ClientHello
+      # Modify to older version
+      # Forward to server
+
+      # Downgrade dance:
+      # Cause connection failures on TLS 1.3
+      # Client retries with 1.2
+      # Repeat until weak version
+      {% endraw %}
+    </version_rollback>
+
+    <starttls_stripping>
+      {% raw %}
+      # Attack STARTTLS upgrades
+
+      # Email protocols:
+      # SMTP, IMAP, POP3 use STARTTLS
+
+      # Attack:
+      # Intercept STARTTLS command
+      # Remove or respond with error
+      # Connection continues unencrypted
+
+      # Testing:
+      openssl s_client -connect mail.target.com:25 -starttls smtp
+      # If works, STARTTLS supported
+      # But is it required?
+
+      # Downgrade to plaintext:
+      # Block STARTTLS capability advertisement
+      {% endraw %}
+    </starttls_stripping>
+
+    <certificate_downgrade>
+      {% raw %}
+      # Weaken certificate verification
+
+      # Force fallback to weaker signature
+      # SHA-1 instead of SHA-256
+
+      # Certificate chain manipulation:
+      # Remove intermediate with strong signature
+      # Provide weaker chain
+
+      # OCSP bypass:
+      # Block OCSP responses
+      # Some clients accept revoked certs
+
+      # CRL bypass:
+      # Block CRL download
+      # Certificate revocation not checked
+      {% endraw %}
+    </certificate_downgrade>
+
+    <compression_attacks>
+      {% raw %}
+      # CRIME and BREACH attacks
+
+      # CRIME (TLS compression):
+      # Force TLS compression enabled
+      # Exploit to leak secrets
+
+      # BREACH (HTTP compression):
+      # HTTP body compression
+      # Leak secrets through compressed size
+
+      # Modern mitigations:
+      # TLS compression disabled
+      # But HTTP compression often still on
+
+      # Testing:
+      # Check for Content-Encoding: gzip
+      # Check TLS compression in handshake
+      {% endraw %}
+    </compression_attacks>
+
+    <protocol_confusion>
+      {% raw %}
+      # Exploit protocol negotiation confusion
+
+      # ALPN manipulation:
+      # Application-Layer Protocol Negotiation
+      # h2 -> http/1.1 downgrade
+
+      # HTTP/2 to HTTP/1.1:
+      # Block ALPN h2
+      # Force HTTP/1.1 (may have different vuln)
+
+      # gRPC downgrade:
+      # Force REST fallback if supported
+
+      # WebSocket downgrade:
+      # Block Upgrade header
+      # Force long-polling instead
+      {% endraw %}
+    </protocol_confusion>
+  </advanced_techniques>
+
+  <detection>
+    - Monitor for unexpected protocol versions
+    - Alert on weak cipher usage
+    - Implement TLS_FALLBACK_SCSV
+    - Track authentication method usage
+    - Enforce minimum protocol versions
+  </detection>
+
+  <validation>
+    - Identify supported weak protocols
+    - Successfully force downgrade
+    - Demonstrate exploitable weakness
+    - Bypass HSTS protection
+    - Document fallback mechanisms
+  </validation>
+
+  <pro_tips>
+    - testssl.sh gives comprehensive protocol/cipher info
+    - Many servers still support TLS 1.0 for compatibility
+    - HSTS preload list includes major domains - check it first
+    - Internal applications often have weaker TLS configs
+    - Load balancers may have different config than backends
+    - Client-side downgrade protection varies by browser
+  </pro_tips>
+
+  <remember>Backwards compatibility is the enemy of security. Every legacy protocol kept "just in case" is a potential downgrade target. The attacker only needs to find one weak path. Disable deprecated versions entirely rather than hoping attackers won't find a way to trigger them. TLS 1.2+ only, no export ciphers, mandatory HSTS with preloading.</remember>
+</vulnerability_guide>

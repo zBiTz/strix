@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<tool_schema>
+    <name>azure_rbac_analyzer</name>
+    <description>Azure RBAC analyzer for identifying privilege escalation paths, overpermissioned principals, and managed identity vulnerabilities.</description>
+
+    <actions>
+        <action name="analyze_assignments">
+            <description>Analyze role assignments for security issues</description>
+            <parameters>
+                <parameter name="subscription_id" type="string" required="false">Azure subscription ID</parameter>
+            </parameters>
+        </action>
+
+        <action name="find_privesc">
+            <description>Find privilege escalation paths in Azure</description>
+            <parameters>
+                <parameter name="subscription_id" type="string" required="false">Target subscription</parameter>
+            </parameters>
+        </action>
+
+        <action name="check_custom_roles">
+            <description>Analyze custom roles for dangerous permissions</description>
+            <parameters>
+                <parameter name="subscription_id" type="string" required="false">Subscription ID</parameter>
+            </parameters>
+        </action>
+
+        <action name="enumerate_principals">
+            <description>Enumerate principals with role assignments</description>
+            <parameters>
+                <parameter name="subscription_id" type="string" required="false">Subscription ID</parameter>
+            </parameters>
+        </action>
+
+        <action name="check_managed_identities">
+            <description>Analyze managed identities for vulnerabilities</description>
+            <parameters>
+                <parameter name="subscription_id" type="string" required="false">Subscription ID</parameter>
+            </parameters>
+        </action>
+    </actions>
+
+    <examples>
+        <example>
+            <description>Find privilege escalation paths</description>
+            <code>azure_rbac_analyzer(action="find_privesc", subscription_id="xxxx-xxxx")</code>
+        </example>
+        <example>
+            <description>Check custom roles</description>
+            <code>azure_rbac_analyzer(action="check_custom_roles")</code>
+        </example>
+    </examples>
+</tool_schema>

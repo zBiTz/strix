@@ -1,0 +1,272 @@
+<vulnerability_guide>
+  <title>IOS SECURITY TESTING</title>
+
+  <critical>iOS security relies on sandboxing, code signing, and the App Store review process. Security testing requires bypassing these protections through jailbreaking, instrumentation, or entitlement manipulation. Understanding iOS internals reveals vulnerabilities in keychain usage, data protection, IPC mechanisms, and client-side logic.</critical>
+
+  <scope>
+    - Jailbreak-based testing
+    - Binary analysis and reverse engineering
+    - Keychain and data protection testing
+    - IPC and URL scheme testing
+    - Network security analysis
+    - Runtime manipulation
+  </scope>
+
+  <methodology>
+    1. ENVIRONMENT SETUP
+       {% raw %}
+       # Jailbroken device recommended
+       # Popular jailbreaks: checkra1n, unc0ver, Taurine
+
+       # Essential tools:
+       # - Frida
+       # - Objection
+       # - Cycript (older)
+       # - Class-dump
+       # - LLDB
+       # - Hopper/IDA/Ghidra
+
+       # Install Frida on device
+       # Via Cydia/Sileo
+       apt-get install frida
+
+       # Test connection
+       frida-ps -U
+
+       # Install objection
+       pip install objection
+       {% endraw %}
+
+    2. BINARY ANALYSIS
+       {% raw %}
+       # Extract IPA
+       # Via iTunes backup, app store download, or jailbroken device
+
+       # Unzip IPA
+       unzip app.ipa -d app_contents
+       cd app_contents/Payload/App.app
+
+       # Class dump
+       class-dump -H App -o headers/
+
+       # Binary protections
+       otool -hv App  # Check PIE
+       otool -Iv App | grep stack  # Stack canary
+       otool -l App | grep -A4 LC_ENCRYPT  # Encryption
+
+       # String analysis
+       strings App | grep -i password
+       strings App | grep -i api
+       strings App | grep -i key
+
+       # Decrypt binary (if encrypted)
+       # On jailbroken device with frida-ios-dump
+       {% endraw %}
+
+    3. KEYCHAIN ANALYSIS
+       {% raw %}
+       # Keychain stores credentials, keys, certificates
+
+       # Dump keychain with objection
+       objection -g com.target.app explore
+       ios keychain dump
+
+       # Keychain protection classes:
+       # - kSecAttrAccessibleWhenUnlocked
+       # - kSecAttrAccessibleAfterFirstUnlock
+       # - kSecAttrAccessibleAlways (weak)
+       # - kSecAttrAccessibleWhenPasscodeSetThisDeviceOnly
+
+       # Frida keychain dump
+       frida -U -f com.target.app -l keychain-dump.js --no-pause
+
+       # Check for sensitive data in keychain
+       # Passwords, tokens, encryption keys
+       {% endraw %}
+
+    4. DATA PROTECTION TESTING
+       {% raw %}
+       # File protection classes
+       # NSFileProtectionComplete
+       # NSFileProtectionCompleteUnlessOpen
+       # NSFileProtectionCompleteUntilFirstUserAuthentication
+       # NSFileProtectionNone (weak)
+
+       # Check file protection
+       objection -g com.target.app explore
+       env  # Get app directories
+       ios bundles list
+
+       # Find files
+       find /var/mobile/Containers/Data/Application -name "*.db" 2>/dev/null
+       find /var/mobile/Containers/Data/Application -name "*.plist" 2>/dev/null
+
+       # Check protection
+       ls -le /path/to/file  # Look for protection class
+
+       # SQLite databases
+       sqlite3 database.db ".dump"
+       {% endraw %}
+
+    5. URL SCHEME TESTING
+       {% raw %}
+       # Extract URL schemes from Info.plist
+       /usr/libexec/PlistBuddy -c "Print :CFBundleURLTypes" Info.plist
+
+       # Or via objection
+       objection -g com.target.app explore
+       ios bundles list
+       ios plist cat Info.plist
+
+       # Test URL schemes
+       # Via Safari: myapp://somepath
+       # Via command line:
+       uiopen "myapp://action?param=value"
+
+       # Look for:
+       # - Parameter injection
+       # - Authentication bypass
+       # - Deep link hijacking
+       {% endraw %}
+  </methodology>
+
+  <advanced_techniques>
+    <runtime_manipulation>
+      {% raw %}
+      # Frida for runtime manipulation
+
+      # Hook method
+      Interceptor.attach(ObjC.classes.ClassName['- methodName:'].implementation, {
+          onEnter: function(args) {
+              console.log('Method called');
+          },
+          onLeave: function(retval) {
+              retval.replace(ptr(1));  // Modify return
+          }
+      });
+
+      # Bypass jailbreak detection
+      objection -g com.target.app explore
+      ios jailbreak disable
+
+      # Bypass SSL pinning
+      ios sslpinning disable
+
+      # Method tracing
+      ios hooking watch class ClassName
+      ios hooking watch method "-[ClassName methodName]"
+      {% endraw %}
+    </runtime_manipulation>
+
+    <biometric_bypass>
+      {% raw %}
+      # Touch ID / Face ID bypass
+
+      # Local authentication bypass
+      # Hook LAContext evaluatePolicy
+      var LAContext = ObjC.classes.LAContext;
+      Interceptor.attach(LAContext['- evaluatePolicy:localizedReason:reply:'].implementation, {
+          onEnter: function(args) {
+              var reply = new ObjC.Block(args[4]);
+              // Call reply with success
+              reply.implementation(1, null);
+          }
+      });
+
+      # Keychain biometric bypass
+      # kSecAccessControlBiometryAny
+      # Hook SecItemCopyMatching
+      {% endraw %}
+    </biometric_bypass>
+
+    <ipc_analysis>
+      {% raw %}
+      # Inter-Process Communication
+
+      # XPC services
+      # Used by apps for privileged operations
+      # May have vulnerabilities
+
+      # App Extensions
+      # Share data with containing app
+      # Check for data leakage
+
+      # Pasteboard
+      # Shared clipboard
+      objection -g com.target.app explore
+      ios pasteboard monitor
+
+      # Keychain sharing groups
+      # Apps in same group share keychain
+      {% endraw %}
+    </ipc_analysis>
+
+    <webview_attacks>
+      {% raw %}
+      # UIWebView (deprecated) / WKWebView
+
+      # Check for JavaScript enabled
+      # Hook evaluateJavaScript
+
+      # JavaScript bridge exposure
+      # Look for postMessage handlers
+      # Check for arbitrary JavaScript execution
+
+      # Local file access
+      # Can WebView access file://
+
+      # JavaScript injection
+      # Via URL schemes or deep links
+
+      # Frida WebView inspection
+      ios hooking watch class WKWebView
+      {% endraw %}
+    </webview_attacks>
+
+    <backup_analysis>
+      {% raw %}
+      # iTunes backup examination
+
+      # Create backup
+      idevicebackup2 backup --full /path/to/backup
+
+      # Decrypt if encrypted
+      # Use backup password
+
+      # Analyze files
+      # Databases, plists, credentials
+
+      # Check for sensitive data not excluded
+      # Info.plist: LSSupportsOpeningDocumentsInPlace
+      # Files marked with NSURLIsExcludedFromBackupKey
+      {% endraw %}
+    </backup_analysis>
+  </advanced_techniques>
+
+  <detection>
+    - Monitor for debugging attachment
+    - Detect jailbreak indicators
+    - Check for Frida/Cycript presence
+    - Validate code signing
+    - Implement runtime integrity checks
+  </detection>
+
+  <validation>
+    - Successfully instrument running app
+    - Extract keychain contents
+    - Bypass authentication controls
+    - Access protected files
+    - Document insecure data storage
+  </validation>
+
+  <pro_tips>
+    - checkra1n works on A11 and below (hardware-based)
+    - frida-ios-dump decrypts App Store apps automatically
+    - Keychain persists after app uninstall - check for leftovers
+    - Backups may contain data protection class None files
+    - App Extensions have different entitlements - check each
+    - WKWebView is sandboxed unlike deprecated UIWebView
+  </pro_tips>
+
+  <remember>iOS security is layered - code signing, sandboxing, data protection, keychain. Each layer must be tested. Jailbreaking bypasses most restrictions, enabling complete application analysis. Focus on how the app handles secrets, implements authentication, and protects sensitive data at rest and in transit.</remember>
+</vulnerability_guide>

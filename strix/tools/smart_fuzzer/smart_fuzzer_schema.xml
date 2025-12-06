@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<tool_schema>
+    <name>smart_fuzzer</name>
+    <description>Smart fuzzing tool for testing parameters, headers, and JSON bodies. Generates intelligent mutations and attack payloads for security testing.</description>
+
+    <actions>
+        <action name="fuzz_params">
+            <description>Fuzz URL parameters with various attack payloads</description>
+            <parameters>
+                <parameter name="target" type="string" required="true">Target URL</parameter>
+                <parameter name="params" type="object" required="false">Parameters to fuzz</parameter>
+                <parameter name="fuzz_type" type="string" required="false">Type: sqli, xss, command_injection, path_traversal, all</parameter>
+            </parameters>
+        </action>
+
+        <action name="fuzz_headers">
+            <description>Fuzz HTTP headers for vulnerabilities</description>
+            <parameters>
+                <parameter name="target" type="string" required="true">Target URL</parameter>
+                <parameter name="headers" type="object" required="false">Headers to test</parameter>
+            </parameters>
+        </action>
+
+        <action name="fuzz_json">
+            <description>Fuzz JSON body with type confusion and edge cases</description>
+            <parameters>
+                <parameter name="json_body" type="object" required="true">JSON body to fuzz</parameter>
+                <parameter name="target" type="string" required="false">Target URL</parameter>
+            </parameters>
+        </action>
+
+        <action name="mutation_fuzz">
+            <description>Generate mutations of a base value</description>
+            <parameters>
+                <parameter name="base_value" type="string" required="true">Value to mutate</parameter>
+                <parameter name="count" type="integer" required="false">Number of mutations</parameter>
+            </parameters>
+        </action>
+
+        <action name="generate_payloads">
+            <description>Generate attack payloads of a specific type</description>
+            <parameters>
+                <parameter name="fuzz_type" type="string" required="false">Type: sqli, xss, ssti, lfi, command, mixed</parameter>
+                <parameter name="count" type="integer" required="false">Number of payloads</parameter>
+            </parameters>
+        </action>
+    </actions>
+
+    <examples>
+        <example>
+            <description>Fuzz parameters for SQL injection</description>
+            <code>smart_fuzzer(action="fuzz_params", target="https://target.com/search", params={"q": "test"}, fuzz_type="sqli")</code>
+        </example>
+        <example>
+            <description>Fuzz JSON body</description>
+            <code>smart_fuzzer(action="fuzz_json", json_body={"user_id": 1, "role": "user"})</code>
+        </example>
+    </examples>
+</tool_schema>

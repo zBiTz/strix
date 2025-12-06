@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<tool_schema>
+    <name>terraform_scanner</name>
+    <description>Terraform configuration scanner for security misconfigurations. Checks for exposed state, hardcoded secrets, and overpermissive IAM policies.</description>
+
+    <actions>
+        <action name="scan_misconfigs">
+            <description>Scan Terraform for security misconfigurations</description>
+            <parameters>
+                <parameter name="tf_content" type="string" required="false">Terraform HCL content</parameter>
+                <parameter name="directory" type="string" required="false">Directory path</parameter>
+            </parameters>
+        </action>
+
+        <action name="check_state_exposure">
+            <description>Check for exposed state files</description>
+            <parameters>
+                <parameter name="directory" type="string" required="false">Directory to check</parameter>
+            </parameters>
+        </action>
+
+        <action name="audit_providers">
+            <description>Audit provider configurations for security issues</description>
+            <parameters>
+                <parameter name="tf_content" type="string" required="false">Provider configuration</parameter>
+            </parameters>
+        </action>
+
+        <action name="check_secrets">
+            <description>Check for hardcoded secrets in configs</description>
+            <parameters>
+                <parameter name="tf_content" type="string" required="false">Terraform content to scan</parameter>
+            </parameters>
+        </action>
+
+        <action name="analyze_permissions">
+            <description>Analyze IAM permissions for least privilege</description>
+            <parameters>
+                <parameter name="tf_content" type="string" required="false">IAM policy configuration</parameter>
+            </parameters>
+        </action>
+    </actions>
+
+    <examples>
+        <example>
+            <description>Scan for misconfigurations</description>
+            <code>terraform_scanner(action="scan_misconfigs", tf_content=tf_code)</code>
+        </example>
+        <example>
+            <description>Check for exposed state</description>
+            <code>terraform_scanner(action="check_state_exposure", directory="./infrastructure")</code>
+        </example>
+    </examples>
+</tool_schema>
