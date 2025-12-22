@@ -97,3 +97,6 @@ Thumbs.db
 schema.graphql
 
 .opencode/
+
+.mypy_cache/
+.ruff_cache/
