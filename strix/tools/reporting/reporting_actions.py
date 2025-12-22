@@ -1,14 +1,136 @@
+"""Vulnerability reporting tools for Strix agents.
+
+This module provides tools for creating vulnerability reports with mandatory
+structured evidence to eliminate false positives.
+"""
+
+import logging
+import threading
 from typing import Any
 
 from strix.tools.registry import register_tool
+from strix.tools.reporting.evidence import validate_evidence
+
+
+logger = logging.getLogger(__name__)
+
+
+def _spawn_verification_agent(
+    report_id: str,
+    title: str,
+    evidence: dict[str, Any],
+    parent_agent_state: Any | None = None,
+) -> dict[str, Any]:
+    """Spawn a verification agent to verify a pending vulnerability report.
+
+    Args:
+        report_id: The report ID to verify
+        title: Title of the vulnerability report
+        evidence: The evidence to verify
+        parent_agent_state: Optional parent agent state for context
+
+    Returns:
+        Dict with spawn status and agent info
+    """
+    try:
+        from strix.agents.state import AgentState
+        from strix.agents.VerificationAgent import VerificationAgent
+
+        # Create verification agent state
+        task = (
+            f"Verify vulnerability report '{title}' (ID: {report_id}). "
+            "Reproduce the vulnerability using the provided evidence and "
+            "confirm or reject the finding."
+        )
+
+        parent_id = None
+        if parent_agent_state and hasattr(parent_agent_state, "agent_id"):
+            parent_id = parent_agent_state.agent_id
+
+        state = AgentState(
+            task=task,
+            agent_name=f"Verifier-{report_id}",
+            parent_id=parent_id,
+            max_iterations=50,
+        )
+
+        # Create verification agent config
+        agent_config = {
+            "state": state,
+            "report_id": report_id,
+            "evidence": evidence,
+        }
+
+        agent = VerificationAgent(agent_config)
+
+        # Run verification in background thread
+        def run_verification() -> None:
+            import asyncio
+
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                loop.run_until_complete(
+                    agent.verify_vulnerability(report_id, title, evidence)
+                )
+            except Exception:
+                logger.exception(f"Verification agent failed for {report_id}")
+            finally:
+                loop.close()
+
+        thread = threading.Thread(
+            target=run_verification,
+            daemon=True,
+            name=f"Verification-{report_id}",
+        )
+        thread.start()
+
+        return {  # noqa: TRY300
+            "spawned": True,
+            "agent_id": state.agent_id,
+            "agent_name": state.agent_name,
+        }
+
+    except ImportError as e:
+        logger.warning(f"Could not spawn verification agent: {e}")
+        return {"spawned": False, "error": f"VerificationAgent not available: {e}"}
+    except Exception as e:
+        logger.exception("Failed to spawn verification agent")
+        return {"spawned": False, "error": str(e)}
 
 
 @register_tool(sandbox_execution=False)
-def create_vulnerability_report(
+def create_vulnerability_report(  # noqa: PLR0911, PLR0912
     title: str,
     content: str,
     severity: str,
+    evidence: dict[str, Any],
+    agent_state: Any = None,
 ) -> dict[str, Any]:
+    """Create a vulnerability report with mandatory structured evidence.
+
+    Reports are added to a pending verification queue and must be verified
+    before becoming final. This eliminates false positives by requiring
+    concrete proof of exploitation.
+
+    Args:
+        title: Clear title of the vulnerability
+        content: Detailed vulnerability description including impact and remediation
+        severity: Severity level (critical, high, medium, low, info)
+        evidence: Structured evidence object containing:
+            - primary_evidence: List of HTTP request/response pairs
+            - reproduction_steps: Step-by-step instructions
+            - poc_payload: The exploit payload used
+            - target_url: Affected URL
+            - affected_parameter: Vulnerable parameter (optional)
+            - baseline_state: State before exploitation (optional)
+            - exploited_state: State after exploitation (optional)
+        agent_state: Agent state for context (optional)
+
+    Returns:
+        Dict with success status, report_id, and verification status
+    """
+    # Validate required string fields
     validation_error = None
     if not title or not title.strip():
         validation_error = "Title cannot be empty"
@@ -26,38 +148,92 @@ def create_vulnerability_report(
     if validation_error:
         return {"success": False, "message": validation_error}
 
+    # Validate evidence structure
+    if not evidence:
+        return {
+            "success": False,
+            "message": (
+                "Evidence is required. You must provide structured evidence including: "
+                "primary_evidence (HTTP request/response pairs), reproduction_steps, "
+                "poc_payload, and target_url."
+            ),
+        }
+
+    validated_evidence, evidence_error = validate_evidence(evidence)
+    if evidence_error:
+        return {
+            "success": False,
+            "message": f"Evidence validation failed: {evidence_error}",
+        }
+
+    # Store as pending report for verification
     try:
         from strix.telemetry.tracer import get_global_tracer
+        from strix.tools.reporting.evidence import evidence_to_dict
 
         tracer = get_global_tracer()
         if tracer:
-            report_id = tracer.add_vulnerability_report(
+            # Convert validated evidence to dict for storage
+            evidence_dict = evidence_to_dict(validated_evidence)
+
+            report_id = tracer.add_pending_vulnerability_report(
                 title=title,
                 content=content,
                 severity=severity,
+                evidence=evidence_dict,
             )
 
-            return {
+            # Spawn verification agent to verify the report
+            spawn_result = _spawn_verification_agent(
+                report_id=report_id,
+                title=title,
+                evidence=evidence_dict,
+                parent_agent_state=agent_state,
+            )
+
+            response = {
                 "success": True,
-                "message": f"Vulnerability report '{title}' created successfully",
+                "message": (
+                    f"Vulnerability report '{title}' submitted for verification. "
+                    "Report will be finalized after verification agent confirms exploitation."
+                ),
                 "report_id": report_id,
                 "severity": severity.lower(),
+                "status": "pending_verification",
             }
+
+            if spawn_result.get("spawned"):
+                response["verification_agent"] = {
+                    "spawned": True,
+                    "agent_id": spawn_result.get("agent_id"),
+                    "agent_name": spawn_result.get("agent_name"),
+                }
+            else:
+                response["verification_agent"] = {
+                    "spawned": False,
+                    "note": "Manual verification required",
+                    "error": spawn_result.get("error"),
+                }
+
+            return response
+
         import logging
 
         logging.warning("Global tracer not available - vulnerability report not stored")
 
         return {  # noqa: TRY300
             "success": True,
-            "message": f"Vulnerability report '{title}' created successfully (not persisted)",
+            "message": f"Report '{title}' created (not persisted - tracer unavailable)",
             "warning": "Report could not be persisted - tracer unavailable",
+            "status": "pending_verification",
         }
 
     except ImportError:
         return {
             "success": True,
-            "message": f"Vulnerability report '{title}' created successfully (not persisted)",
+            "message": f"Report '{title}' created (not persisted - module unavailable)",
             "warning": "Report could not be persisted - tracer module unavailable",
+            "status": "pending_verification",
         }
     except (ValueError, TypeError) as e:
         return {"success": False, "message": f"Failed to create vulnerability report: {e!s}"}

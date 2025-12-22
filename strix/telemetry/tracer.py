@@ -35,6 +35,8 @@ class Tracer:
         self.chat_messages: list[dict[str, Any]] = []
 
         self.vulnerability_reports: list[dict[str, Any]] = []
+        self.pending_vulnerability_reports: list[dict[str, Any]] = []
+        self.rejected_vulnerability_reports: list[dict[str, Any]] = []
         self.final_scan_result: str | None = None
 
         self.scan_results: dict[str, Any] | None = None
@@ -51,6 +53,8 @@ class Tracer:
         self._next_execution_id = 1
         self._next_message_id = 1
         self._saved_vuln_ids: set[str] = set()
+        self._saved_pending_ids: set[str] = set()
+        self._saved_rejected_ids: set[str] = set()
 
         self.vulnerability_found_callback: Callable[[str, str, str, str], None] | None = None
 
@@ -95,6 +99,171 @@ class Tracer:
 
         self.save_run_data()
         return report_id
+
+    def add_pending_vulnerability_report(
+        self,
+        title: str,
+        content: str,
+        severity: str,
+        evidence: dict[str, Any],
+    ) -> str:
+        """Add a vulnerability report to the pending verification queue.
+
+        Reports added here will not be finalized until verified by a verification agent.
+
+        Args:
+            title: Vulnerability title
+            content: Detailed vulnerability description
+            severity: Severity level (critical, high, medium, low, info)
+            evidence: Structured evidence dictionary
+
+        Returns:
+            Report ID (format: vuln-XXXX)
+        """
+        # Use combined count for unique IDs across all report lists
+        total_reports = (
+            len(self.vulnerability_reports)
+            + len(self.pending_vulnerability_reports)
+            + len(self.rejected_vulnerability_reports)
+        )
+        report_id = f"vuln-{total_reports + 1:04d}"
+
+        report = {
+            "id": report_id,
+            "title": title.strip(),
+            "content": content.strip(),
+            "severity": severity.lower().strip(),
+            "evidence": evidence,
+            "status": "pending_verification",
+            "timestamp": datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S UTC"),
+            "verification_attempts": 0,
+        }
+
+        self.pending_vulnerability_reports.append(report)
+        logger.info(f"Added pending vulnerability report: {report_id} - {title}")
+
+        self.save_run_data()
+        return report_id
+
+    def get_pending_report(self, report_id: str) -> dict[str, Any] | None:
+        """Get a pending report by ID.
+
+        Args:
+            report_id: The report ID to look up
+
+        Returns:
+            The report dictionary if found, None otherwise
+        """
+        for report in self.pending_vulnerability_reports:
+            if report["id"] == report_id:
+                return report
+        return None
+
+    def get_pending_reports(self) -> list[dict[str, Any]]:
+        """Get all pending verification reports.
+
+        Returns:
+            Copy of the pending reports list
+        """
+        return self.pending_vulnerability_reports.copy()
+
+    def finalize_vulnerability_report(
+        self,
+        report_id: str,
+        verification_evidence: dict[str, Any] | None = None,
+        notes: list[str] | None = None,
+    ) -> bool:
+        """Move a pending report to verified status.
+
+        Moves the report from pending queue to the main vulnerability_reports
+        list and triggers the vulnerability_found_callback.
+
+        Args:
+            report_id: The report ID to finalize
+            verification_evidence: Evidence from the verification process
+            notes: Optional notes from verification
+
+        Returns:
+            True if report was found and finalized, False otherwise
+        """
+        for i, report in enumerate(self.pending_vulnerability_reports):
+            if report["id"] == report_id:
+                report["status"] = "verified"
+                report["verified_at"] = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S UTC")
+                report["verification_evidence"] = verification_evidence
+                report["verification_notes"] = notes or []
+
+                # Move to main vulnerability reports
+                self.vulnerability_reports.append(report)
+                self.pending_vulnerability_reports.pop(i)
+
+                logger.info(f"Finalized vulnerability report: {report_id} - {report['title']}")
+
+                # Trigger callback if exists
+                if self.vulnerability_found_callback:
+                    self.vulnerability_found_callback(
+                        report["id"],
+                        report["title"],
+                        report["content"],
+                        report["severity"],
+                    )
+
+                self.save_run_data()
+                return True
+        return False
+
+    def reject_vulnerability_report(
+        self,
+        report_id: str,
+        reason: str,
+        notes: list[str] | None = None,
+    ) -> bool:
+        """Reject a pending report as a false positive.
+
+        Moves the report from pending queue to the rejected list.
+
+        Args:
+            report_id: The report ID to reject
+            reason: Reason for rejection
+            notes: Optional notes from verification
+
+        Returns:
+            True if report was found and rejected, False otherwise
+        """
+        for i, report in enumerate(self.pending_vulnerability_reports):
+            if report["id"] == report_id:
+                report["status"] = "rejected"
+                report["rejection_reason"] = reason
+                report["rejection_notes"] = notes or []
+                report["rejected_at"] = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S UTC")
+
+                # Move to rejected reports
+                self.rejected_vulnerability_reports.append(report)
+                self.pending_vulnerability_reports.pop(i)
+
+                logger.info(
+                    f"Rejected vulnerability report: {report_id} - "
+                    f"{report['title']} (Reason: {reason})"
+                )
+
+                self.save_run_data()
+                return True
+        return False
+
+    def increment_verification_attempt(self, report_id: str) -> bool:
+        """Increment the verification attempt counter for a pending report.
+
+        Args:
+            report_id: The report ID to update
+
+        Returns:
+            True if report was found and updated, False otherwise
+        """
+        for report in self.pending_vulnerability_reports:
+            if report["id"] == report_id:
+                report["verification_attempts"] = report.get("verification_attempts", 0) + 1
+                return True
+        return False
 
     def set_final_scan_result(
         self,
@@ -202,7 +371,7 @@ class Tracer:
         )
         self.get_run_dir()
 
-    def save_run_data(self, mark_complete: bool = False) -> None:
+    def save_run_data(self, mark_complete: bool = False) -> None:  # noqa: PLR0912, PLR0915
         try:
             run_dir = self.get_run_dir()
             if mark_complete:
@@ -272,6 +441,54 @@ class Tracer:
                         f"Saved {len(new_reports)} new vulnerability report(s) to: {vuln_dir}"
                     )
                 logger.info(f"Updated vulnerability index: {vuln_csv_file}")
+
+            # Save pending verification reports
+            if self.pending_vulnerability_reports:
+                pending_dir = run_dir / "pending_verifications"
+                pending_dir.mkdir(exist_ok=True)
+
+                import json
+
+                new_pending = [
+                    report
+                    for report in self.pending_vulnerability_reports
+                    if report["id"] not in self._saved_pending_ids
+                ]
+
+                for report in new_pending:
+                    pending_file = pending_dir / f"{report['id']}.json"
+                    with pending_file.open("w", encoding="utf-8") as f:
+                        json.dump(report, f, indent=2)
+                    self._saved_pending_ids.add(report["id"])
+
+                if new_pending:
+                    logger.info(
+                        f"Saved {len(new_pending)} pending verification report(s) to: {pending_dir}"
+                    )
+
+            # Save rejected reports (false positives)
+            if self.rejected_vulnerability_reports:
+                rejected_dir = run_dir / "rejected_false_positives"
+                rejected_dir.mkdir(exist_ok=True)
+
+                import json
+
+                new_rejected = [
+                    report
+                    for report in self.rejected_vulnerability_reports
+                    if report["id"] not in self._saved_rejected_ids
+                ]
+
+                for report in new_rejected:
+                    rejected_file = rejected_dir / f"{report['id']}.json"
+                    with rejected_file.open("w", encoding="utf-8") as f:
+                        json.dump(report, f, indent=2)
+                    self._saved_rejected_ids.add(report["id"])
+
+                if new_rejected:
+                    logger.info(
+                        f"Saved {len(new_rejected)} rejected report(s) to: {rejected_dir}"
+                    )
 
             logger.info(f"📊 Essential scan data saved to: {run_dir}")
 

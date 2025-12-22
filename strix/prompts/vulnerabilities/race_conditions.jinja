@@ -140,6 +140,78 @@
 - Rate limits that reject excess with atomic counters
 </false_positives>
 
+<llm_reasoning_errors>
+COMMON AI MISTAKES THAT CAUSE FALSE POSITIVES - AVOID THESE:
+
+1. MULTIPLE REQUESTS != RACE CONDITION:
+   WRONG: "I sent 10 parallel requests and some succeeded, proving race condition"
+   RIGHT: Success of multiple requests is not inherently a race condition.
+          Race condition requires: INVARIANT VIOLATION (e.g., 2 redemptions of 1-use code,
+          balance going negative, exceeding quota).
+          Test: Did MORE succeed than SHOULD have? Check the final state.
+
+2. IDEMPOTENT OPERATIONS:
+   WRONG: "Multiple parallel GETs returned data, race condition!"
+   RIGHT: Read operations (GET) are typically idempotent - multiple reads are fine.
+          Race conditions matter for STATE-CHANGING operations.
+          Focus on: POST/PUT/DELETE that should be atomic or limited.
+
+3. VISUAL GLITCHES:
+   WRONG: "The UI briefly showed wrong balance during concurrent requests"
+   RIGHT: Temporary UI inconsistencies during high load are not vulnerabilities.
+          Race conditions require DURABLE state corruption that persists.
+          Check: After all requests complete, is the FINAL STATE correct?
+
+4. RATE LIMITING WORKING:
+   WRONG: "Some of my 100 parallel requests got rate limited, proving race vulnerability"
+   RIGHT: Getting rate limited means the protection IS working.
+          Race condition in rate limiting = requests BYPASS the limit.
+          If most are rejected, the control is functioning.
+
+5. EXPECTED DISTRIBUTED BEHAVIOR:
+   WRONG: "Eventual consistency means I could briefly see stale data, race condition!"
+   RIGHT: Eventual consistency is a design choice, not a vulnerability.
+          Vulnerability requires: exploitable window causing harm, not just delay.
+          Check: Can this consistency window be exploited for unauthorized gain?
+
+6. NON-REPRODUCIBLE TIMING:
+   WRONG: "It worked once, so there's definitely a race condition"
+   RIGHT: Race conditions should be REPRODUCIBLE under controlled conditions.
+          One success could be: normal operation, network artifact, or coincidence.
+          Demonstrate: consistent reproduction with specific timing/parallelism.
+</llm_reasoning_errors>
+
+<expanded_false_positives>
+FALSE POSITIVE SCENARIOS - DO NOT REPORT:
+
+1. PROPER CONCURRENCY CONTROLS:
+   - Optimistic locking with version/ETag enforcement
+   - Database unique constraints preventing duplicates
+   - Serializable transaction isolation
+   - Proper advisory locks or mutexes
+
+2. IDEMPOTENT BY DESIGN:
+   - Multiple identical requests producing same result
+   - Idempotency keys properly scoped and enforced
+   - Upsert operations with correct conflict handling
+
+3. TEMPORARY INCONSISTENCIES:
+   - Brief UI flickering during high load
+   - Eventual consistency converging correctly
+   - Cache invalidation delays without security impact
+
+4. RATE LIMITING WORKING:
+   - Excess requests properly rejected (429)
+   - Quotas enforced at correct granularity
+   - Atomic counters preventing over-consumption
+
+5. NON-EXPLOITABLE WINDOWS:
+   - Race windows too small to exploit practically
+   - Self-correcting inconsistencies
+   - Audit trails catching and reversing duplicates
+   - Compensating transactions cleaning up state
+</expanded_false_positives>
+
 <impact>
 - Financial loss (double spend, over-issuance of credits/refunds)
 - Policy/limit bypass (quotas, single-use tokens, seat counts)

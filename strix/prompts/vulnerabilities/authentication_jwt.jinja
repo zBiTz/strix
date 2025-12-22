@@ -123,6 +123,80 @@
 - ID token not accepted by APIs that require access tokens
 </false_positives>
 
+<llm_reasoning_errors>
+COMMON AI MISTAKES THAT CAUSE FALSE POSITIVES - AVOID THESE:
+
+1. ALGORITHM CONFUSION WITHOUT EXPLOITATION:
+   WRONG: "The JWT uses HS256, which is weaker than RS256, vulnerability confirmed"
+   RIGHT: HS256 is not inherently vulnerable. The vulnerability is when:
+          - Server accepts BOTH HS256 and RS256 AND
+          - You can forge a valid HS256 token using the public key as secret
+          Simply using HS256 or RS256 is not a vulnerability.
+
+2. NONE ALGORITHM FALSE POSITIVE:
+   WRONG: "I changed alg to 'none' and removed signature, JWT bypass!"
+   RIGHT: You must prove the SERVER ACCEPTED your modified token.
+          Most modern libraries reject alg:none by default.
+          Test: Did you actually get authenticated/authorized with the forged token?
+
+3. EXPIRED TOKEN OBSERVATION:
+   WRONG: "The token has a long expiration time (24h), security issue!"
+   RIGHT: Token lifetime is a design decision, not automatically a vulnerability.
+          Long-lived tokens are common for refresh tokens.
+          Vulnerability requires: (1) stolen token, (2) no revocation mechanism,
+          (3) actual exploitation window demonstrated.
+
+4. CLAIM OBSERVATION WITHOUT MANIPULATION:
+   WRONG: "The JWT contains user role in claims, proving privilege escalation possible"
+   RIGHT: JWTs commonly contain role/scope claims. This is not vulnerable unless:
+          - You can MODIFY claims and have the token accepted
+          - Server trusts claims without signature verification
+          Observation of claims structure is not a vulnerability.
+
+5. TOKEN REUSE ACROSS ENVIRONMENTS:
+   WRONG: "Same JWT works in dev and prod, proving cross-environment vulnerability"
+   RIGHT: If both environments use the same key/issuer, this may be intentional.
+          Vulnerability requires: (1) environments SHOULD be isolated, (2) you can
+          actually gain unauthorized access, not just that the token is valid.
+
+6. JWKS ENDPOINT EXPOSURE:
+   WRONG: "/.well-known/jwks.json is publicly accessible, security issue!"
+   RIGHT: JWKS endpoints MUST be public - that's how clients verify tokens.
+          Public keys are meant to be public. This is not a vulnerability.
+          Vulnerability: if you can REPLACE keys or inject your own.
+</llm_reasoning_errors>
+
+<expanded_false_positives>
+FALSE POSITIVE SCENARIOS - DO NOT REPORT:
+
+1. CORRECT TOKEN VALIDATION:
+   - Token rejected when modified (signature verification works)
+   - Expired tokens rejected
+   - Wrong audience/issuer tokens rejected
+   - Algorithm pinning prevents alg switching
+
+2. DESIGN DECISIONS (NOT VULNERABILITIES):
+   - HS256 algorithm choice (with proper secret management)
+   - Long-lived refresh tokens (with proper rotation)
+   - Roles/scopes in claims (with signature verification)
+   - Public JWKS endpoint (required for verification)
+
+3. PROPER KEY MANAGEMENT:
+   - Kid/jku/x5u headers validated against allowlist
+   - JWKS fetched only from configured URLs
+   - Key rotation with proper transition periods
+
+4. INTENDED TOKEN BEHAVIOR:
+   - Same token valid across related services (shared issuer)
+   - Token caching within expiration window
+   - Refresh token reuse within rotation window
+
+5. TESTING/DEBUG FEATURES:
+   - Verbose error messages in development environment
+   - Debug endpoints with explicit warnings
+   - Test tokens clearly marked as non-production
+</expanded_false_positives>
+
 <impact>
 - Account takeover and durable session persistence
 - Privilege escalation via claim manipulation or cross-service acceptance

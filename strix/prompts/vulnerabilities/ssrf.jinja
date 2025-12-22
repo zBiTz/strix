@@ -113,6 +113,77 @@
 - Blocked egress confirmed by uniform errors across all targets and protocols
 </false_positives>
 
+<llm_reasoning_errors>
+COMMON AI MISTAKES THAT CAUSE FALSE POSITIVES - AVOID THESE:
+
+1. CLIENT-SIDE FETCH CONFUSION:
+   WRONG: "The page fetched my URL, confirming SSRF"
+   RIGHT: Check if the fetch is CLIENT-SIDE (browser) or SERVER-SIDE (server).
+          - If fetch appears in browser network tab: CLIENT-SIDE (not SSRF)
+          - If fetch appears at your OAST server from target server IP: SERVER-SIDE (SSRF)
+          SSRF specifically requires the SERVER to make the request.
+
+2. INTENDED FUNCTIONALITY:
+   WRONG: "The URL preview feature fetched my URL, SSRF confirmed"
+   RIGHT: URL preview/unfurl features are DESIGNED to fetch URLs. This is not SSRF unless:
+          - You can access INTERNAL resources (localhost, 169.254.x.x, 10.x.x.x, etc.)
+          - You can access non-HTTP protocols (file://, gopher://, dict://)
+          - You can bypass allowlists to reach unintended targets
+          A feature working as designed on external URLs is not a vulnerability.
+
+3. OAST CALLBACK WITHOUT INTERNAL ACCESS:
+   WRONG: "Server made a request to my OAST domain, SSRF is proven"
+   RIGHT: OAST proves server-side fetch capability, but SSRF impact requires:
+          - Access to internal/private addresses, OR
+          - Access to cloud metadata endpoints, OR
+          - Protocol smuggling capabilities
+          External-to-external fetch may be intended behavior.
+
+4. BLOCKED INTERNAL ACCESS IGNORED:
+   WRONG: "I tried localhost and got an error, but OAST worked, so SSRF exists"
+   RIGHT: If internal access is blocked but external works, the application has mitigations.
+          SSRF severity depends on what you CAN access, not what you TRIED.
+          Report only what you can actually exploit.
+
+5. REDIRECT CHAIN MISATTRIBUTION:
+   WRONG: "My attacker server redirected to internal, proving SSRF"
+   RIGHT: Some applications DO follow redirects but STILL validate the final destination.
+          You must prove: Final internal resource was actually accessed and data retrieved.
+          Not just: Redirect was followed.
+</llm_reasoning_errors>
+
+<expanded_false_positives>
+FALSE POSITIVE SCENARIOS - DO NOT REPORT:
+
+1. CLIENT-SIDE FETCHES:
+   - Browser fetching resources (visible in browser dev tools network tab)
+   - Frontend JavaScript making requests (CORS would block cross-origin)
+   - Image/CSS/JS loads initiated by client
+
+2. INTENDED EXTERNAL FETCHES:
+   - Link preview features working on external URLs
+   - Webhook delivery to user-specified external URLs
+   - Feed importers (RSS/Atom) fetching external content
+   - Avatar/image URL import from external sources
+   UNLESS: You can redirect to or directly specify internal addresses
+
+3. BLOCKED INTERNAL ACCESS:
+   - Allowlist prevents internal IPs (connection refused/timeout to 127.0.0.1)
+   - DNS resolution blocked for private ranges
+   - Protocol restrictions (only HTTP/HTTPS allowed)
+   - Uniform error for all internal targets indicating blanket block
+
+4. METADATA ACCESS BLOCKED:
+   - IMDSv2 required but application cannot set headers
+   - Cloud provider has additional metadata protections enabled
+   - Instance not running in cloud environment
+
+5. HARMLESS EXTERNAL ACCESS:
+   - Can fetch arbitrary external URLs but no internal access
+   - No protocol smuggling capability (gopher://, file:// rejected)
+   - No credential leakage from requests
+</expanded_false_positives>
+
 <impact>
 - Cloud credential disclosure with subsequent control-plane/API access
 - Access to internal control panels and data stores not exposed publicly

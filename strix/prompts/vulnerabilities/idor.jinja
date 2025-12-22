@@ -171,6 +171,74 @@ query IDOR {
 - Correct row-level checks enforced across all channels
 </false_positives>
 
+<llm_reasoning_errors>
+COMMON AI MISTAKES THAT CAUSE FALSE POSITIVES - AVOID THESE:
+
+1. PUBLIC DATA CONFUSION:
+   WRONG: "I accessed /api/users/123 and saw user data, proving IDOR"
+   RIGHT: Some data is intentionally public (user profiles, public posts).
+          IDOR requires accessing data that SHOULD be protected from you.
+          Test: Can an UNAUTHENTICATED or DIFFERENTLY-AUTHORIZED user access the same data?
+          Compare: Your own ID vs another user's ID vs anonymous access.
+
+2. AUTHORIZATION WORKING CORRECTLY:
+   WRONG: "Changing user_id from 1 to 2 returned different data"
+   RIGHT: If you're an admin or have permission to view user 2, this is CORRECT behavior.
+          IDOR requires accessing data you're NOT AUTHORIZED to see.
+          Need: Two accounts where Account A cannot legitimately access Account B's data.
+
+3. ENUMERATION WITHOUT ACCESS:
+   WRONG: "I can increment IDs and see they exist (200 vs 404), proving IDOR"
+   RIGHT: Knowing an ID EXISTS is different from ACCESSING its data.
+          Object enumeration might be a minor info leak, not IDOR.
+          IDOR requires retrieving or modifying the actual protected content.
+
+4. SELF-REFERENTIAL ACCESS:
+   WRONG: "I changed the user_id to my own and could access my data"
+   RIGHT: Accessing your OWN data is not IDOR. You need to prove access to SOMEONE ELSE'S data.
+          Test must use two distinct accounts with separate authorization scopes.
+
+5. ADMIN/STAFF ACCESS CONFUSION:
+   WRONG: "As admin, I can view any user's data - IDOR!"
+   RIGHT: Admins are often SUPPOSED to access all data. This is authorization working correctly.
+          IDOR: A REGULAR USER accessing another REGULAR USER's data.
+
+6. DIFFERENT RESOURCE TYPES:
+   WRONG: "I found /api/documents/1 exists, so all numbered resources have IDOR"
+   RIGHT: Each endpoint has its own authorization. /documents/1 might be public while /invoices/1 is protected.
+          Test each resource type independently.
+</llm_reasoning_errors>
+
+<expanded_false_positives>
+FALSE POSITIVE SCENARIOS - DO NOT REPORT:
+
+1. INTENTIONALLY PUBLIC DATA:
+   - Public user profiles (username, avatar, bio)
+   - Published content (blog posts, comments, public files)
+   - Directory listings designed for discovery
+   - Shared links with intentional access tokens
+
+2. PROPER AUTHORIZATION IN PLACE:
+   - 403 Forbidden when accessing another user's resource
+   - Empty response or generic "not found" for unauthorized access
+   - Redirect to login for unauthenticated attempts
+   - Row-level security filtering returning only your own data
+
+3. ROLE-APPROPRIATE ACCESS:
+   - Admin accessing any user (admin privilege by design)
+   - Support staff viewing customer data (support role by design)
+   - Manager seeing team member data (hierarchical access by design)
+
+4. SAME-USER BOUNDARY:
+   - Accessing your own data via different ID formats (numeric vs UUID)
+   - Reading your own linked resources (your orders, your files)
+
+5. EXISTENCE LEAKAGE ONLY:
+   - Can tell ID exists (200) vs doesn't exist (404) but cannot read content
+   - Timing differences without content access
+   - Error messages revealing ID validity but not data
+</expanded_false_positives>
+
 <impact>
 - Cross-account data exposure (PII/PHI/PCI)
 - Unauthorized state changes (transfers, role changes, cancellations)

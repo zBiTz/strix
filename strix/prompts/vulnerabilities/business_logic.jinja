@@ -147,6 +147,80 @@
 - Admin-only operations with proper audit and approvals
 </false_positives>
 
+<llm_reasoning_errors>
+COMMON AI MISTAKES THAT CAUSE FALSE POSITIVES - AVOID THESE:
+
+1. INTENDED FUNCTIONALITY CONFUSION:
+   WRONG: "Users can apply multiple discount codes, business logic flaw!"
+   RIGHT: Some applications INTENTIONALLY allow stacking discounts.
+          Business logic flaw requires violating INTENDED business rules.
+          Check: Is this behavior documented? Is it a feature or a bug?
+          Ask: Would the business consider this a problem?
+
+2. POLICY VS VULNERABILITY:
+   WRONG: "Trial can be extended by creating new accounts, vulnerability!"
+   RIGHT: This may be a policy decision (allow new trials) not a security flaw.
+          Business logic vulnerabilities violate ENFORCED constraints.
+          If there's no technical control, it's a policy gap, not a vulnerability.
+
+3. ADMIN CAPABILITIES:
+   WRONG: "Admin can give unlimited credits to any user, logic flaw!"
+   RIGHT: Admins are often SUPPOSED to have these capabilities.
+          The question is: Can NON-ADMINS do this? Is admin access properly controlled?
+          Admin doing admin things is not a vulnerability.
+
+4. PRICE DISPLAY VS ACTUAL CHARGE:
+   WRONG: "I modified the price in the request and it showed a lower price"
+   RIGHT: What matters is what was ACTUALLY CHARGED, not what was displayed.
+          Check: Did the payment processor receive the modified amount?
+          Many apps show client-side values but validate server-side.
+
+5. SINGLE INSTANCE VS PATTERN:
+   WRONG: "I found one case where a refund exceeded the original amount"
+   RIGHT: One instance could be: (1) legitimate adjustment, (2) edge case handling,
+          (3) intentional policy, (4) already-addressed bug.
+          Verify: Is this reproducible? Is it actually exploitable at scale?
+
+6. THEORETICAL VS DEMONSTRATED:
+   WRONG: "If a user could modify X, they could bypass Y" (without proof)
+   RIGHT: Business logic flaws require DEMONSTRATING the exploit, not theorizing.
+          You must show: (1) the exact steps, (2) the state change, (3) the impact.
+          "Could potentially" is not a valid vulnerability report.
+</llm_reasoning_errors>
+
+<expanded_false_positives>
+FALSE POSITIVE SCENARIOS - DO NOT REPORT:
+
+1. INTENTIONAL BUSINESS FEATURES:
+   - Discount stacking allowed by design
+   - Extended trial periods as promotional feature
+   - Referral bonuses working as documented
+   - Flexible return policies
+
+2. POLICY GAPS (NOT VULNERABILITIES):
+   - Multiple accounts allowed (no technical enforcement)
+   - Generous refund policies
+   - Manual override capabilities for support staff
+   - Business decisions about pricing flexibility
+
+3. ADMIN/STAFF CAPABILITIES:
+   - Admins adjusting user balances (with audit)
+   - Support issuing credits (within policy)
+   - Staff impersonation for debugging (logged)
+   - Manual overrides with proper authorization
+
+4. UI/DISPLAY INCONSISTENCIES:
+   - Client-side price modifications not affecting actual charge
+   - Cosmetic cart discrepancies corrected at checkout
+   - Display bugs without backend impact
+
+5. EDGE CASES WITH CONTROLS:
+   - Rounding differences within acceptable tolerance
+   - Race conditions with proper idempotency
+   - Timing windows that self-correct
+   - Audited and reversible state changes
+</expanded_false_positives>
+
 <impact>
 - Direct financial loss (fraud, arbitrage, over-refunds, unpaid consumption)
 - Regulatory/contractual violations (billing accuracy, consumer protection)

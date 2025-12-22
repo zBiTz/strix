@@ -154,6 +154,80 @@ URL: {% raw %}javascript:alert(1){% endraw %}
 - Scriptable contexts disabled (no HTML pass-through, safe URL schemes enforced)
 </false_positives>
 
+<llm_reasoning_errors>
+COMMON AI MISTAKES THAT CAUSE FALSE POSITIVES - AVOID THESE:
+
+1. REFLECTION WITHOUT EXECUTION:
+   WRONG: "My <script>alert(1)</script> payload appears in the page source, confirming XSS"
+   RIGHT: Reflection is NOT execution. The payload might be:
+          - HTML-encoded: &lt;script&gt;alert(1)&lt;/script&gt; (SAFE)
+          - Inside a non-executable context: <!-- <script>alert(1)</script> --> (SAFE)
+          - Sanitized by DOMPurify or similar (SAFE)
+          MUST verify: Does a browser actually EXECUTE the script? Use browser dev tools.
+
+2. CONTEXT CONFUSION:
+   WRONG: "Input reflects in the page, so I'll report XSS"
+   RIGHT: Context determines executability:
+          - In <title> or <textarea>: Script tags don't execute
+          - In attribute: Need to break out first " onload=alert(1)
+          - In JavaScript string: Need valid JS context break
+          Test in an ACTUAL BROWSER, not just viewing source.
+
+3. CSP BYPASS ASSUMPTION:
+   WRONG: "The payload executes, so XSS is confirmed" (ignoring CSP)
+   RIGHT: Check for Content-Security-Policy header. If present with proper nonces/hashes,
+          your inline script will be BLOCKED even if it appears in DOM.
+          Open browser console - CSP violations will be logged.
+
+4. DOM XSS WITHOUT SINK TRACE:
+   WRONG: "User input goes into the URL hash and the page uses JavaScript, so DOM XSS exists"
+   RIGHT: Must trace: Source (where input enters) → Sink (where it executes)
+          Many apps read URL params but encode before use.
+          Prove: Your controlled input reaches innerHTML/eval/document.write UNENCODED.
+
+5. HTTP-ONLY CONTEXT ERRORS:
+   WRONG: "XSS in an API response proves the vulnerability"
+   RIGHT: API responses with Content-Type: application/json don't render HTML.
+          XSS requires HTML rendering context (text/html).
+          Check the Content-Type header!
+
+6. SELF-XSS MISREPORTING:
+   WRONG: "If I paste this payload into my own profile, JavaScript executes"
+   RIGHT: Self-XSS (attacking yourself) has minimal impact unless you can prove:
+          - Another user will see YOUR payload (stored XSS)
+          - You can force another user to submit it (CSRF + XSS chain)
+          Pure self-XSS is generally not reportable.
+</llm_reasoning_errors>
+
+<expanded_false_positives>
+FALSE POSITIVE SCENARIOS - DO NOT REPORT:
+
+1. ENCODED OUTPUT:
+   - Input appears as &lt; &gt; &quot; &#39; &amp; (HTML entities = SAFE)
+   - Input appears as %3C%3E (URL encoded in text context = SAFE)
+   - JSON-escaped in JavaScript: "user input with \"quotes\"" (SAFE)
+
+2. SAFE CONTEXT:
+   - Input inside <title>, <textarea>, <style> (not executable)
+   - Input in HTML comments (unless you can break out with -->)
+   - Input in non-rendered areas (hidden inputs, data attributes not read by JS)
+
+3. SECURITY CONTROLS PRESENT:
+   - CSP with nonce/hash policy that blocks your payload (check console)
+   - Trusted Types enforced (check console for violations)
+   - DOMPurify or similar sanitizer active on the path
+
+4. NON-IMPACTFUL EXECUTION:
+   - alert() works but httpOnly cookies prevent session theft
+   - Sandboxed iframe prevents parent access
+   - Same-origin policy blocks cross-origin data access
+
+5. FRAMEWORK AUTO-ESCAPING:
+   - React's {userInput} in JSX (auto-escaped unless dangerouslySetInnerHTML)
+   - Vue's {{userInput}} in templates (auto-escaped unless v-html)
+   - Angular's {{userInput}} interpolation (auto-escaped unless bypassSecurityTrust*)
+</expanded_false_positives>
+
 <pro_tips>
 1. Start with context classification, not payload brute force.
 2. Use DOM instrumentation to log sink usage; it reveals unexpected flows.

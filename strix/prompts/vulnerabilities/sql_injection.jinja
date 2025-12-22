@@ -127,6 +127,74 @@
 - Parameterized queries with no string concatenation, verified by code review
 </false_positives>
 
+<llm_reasoning_errors>
+COMMON AI MISTAKES THAT CAUSE FALSE POSITIVES - AVOID THESE:
+
+1. ERROR MESSAGE CONFUSION:
+   WRONG: "The server returned a 500 error with 'database error' text, therefore SQL injection exists"
+   RIGHT: Database errors can occur for many reasons (connection issues, invalid data types, constraints).
+          SQLi requires proving you can CONTROL query behavior, not just cause errors.
+
+2. RESPONSE DIFFERENCE FALLACY:
+   WRONG: "Adding a quote changed the response length from 4521 to 4523 bytes, proving boolean-based SQLi"
+   RIGHT: Minor response differences can result from timestamps, session tokens, CSRF tokens, ads, counters.
+          Boolean-based SQLi requires proving a TRUE predicate returns DIFFERENT content than FALSE.
+          Test: id=1 AND 1=1 vs id=1 AND 1=2 - content difference must be consistent and meaningful.
+
+3. TIMING ASSUMPTION ERROR:
+   WRONG: "The response took 5.2 seconds instead of 0.3 seconds, confirming time-based SQLi"
+   RIGHT: Network latency, server load, and database operations vary naturally.
+          Time-based SQLi requires: (1) consistent baseline, (2) SLEEP function in payload,
+          (3) delay correlating to SLEEP duration, (4) delay NOT present without SLEEP payload.
+          Minimum test: 5 requests with SLEEP(0), 5 requests with SLEEP(5) - compare distributions.
+
+4. SCANNER OUTPUT TRUST:
+   WRONG: "SQLMap reported 'parameter appears to be injectable' so I will report SQLi"
+   RIGHT: "Appears to be" means the scanner found anomalies, NOT confirmed exploitation.
+          You must manually verify: Can you extract specific data? Can you toggle a predicate?
+          If SQLMap cannot dump data, the injection may not be exploitable.
+
+5. PARAMETERIZED QUERY MISDIAGNOSIS:
+   WRONG: "I found query construction in code: SELECT * FROM users WHERE id = ? - this is vulnerable"
+   RIGHT: Parameterized queries with ? placeholders are SAFE. The parameter is bound separately.
+          Only report if you find string concatenation: "WHERE id = " + userInput
+
+6. REFLECTION WITHOUT EXPLOITATION:
+   WRONG: "My payload appeared in an error message, proving SQL injection"
+   RIGHT: Input reflection in errors indicates poor error handling, not SQLi.
+          Must prove: payload EXECUTED in the SQL context, not just DISPLAYED in output.
+</llm_reasoning_errors>
+
+<expanded_false_positives>
+FALSE POSITIVE SCENARIOS - DO NOT REPORT:
+
+1. GENERIC DATABASE ERRORS:
+   - "Connection refused" or "Connection timeout" (network/infra issue)
+   - "Duplicate key" or "Constraint violation" (normal validation)
+   - "Invalid data type" (input validation, not injection)
+   - "Table does not exist" unless YOU specified the table name
+
+2. RESPONSE VARIANCE WITHOUT CONTROL:
+   - Different response sizes on repeated identical requests (dynamic content)
+   - Inconsistent timing without correlation to your payload
+   - Changed content that includes timestamps, tokens, or user-specific data
+
+3. WAF/FILTER DETECTION WITHOUT BYPASS:
+   - "Your request was blocked" messages (WAF worked correctly)
+   - 403/406 responses to SQL keywords (input filtering active)
+   - Unless you can BYPASS the filter and demonstrate exploitation
+
+4. CODE PATTERNS THAT ARE ACTUALLY SAFE:
+   - Prepared statements: cursor.execute("SELECT * FROM users WHERE id = ?", (user_id,))
+   - ORM queries: User.objects.filter(id=user_id) without .raw() or .extra()
+   - Query builders with proper parameterization
+
+5. EXPLOITS REQUIRING IMPOSSIBLE CONDITIONS:
+   - SQLi requiring local file access you don't have
+   - Stacked queries on databases that don't support them (MySQL default)
+   - UNION injection when you cannot determine column count after exhaustive testing
+</expanded_false_positives>
+
 <impact>
 - Direct data exfiltration and privacy/regulatory exposure
 - Authentication and authorization bypass via manipulated predicates

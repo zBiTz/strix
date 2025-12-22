@@ -1,0 +1,64 @@
+<tools>
+  <tool name="verify_vulnerability_report">
+    <description>Submit verification decision for a pending vulnerability report.
+
+Use this tool ONLY after attempting to reproduce the vulnerability.
+This is the ONLY way to finalize or reject a pending vulnerability report.
+
+BEFORE CALLING:
+- You MUST have attempted to reproduce the vulnerability
+- You MUST have documented your reproduction attempts
+- You MUST have compared results to the original evidence
+
+VERIFIED CRITERIA (verified=True):
+- Reproduced the exact same behavior as reported
+- Consistent results across 3+ attempts
+- Demonstrated actual security impact
+- Negative control confirmed authorization exists
+
+REJECTED CRITERIA (verified=False):
+- Cannot reproduce despite following all steps
+- Reported behavior is normal functionality
+- No actual security impact demonstrated
+- Finding requires already having access</description>
+    <parameters>
+      <parameter name="report_id" type="string" required="true">
+        <description>Report ID to verify (format: vuln-XXXX)</description>
+      </parameter>
+      <parameter name="verified" type="boolean" required="true">
+        <description>True if vulnerability was successfully reproduced, False otherwise</description>
+      </parameter>
+      <parameter name="verification_evidence" type="object" required="false">
+        <description>Evidence from successful verification (required if verified=True):
+- reproduction_count: Number of successful reproductions (recommend 3+)
+- baseline_response: Normal behavior observed without exploit
+- exploit_response: Behavior observed with exploit
+- negative_control: Result of unauthorized access test</description>
+      </parameter>
+      <parameter name="rejection_reason" type="string" required="false">
+        <description>REQUIRED if verified=False. Clear explanation of why the vulnerability could not be verified. Examples:
+- "Cannot reproduce: response identical with and without payload"
+- "Not a vulnerability: data is intentionally public"
+- "Requires manual review: intermittent reproduction"</description>
+      </parameter>
+      <parameter name="notes" type="array" required="false">
+        <description>Optional list of additional observations from verification</description>
+      </parameter>
+    </parameters>
+    <returns type="Dict[str, Any]">
+      <description>Response with success status, final status (verified/rejected), and message</description>
+    </returns>
+  </tool>
+
+  <tool name="list_pending_verifications">
+    <description>List all vulnerability reports pending verification.
+
+Use this to see what reports need verification.
+Returns basic information about each pending report.</description>
+    <parameters>
+    </parameters>
+    <returns type="Dict[str, Any]">
+      <description>Response with pending_count and pending_reports array containing id, title, severity, submitted_at, and verification_attempts for each report</description>
+    </returns>
+  </tool>
+</tools>

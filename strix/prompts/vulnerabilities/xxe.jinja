@@ -160,6 +160,82 @@ evil.dtd:
 - XML processed only client-side (no server parse)
 </false_positives>
 
+<llm_reasoning_errors>
+COMMON AI MISTAKES THAT CAUSE FALSE POSITIVES - AVOID THESE:
+
+1. DOCTYPE ACCEPTANCE != XXE:
+   WRONG: "The server accepts XML with DOCTYPE, proving XXE vulnerability"
+   RIGHT: DOCTYPE acceptance is necessary but NOT sufficient for XXE.
+          XXE requires: (1) DOCTYPE accepted, (2) external entities RESOLVED,
+          (3) entity content ACCESSIBLE (file read or network fetch).
+          Many parsers accept DOCTYPE but don't resolve external entities.
+
+2. ENTITY LITERAL OUTPUT:
+   WRONG: "I see &xxe; in the response, confirming entity processing"
+   RIGHT: Seeing &xxe; literally means the entity was NOT resolved.
+          XXE requires seeing the CONTENT of the file/URL, not the entity reference.
+          If /etc/passwd content doesn't appear, the entity wasn't resolved.
+
+3. XML ERROR MESSAGES:
+   WRONG: "Parser error mentioning 'entity' proves XXE"
+   RIGHT: Parser errors about entities often indicate the parser is BLOCKING them.
+          "Entity not allowed" or "External entities disabled" = parser is protected.
+          XXE requires entity resolution to SUCCEED, not just be attempted.
+
+4. BLIND XXE ASSUMPTION:
+   WRONG: "No output shown, so it must be blind XXE - I'll report it anyway"
+   RIGHT: Blind XXE still requires PROOF of exploitation:
+          - OAST callback from the target server
+          - Error-based exfiltration showing file content
+          - Observable side effects (timing, state change)
+          No proof = no vulnerability report.
+
+5. CLIENT-SIDE XML PROCESSING:
+   WRONG: "JavaScript parses XML in the browser, XXE possible"
+   RIGHT: Browser XML parsers (DOMParser) do NOT resolve external entities.
+          XXE is a SERVER-SIDE vulnerability. Client-side XML parsing is safe.
+          Check: Is the XML processed on the server or in the browser?
+
+6. SVG/OFFICE FILE CONFUSION:
+   WRONG: "Application accepts SVG uploads, XXE confirmed"
+   RIGHT: SVG upload acceptance doesn't mean XXE. You must prove:
+          - SVG is parsed server-side (not just stored/served)
+          - External entities in SVG are resolved
+          - You can read files or make network requests
+          Many apps just store SVGs without XML parsing.
+</llm_reasoning_errors>
+
+<expanded_false_positives>
+FALSE POSITIVE SCENARIOS - DO NOT REPORT:
+
+1. PROTECTED PARSERS:
+   - DOCTYPE accepted but external entities disabled
+   - Error messages stating "external entities not allowed"
+   - Parser configured with FEATURE_EXTERNAL_GENERAL_ENTITIES = false
+   - libxml2 with XML_PARSE_NOENT disabled
+
+2. ENTITY REFERENCE LITERAL:
+   - Entity reference (&xxe;) appears unchanged in output
+   - Entity definition visible but not expanded
+   - Parser echoes DTD without resolving
+
+3. CLIENT-SIDE ONLY:
+   - XML parsed in browser JavaScript
+   - Client-side XSLT transformation
+   - No server-side XML processing
+
+4. MOCKED/SIMULATED:
+   - Test environments returning canned responses
+   - Honeypots simulating XXE behavior
+   - Demo applications with fake file content
+
+5. NO PROOF OF EXPLOITATION:
+   - No OAST callback received
+   - No file content in response or errors
+   - No observable side effects
+   - Just "tried XXE payload" without verification
+</expanded_false_positives>
+
 <impact>
 - Disclosure of credentials/keys/configs, code, and environment secrets
 - Access to cloud metadata/token services and internal admin panels

@@ -1,30 +1,108 @@
 <tools>
   <tool name="create_vulnerability_report">
-    <description>Create a vulnerability report for a discovered security issue.
+    <description>Create a vulnerability report with MANDATORY structured evidence.
 
-Use this tool to document a specific verified security vulnerability.
-Put ALL details in the content field - affected URLs, parameters, proof of concept, remediation steps, CVE references, CVSS scores, technical details, impact assessment, etc.
+Reports are submitted to a verification queue and must pass verification before becoming final.
+This eliminates false positives by requiring concrete proof of exploitation.
 
-DO NOT USE:
-- For general security observations without specific vulnerabilities
-- When you don't have concrete vulnerability details
-- When you don't have a proof of concept, or still not 100% sure if it's a vulnerability
-- For tracking multiple vulnerabilities (create separate reports)
-- For reporting multiple vulnerabilities at once. Use a separate create_vulnerability_report for each vulnerability.
-</description>
+MANDATORY PRE-SUBMISSION CHECKLIST - Verify ALL before calling:
+[ ] Baseline established: You documented normal behavior BEFORE the exploit
+[ ] Controlled test: Your specific payload caused the specific effect
+[ ] Reproducible: You reproduced this 3+ times consecutively
+[ ] Negative control: You verified unauthorized users are denied
+[ ] Impact demonstrated: You proved actual security consequence (not just an error)
+[ ] Evidence included: Raw requests/responses are in the evidence parameter
+
+DO NOT USE THIS TOOL IF:
+- You only have scanner output without manual verification
+- You observed an anomaly but cannot reproduce it reliably
+- You see reflection but have not proven execution (XSS)
+- You see errors but have not demonstrated data extraction (SQLi)
+- You accessed data but have not proven it should be protected (IDOR)
+- You caused a server request but cannot access internal resources (SSRF)
+- You are guessing about impact rather than demonstrating it
+- You are the Discovery agent (only Reporting agents may use this)
+- You did not receive validation evidence from a Validation agent
+
+SEVERITY GUIDE - Use demonstrated impact, not theoretical maximum:
+- CRITICAL: You demonstrated RCE, full DB dump, or admin takeover
+- HIGH: You demonstrated cross-user data access or authenticated RCE
+- MEDIUM: You demonstrated limited stored XSS or partial info disclosure
+- LOW: You demonstrated reflected XSS requiring interaction
+- INFO: You identified a misconfiguration without direct security impact</description>
     <parameters>
       <parameter name="title" type="string" required="true">
-        <description>Clear, concise title of the vulnerability</description>
+        <description>Clear title: [Vuln Type] in [Location] - e.g., "SQL Injection in /api/users search parameter"</description>
       </parameter>
       <parameter name="content" type="string" required="true">
-        <description>Complete vulnerability details including affected URLs, technical details, impact, proof of concept, remediation steps, and any relevant references. Be comprehensive and include everything relevant.</description>
+        <description>REQUIRED SECTIONS:
+## Vulnerability Summary
+[Type, location, root cause]
+
+## Affected Endpoint
+[Exact URL, method, parameter]
+
+## Reproduction Steps
+[Numbered steps with exact payloads]
+
+## Evidence
+### Baseline Request/Response
+[Normal behavior without exploit]
+
+### Exploit Request/Response
+[Request with payload and response showing impact]
+
+### Negative Control
+[Proof that authorization exists - unauthorized request fails]
+
+## Demonstrated Impact
+[What you actually achieved, not theoretical impact]
+
+## Remediation
+[Specific fix recommendations]</description>
       </parameter>
       <parameter name="severity" type="string" required="true">
-        <description>Severity level: critical, high, medium, low, or info</description>
+        <description>Severity based on DEMONSTRATED impact: critical, high, medium, low, or info</description>
+      </parameter>
+      <parameter name="evidence" type="object" required="true">
+        <description>MANDATORY structured evidence object containing:
+
+primary_evidence: Array of HTTP request/response objects (at least 1 required):
+  - method: HTTP method (GET, POST, etc.)
+  - url: Full URL with path and query
+  - request_headers: Dict of request headers
+  - request_body: Request body content
+  - response_status: HTTP status code
+  - response_headers: Dict of response headers
+  - response_body_snippet: Relevant portion of response (max 2000 chars)
+  - timestamp: ISO timestamp of the request
+
+reproduction_steps: Array of step objects (at least 1 required):
+  - step_number: Sequential step number (1, 2, 3...)
+  - description: Clear description of the action
+  - tool_used: Tool used (browser, terminal, proxy, etc.)
+  - expected_result: What should happen if vulnerable
+  - actual_result: What actually happened
+
+poc_payload: The actual exploit payload or code used (required)
+
+target_url: The primary affected URL (required)
+
+affected_parameter: The specific vulnerable parameter (optional)
+
+baseline_state: State before exploitation, e.g., "user has no admin access" (optional but recommended)
+
+exploited_state: State after exploitation, e.g., "user now has admin access" (optional but recommended)
+
+reproduction_count: Number of successful reproductions (default 1, recommend 3+)
+
+negative_control_passed: Boolean indicating if negative control was tested (recommend true)
+
+negative_control_description: Description of negative control test performed (optional)</description>
       </parameter>
     </parameters>
     <returns type="Dict[str, Any]">
-      <description>Response containing success status and message</description>
+      <description>Response with report_id, status (pending_verification), and message. Reports must be verified before becoming final.</description>
     </returns>
   </tool>
 </tools>

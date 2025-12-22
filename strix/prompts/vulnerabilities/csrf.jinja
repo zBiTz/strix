@@ -155,6 +155,84 @@
 - Only idempotent, non-sensitive operations affected.
 </false_positives>
 
+<llm_reasoning_errors>
+COMMON AI MISTAKES THAT CAUSE FALSE POSITIVES - AVOID THESE:
+
+1. MISSING TOKEN != CSRF VULNERABLE:
+   WRONG: "The request doesn't have a CSRF token, so it's vulnerable"
+   RIGHT: CSRF protection can be implemented via:
+          - SameSite=Strict cookies (no token needed)
+          - Origin/Referer header validation
+          - Custom headers required (CORS preflight blocks cross-origin)
+          - Bearer token authentication (not vulnerable to CSRF)
+          You must prove the ACTION SUCCEEDS from a cross-origin page.
+
+2. API ENDPOINT CONFUSION:
+   WRONG: "This API endpoint accepts POST without CSRF token, vulnerable!"
+   RIGHT: APIs using Authorization headers (Bearer tokens, API keys) are NOT
+          vulnerable to CSRF because browsers don't auto-attach these headers.
+          CSRF only affects cookie-based or HTTP Basic/Digest auth.
+          Check: Does the endpoint use cookies for authentication?
+
+3. SAMESITE MISUNDERSTANDING:
+   WRONG: "I can submit a form cross-origin, proving CSRF"
+   RIGHT: With SameSite=Lax (browser default), cookies are NOT sent on cross-site
+          POST requests. Only top-level GET navigations include cookies.
+          Test: Does YOUR cross-origin POST actually include the session cookie?
+          Check the actual request in browser dev tools.
+
+4. IDEMPOTENT OPERATIONS:
+   WRONG: "I can trigger this GET request cross-origin, CSRF confirmed"
+   RIGHT: GET requests should be idempotent (no state changes).
+          If a GET request IS changing state, that's a separate issue (HTTP method misuse).
+          CSRF impact requires demonstrating actual HARM from the forced action.
+
+5. PROOF OF CONCEPT FAILURE:
+   WRONG: "The server accepts the request, so CSRF works"
+   RIGHT: You must prove:
+          (1) Request came from DIFFERENT origin (your attacker page)
+          (2) Session cookie was attached (check request headers)
+          (3) State actually changed (before/after comparison)
+          Many "successful" CSRF attempts actually fail silently.
+
+6. PREFLIGHT BYPASS ASSUMPTION:
+   WRONG: "I'll just change Content-Type to avoid preflight"
+   RIGHT: Some content-types avoid preflight BUT the server may reject them.
+          Application/json endpoints often require that exact content-type.
+          Test: Does the server actually process your text/plain body as JSON?
+</llm_reasoning_errors>
+
+<expanded_false_positives>
+FALSE POSITIVE SCENARIOS - DO NOT REPORT:
+
+1. PROPER TOKEN VALIDATION:
+   - CSRF token present and validated on state-changing requests
+   - Origin/Referer headers checked and enforced
+   - Double-submit cookie pattern with proper implementation
+
+2. NON-COOKIE AUTHENTICATION:
+   - Bearer token in Authorization header (not auto-attached)
+   - API key authentication
+   - OAuth tokens passed explicitly
+   - Client certificates (mTLS)
+
+3. SAMESITE PROTECTION:
+   - SameSite=Strict on session cookies
+   - SameSite=Lax with POST-based state changes (cookie not sent)
+   - Secure cookie flag with HTTPS-only
+
+4. NO MEANINGFUL IMPACT:
+   - Read-only operations (GET requests)
+   - Actions on attacker's own account
+   - Idempotent operations that can't cause harm
+   - Operations requiring re-authentication
+
+5. PREFLIGHT REQUIRED:
+   - Custom headers required (X-Requested-With, X-CSRF-Token)
+   - Non-simple content types (application/json) enforced
+   - DELETE/PUT methods requiring preflight
+</expanded_false_positives>
+
 <impact>
 - Account state changes (email/password/MFA), session hijacking via login CSRF, financial operations, administrative actions.
 - Durable authorization changes (role/permission flips, key rotations) and data loss.

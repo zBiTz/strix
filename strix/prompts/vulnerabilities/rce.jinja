@@ -134,6 +134,77 @@ Example: push graphic-context\nfill 'url(https://x.tld/a"|id>/tmp/o")'\npop grap
 - Simulated outputs not derived from executed commands
 </false_positives>
 
+<llm_reasoning_errors>
+COMMON AI MISTAKES THAT CAUSE FALSE POSITIVES - AVOID THESE:
+
+1. ERROR MESSAGE CONFUSION:
+   WRONG: "The server returned an error mentioning 'command not found', proving command injection"
+   RIGHT: Error messages about commands can come from application logging, not execution.
+          RCE requires proving you CONTROLLED the command that ran.
+          Test: Does YOUR payload produce observable, controlled output?
+
+2. TIMEOUT WITHOUT CAUSATION:
+   WRONG: "The request timed out after I added sleep, confirming RCE"
+   RIGHT: Timeouts can occur for many reasons (network, server load, slow queries).
+          Time-based RCE requires: (1) consistent baseline timing, (2) delay correlating
+          EXACTLY to your sleep duration, (3) delay NOT present without sleep payload.
+          Minimum: 5+ requests each with/without sleep, compare distributions.
+
+3. TEMPLATE REFLECTION WITHOUT EXECUTION:
+   WRONG: "My {{7*7}} appeared in the response, proving SSTI/RCE"
+   RIGHT: Reflection of {{7*7}} literally means the template engine did NOT execute it.
+          SSTI requires the output to show "49" not "{{7*7}}".
+          If you see your payload unchanged, it's NOT executing.
+
+4. DESERIALIZATION GADGET ASSUMPTION:
+   WRONG: "The application uses Java serialization, so it's vulnerable to RCE"
+   RIGHT: Deserialization RCE requires: (1) untrusted input reaching deserialize(),
+          (2) vulnerable gadget classes on classpath, (3) no deserialization filters.
+          You must PROVE code execution, not just detect serialization.
+
+5. SCANNER/TOOL OUTPUT TRUST:
+   WRONG: "Nuclei/Burp/commix reported command injection, confirming RCE"
+   RIGHT: Scanners report POTENTIAL issues. Many are false positives.
+          You must manually verify: Can you extract specific data via OAST?
+          Can you control command output? If not, it may not be exploitable.
+
+6. OAST CALLBACK WITHOUT COMMAND PROOF:
+   WRONG: "I got an OAST callback, proving RCE"
+   RIGHT: OAST proves server-side network access, but not necessarily command execution.
+          The callback could come from SSRF, XXE, or legitimate webhook behavior.
+          RCE requires proving YOUR COMMAND caused the callback.
+</llm_reasoning_errors>
+
+<expanded_false_positives>
+FALSE POSITIVE SCENARIOS - DO NOT REPORT:
+
+1. CRASHES/ERRORS WITHOUT CONTROL:
+   - Application crashes or hangs (denial of service, not RCE)
+   - Generic error messages mentioning "shell" or "command"
+   - Stack traces showing command-related classes without execution proof
+
+2. SANDBOXED/FILTERED EXECUTION:
+   - Commands run but output is not attacker-controlled
+   - Limited command subset allowed (e.g., only "echo" or "ping")
+   - Sandbox restricts file/network/process access
+   - WAF blocks before command execution
+
+3. SIMULATED OR MOCKED RESPONSES:
+   - Test/demo environments returning fake command output
+   - Honeypots simulating command execution
+   - Debug endpoints that echo but don't execute
+
+4. TIMING VARIANCE WITHOUT CORRELATION:
+   - Inconsistent response times not matching sleep duration
+   - Server-side processing delays unrelated to payload
+   - Network latency causing timeout-like behavior
+
+5. TEMPLATE LITERAL OUTPUT:
+   - SSTI payloads appearing unchanged in output
+   - Expression syntax visible but not evaluated
+   - Client-side template processing (Angular/Vue/React)
+</expanded_false_positives>
+
 <impact>
 - Remote system control under application user; potential privilege escalation to root
 - Data theft, encryption/signing key compromise, supply-chain insertion, lateral movement

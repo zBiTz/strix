@@ -105,6 +105,74 @@ def _check_active_agents(agent_state: Any = None) -> dict[str, Any] | None:
     return None
 
 
+def _check_pending_verifications(agent_state: Any = None) -> dict[str, Any] | None:
+    """Check if there are pending vulnerability reports awaiting verification.
+
+    Returns an error dict if pending verifications exist, None otherwise.
+    """
+    try:
+        from strix.telemetry.tracer import get_global_tracer
+
+        tracer = get_global_tracer()
+        if not tracer:
+            return None
+
+        pending_reports = tracer.get_pending_reports()
+        if not pending_reports:
+            return None
+
+        message_parts = [
+            "Cannot finish scan while vulnerability reports are pending verification:",
+            f"\n\nPending verifications: {len(pending_reports)}",
+        ]
+
+        for report in pending_reports[:5]:  # Show first 5
+            report_id = report.get("report_id", "unknown")
+            title = report.get("title", "Unknown vulnerability")
+            severity = report.get("severity", "unknown")
+            attempts = report.get("verification_attempts", 0)
+            line = f"  - [{severity.upper()}] {title} (ID: {report_id}, attempts: {attempts})"
+            message_parts.append(line)
+
+        if len(pending_reports) > 5:
+            message_parts.append(f"  ... and {len(pending_reports) - 5} more")
+
+        message_parts.extend(
+            [
+                "\n\nRequired actions:",
+                "1. Wait for verification agents to complete their verification",
+                "2. Use list_pending_verifications to check status",
+                "3. Verification agents call verify_vulnerability_report to finalize/reject",
+                "\n\nNote: Only VERIFIED findings will be included in the final report.",
+                "Rejected findings will be saved separately for review.",
+            ]
+        )
+
+        return {
+            "success": False,
+            "message": "\n".join(message_parts),
+            "pending_verifications": {
+                "count": len(pending_reports),
+                "reports": [
+                    {
+                        "report_id": r.get("report_id"),
+                        "title": r.get("title"),
+                        "severity": r.get("severity"),
+                        "verification_attempts": r.get("verification_attempts", 0),
+                    }
+                    for r in pending_reports
+                ],
+            },
+        }
+
+    except ImportError:
+        import logging
+
+        logging.warning("Could not check pending verifications - tracer module unavailable")
+
+    return None
+
+
 def _finalize_with_tracer(content: str, success: bool) -> dict[str, Any]:
     try:
         from strix.telemetry.tracer import get_global_tracer
@@ -116,14 +184,28 @@ def _finalize_with_tracer(content: str, success: bool) -> dict[str, Any]:
                 success=success,
             )
 
-            return {
+            # Get counts for verified (finalized) and rejected reports
+            verified_count = len(tracer.vulnerability_reports)
+            rejected_count = len(tracer.rejected_vulnerability_reports)
+
+            result = {
                 "success": True,
                 "scan_completed": True,
                 "message": "Scan completed successfully"
                 if success
                 else "Scan completed with errors",
-                "vulnerabilities_found": len(tracer.vulnerability_reports),
+                "vulnerabilities_found": verified_count,
             }
+
+            # Add rejected count if any were rejected
+            if rejected_count > 0:
+                result["false_positives_rejected"] = rejected_count
+                result["note"] = (
+                    f"{rejected_count} potential finding(s) were rejected during verification. "
+                    "See rejected_false_positives/ directory for details."
+                )
+
+            return result
 
         import logging
 
@@ -167,6 +249,10 @@ def finish_scan(
         active_agents_error = _check_active_agents(agent_state)
         if active_agents_error:
             return active_agents_error
+
+        pending_verifications_error = _check_pending_verifications(agent_state)
+        if pending_verifications_error:
+            return pending_verifications_error
 
         return _finalize_with_tracer(content, success)
 
