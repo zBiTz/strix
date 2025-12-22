@@ -108,6 +108,7 @@ class LLMResponse:
     scan_id: str | None = None
     step_number: int = 1
     role: StepRole = StepRole.AGENT
+    thinking_blocks: list[dict[str, Any]] | None = None
 
 
 @dataclass
@@ -296,12 +297,23 @@ class LLM:
             self._update_usage_stats(response)
 
             content = ""
+            thinking_blocks = None
             if (
                 response.choices
                 and hasattr(response.choices[0], "message")
                 and response.choices[0].message
             ):
-                content = getattr(response.choices[0].message, "content", "") or ""
+                message = response.choices[0].message
+                content = getattr(message, "content", "") or ""
+
+                if self._should_include_reasoning_effort():
+                    raw_thinking = getattr(message, "thinking_blocks", None)
+                    if raw_thinking:
+                        thinking_blocks = [
+                            {"type": block.get("type"), "thinking": block.get("thinking")}
+                            for block in raw_thinking
+                            if isinstance(block, dict)
+                        ]
 
             content = _truncate_to_first_function(content)
 
@@ -317,6 +329,7 @@ class LLM:
                 role=StepRole.AGENT,
                 content=content,
                 tool_invocations=tool_invocations if tool_invocations else None,
+                thinking_blocks=thinking_blocks,
             )
 
         except litellm.RateLimitError as e:
