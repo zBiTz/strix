@@ -1,9 +1,7 @@
 """Tests for vulnerability verification workflow."""
 
 from datetime import UTC, datetime
-from unittest.mock import MagicMock, patch
-
-import pytest
+from unittest.mock import MagicMock
 
 
 class TestReportEntersPendingQueue:

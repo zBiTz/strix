@@ -3,7 +3,7 @@ from typing import Any
 from strix.tools.registry import register_tool
 
 
-@register_tool(sandbox_execution=False)
+@register_tool(sandbox_execution=False, parallelizable=True)
 def think(thought: str) -> dict[str, Any]:
     try:
         if not thought or not thought.strip():

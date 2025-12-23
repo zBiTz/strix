@@ -102,7 +102,7 @@ def _run_agent_in_thread(
         return {"result": result}
 
 
-@register_tool(sandbox_execution=False)
+@register_tool(sandbox_execution=False, parallelizable=True)
 def view_agent_graph(agent_state: Any) -> dict[str, Any]:
     try:
         structure_lines = ["=== AGENT GRAPH STRUCTURE ==="]

@@ -96,7 +96,10 @@ def _get_module_name(func: Callable[..., Any]) -> str:
 
 
 def register_tool(
-    func: Callable[..., Any] | None = None, *, sandbox_execution: bool = True
+    func: Callable[..., Any] | None = None,
+    *,
+    sandbox_execution: bool = True,
+    parallelizable: bool = False,
 ) -> Callable[..., Any]:
     def decorator(f: Callable[..., Any]) -> Callable[..., Any]:
         func_dict = {
@@ -104,6 +107,7 @@ def register_tool(
             "function": f,
             "module": _get_module_name(f),
             "sandbox_execution": sandbox_execution,
+            "parallelizable": parallelizable,
         }
 
         sandbox_mode = os.getenv("STRIX_SANDBOX_MODE", "false").lower() == "true"
@@ -166,6 +170,14 @@ def should_execute_in_sandbox(tool_name: str) -> bool:
         if tool.get("name") == tool_name:
             return bool(tool.get("sandbox_execution", True))
     return True
+
+
+def is_parallelizable(tool_name: str) -> bool:
+    """Check if a tool can be safely executed in parallel with other parallelizable tools."""
+    for tool in tools:
+        if tool.get("name") == tool_name:
+            return bool(tool.get("parallelizable", False))
+    return False
 
 
 def get_tools_prompt() -> str:

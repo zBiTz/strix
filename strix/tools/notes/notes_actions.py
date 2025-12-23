@@ -85,7 +85,7 @@ def create_note(
         }
 
 
-@register_tool(sandbox_execution=False)
+@register_tool(sandbox_execution=False, parallelizable=True)
 def list_notes(
     category: str | None = None,
     tags: list[str] | None = None,
