@@ -114,6 +114,90 @@
 - Only UI-side changes with no persisted effect
 </false_positives>
 
+<llm_reasoning_errors>
+COMMON AI MISTAKES THAT CAUSE FALSE POSITIVES - AVOID THESE:
+
+1. FIELD EXPOSURE != FIELD WRITABLE:
+   WRONG: "API response includes 'isAdmin' field, mass assignment possible"
+   RIGHT: Fields in responses don't indicate writability. You must:
+          - SEND the sensitive field in a create/update request
+          - VERIFY the field was actually persisted with your value
+          - CONFIRM via subsequent GET or response that the change stuck
+          Reading a field is not the same as writing it.
+
+2. SCHEMA DISCOVERY != EXPLOITATION:
+   WRONG: "GraphQL schema exposes role field in UserInput type, vulnerability"
+   RIGHT: Schema exposure shows potential, not confirmed vulnerability.
+          You must: (1) actually send role in mutation, (2) verify it persisted,
+          (3) confirm the caller shouldn't be able to set this field.
+          Some roles MAY be allowed to set certain fields.
+
+3. REQUEST ACCEPTED != FIELD CHANGED:
+   WRONG: "Server returned 200 when I included isAdmin=true"
+   RIGHT: 200 status doesn't mean the field was written. Servers often:
+          - Silently ignore unknown/forbidden fields
+          - Accept request but only process allowed fields
+          - Return success while rejecting specific field changes
+          Check: Did a subsequent GET show isAdmin=true?
+
+4. ADMIN SETTING ADMIN FIELDS:
+   WRONG: "Admin can set user roles via API, mass assignment vulnerability"
+   RIGHT: Admins are often SUPPOSED to set roles and permissions.
+          Mass assignment is when UNAUTHORIZED users can set these.
+          Verify: Can a regular user set their own role to admin?
+          Admin capabilities are not vulnerabilities.
+
+5. SELF-MODIFIABLE FIELDS:
+   WRONG: "User can update their own displayName, mass assignment"
+   RIGHT: Users should be able to update their own profile fields.
+          Mass assignment vulnerabilities involve setting fields that:
+          - Should be system-controlled (role, permissions, plan)
+          - Belong to other users (ownerId to another user)
+          - Affect entitlements (credits, quotas, features)
+
+6. UI CHANGE VS PERSISTENT CHANGE:
+   WRONG: "After sending request, UI shows I'm an admin"
+   RIGHT: UI changes can be client-side rendering issues.
+          You must prove the BACKEND state changed:
+          - Different browser/session shows admin status
+          - Server treats you as admin (new capabilities work)
+          - Database query confirms role change
+</llm_reasoning_errors>
+
+<expanded_false_positives>
+FALSE POSITIVE SCENARIOS - DO NOT REPORT:
+
+1. PROPER FIELD FILTERING:
+   - Server ignores unrecognized fields (silent drop)
+   - Allowlist explicitly limits writable fields
+   - Field included in request but value unchanged
+   - Validation rejects forbidden field values
+
+2. INTENDED CAPABILITIES:
+   - Admin setting roles for users (administrative function)
+   - User updating their own permitted profile fields
+   - API key/token with explicit write permissions
+   - Documented bulk update endpoints with proper authorization
+
+3. DERIVED/COMPUTED FIELDS:
+   - Plan/tier determined by subscription status, not input
+   - Role derived from group membership, not direct assignment
+   - Balance recomputed from transaction history
+   - Status determined by workflow state machine
+
+4. READ-ONLY ENFORCEMENT:
+   - Field present in input type but marked read-only
+   - Input parsed but field value not applied
+   - Separate DTOs for input vs storage
+   - Explicit field mapping ignoring sensitive attributes
+
+5. TESTING/DEBUG CONFUSION:
+   - Development mode with relaxed restrictions
+   - Test user with elevated permissions
+   - Mock responses not reflecting actual behavior
+   - Swagger/docs showing theoretical fields
+</expanded_false_positives>
+
 <impact>
 - Privilege escalation and admin feature access
 - Cross-tenant or cross-account resource takeover

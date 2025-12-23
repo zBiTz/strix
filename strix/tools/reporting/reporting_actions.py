@@ -33,6 +33,8 @@ def _spawn_verification_agent(
         Dict with spawn status and agent info
     """
     try:
+        from datetime import UTC, datetime
+
         from strix.agents.state import AgentState
         from strix.agents.VerificationAgent import VerificationAgent
 
@@ -63,6 +65,35 @@ def _spawn_verification_agent(
 
         agent = VerificationAgent(agent_config)
 
+        # Register with agent graph for visibility
+        try:
+            from strix.tools.agents_graph.agents_graph_actions import (
+                _agent_graph,
+                _agent_instances,
+            )
+
+            _agent_graph["nodes"][state.agent_id] = {
+                "name": state.agent_name,
+                "task": task,
+                "status": "running",
+                "created_at": datetime.now(UTC).isoformat(),
+                "parent_id": parent_id,
+                "type": "verification",
+                "report_id": report_id,
+            }
+
+            if parent_id:
+                _agent_graph["edges"].append({
+                    "from": parent_id,
+                    "to": state.agent_id,
+                    "type": "spawned_verification",
+                    "created_at": datetime.now(UTC).isoformat(),
+                })
+
+            _agent_instances[state.agent_id] = agent
+        except ImportError:
+            logger.debug("Agent graph not available - verification agent not registered")
+
         # Run verification in background thread
         def run_verification() -> None:
             import asyncio
@@ -73,10 +104,21 @@ def _spawn_verification_agent(
                 loop.run_until_complete(
                     agent.verify_vulnerability(report_id, title, evidence)
                 )
+                # Update agent graph status on success
+                _update_verification_agent_status(state.agent_id, "completed")
             except Exception:
                 logger.exception(f"Verification agent failed for {report_id}")
+                _update_verification_agent_status(state.agent_id, "failed")
             finally:
                 loop.close()
+                # Clean up running agents
+                try:
+                    from strix.tools.agents_graph.agents_graph_actions import (
+                        _running_agents as running,
+                    )
+                    running.pop(state.agent_id, None)
+                except ImportError:
+                    pass
 
         thread = threading.Thread(
             target=run_verification,
@@ -84,6 +126,15 @@ def _spawn_verification_agent(
             name=f"Verification-{report_id}",
         )
         thread.start()
+
+        # Register the running thread
+        try:
+            from strix.tools.agents_graph.agents_graph_actions import (
+                _running_agents as running,
+            )
+            running[state.agent_id] = thread
+        except ImportError:
+            pass
 
         return {  # noqa: TRY300
             "spawned": True,
@@ -97,6 +148,34 @@ def _spawn_verification_agent(
     except Exception as e:
         logger.exception("Failed to spawn verification agent")
         return {"spawned": False, "error": str(e)}
+
+
+def _update_verification_agent_status(agent_id: str, status: str) -> None:
+    """Update the verification agent status in the agent graph.
+
+    Args:
+        agent_id: The agent ID to update
+        status: New status (completed, failed, etc.)
+    """
+    try:
+        from datetime import UTC, datetime
+
+        from strix.tools.agents_graph.agents_graph_actions import (
+            _agent_graph,
+            _agent_instances,
+        )
+
+        if agent_id in _agent_graph["nodes"]:
+            _agent_graph["nodes"][agent_id]["status"] = status
+            _agent_graph["nodes"][agent_id]["finished_at"] = datetime.now(UTC).isoformat()
+
+        # Clean up instance reference
+        _agent_instances.pop(agent_id, None)
+
+    except ImportError:
+        pass
+    except (KeyError, AttributeError) as e:
+        logger.debug(f"Failed to update verification agent status: {e}")
 
 
 @register_tool(sandbox_execution=False)

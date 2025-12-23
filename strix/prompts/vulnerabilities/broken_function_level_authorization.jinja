@@ -127,6 +127,83 @@ mutation Promote($id:ID!){
 - Simulated environments where admin endpoints are stubbed with no side effects
 </false_positives>
 
+<llm_reasoning_errors>
+COMMON AI MISTAKES THAT CAUSE FALSE POSITIVES - AVOID THESE:
+
+1. ENDPOINT EXISTS != ACCESSIBLE:
+   WRONG: "Found /admin/users endpoint in JavaScript, BFLA vulnerability"
+   RIGHT: Finding an endpoint doesn't mean you can access it.
+          Test: (1) call the endpoint with a low-privilege token,
+          (2) confirm you get 200 with actual data/action, not 401/403.
+          Endpoint discovery is not the same as broken authorization.
+
+2. ADMIN DOING ADMIN THINGS:
+   WRONG: "Admin user can delete any user, broken authorization"
+   RIGHT: Admins are SUPPOSED to have elevated privileges.
+          BFLA requires: (1) action restricted to certain roles,
+          (2) LOWER privilege role successfully performs it.
+          Admin doing admin things is expected behavior.
+
+3. UI HIDDEN != SERVER PROTECTED:
+   WRONG: "Button is hidden in UI but endpoint works, BFLA confirmed"
+   RIGHT: Hidden UI elements don't guarantee server protection.
+          But you must verify with a DIFFERENT, LOWER privilege account.
+          If you're already authorized, the hidden button is just UX.
+          Test: Does a regular user token get the same result?
+
+4. SAME USER DIFFERENT PATHS:
+   WRONG: "User can access /api/v2/admin/settings via direct call"
+   RIGHT: If the user is an admin, this is expected.
+          If there's no role difference between UI and API, no BFLA.
+          BFLA requires ROLE ESCALATION: user → admin function access.
+
+5. FEATURE FLAG CONFUSION:
+   WRONG: "Beta feature is accessible to all users, broken authorization"
+   RIGHT: Beta features may intentionally be open to all users.
+          Check: Is this feature SUPPOSED to be admin-only?
+          Documented beta/preview features are not BFLA.
+
+6. TRANSPORT DIFFERENCE WITHOUT AUTHZ DIFFERENCE:
+   WRONG: "GraphQL allows same operations as REST, inconsistent"
+   RIGHT: Multiple transports (REST, GraphQL, gRPC) offering same operations
+          is not a vulnerability if authorization is consistent.
+          Test: Does a low-privilege user get MORE access via GraphQL?
+</llm_reasoning_errors>
+
+<expanded_false_positives>
+FALSE POSITIVE SCENARIOS - DO NOT REPORT:
+
+1. PROPER AUTHORIZATION ENFORCEMENT:
+   - Endpoint returns 401/403 for unprivileged users
+   - Admin endpoints require admin token/session
+   - Function access matches documented role requirements
+   - Multi-tenant isolation prevents cross-org access
+
+2. INTENDED ROLE CAPABILITIES:
+   - Admin performing admin functions
+   - Super-user with documented elevated privileges
+   - Support staff with intentional override capabilities
+   - Service accounts with specific function access
+
+3. DIFFERENT ACCESS != BROKEN ACCESS:
+   - Multiple valid paths to same function (REST + GraphQL)
+   - API versioning with consistent authorization
+   - Mobile and web with same authorization model
+   - Internal and external APIs with proper scoping
+
+4. FEATURE AVAILABILITY:
+   - Beta features open to all users (documented policy)
+   - Preview features for early adopters
+   - Gradual rollout features
+   - A/B test variations
+
+5. TESTING/DEVELOPMENT:
+   - Staging environments with relaxed auth (not production)
+   - Test accounts with elevated permissions
+   - Mock endpoints without real authorization
+   - Demo modes with full feature access
+</expanded_false_positives>
+
 <impact>
 - Privilege escalation to admin/staff actions
 - Monetary/state impact: refunds/credits/approvals without authorization

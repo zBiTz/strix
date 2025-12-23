@@ -123,6 +123,84 @@
 - Archive extractors that sanitize paths and enforce destination directories
 </false_positives>
 
+<llm_reasoning_errors>
+COMMON AI MISTAKES THAT CAUSE FALSE POSITIVES - AVOID THESE:
+
+1. ERROR MESSAGE CONFUSION:
+   WRONG: "The server returned 'file not found' error mentioning a path, proving path traversal"
+   RIGHT: Error messages indicating file not found mean the traversal FAILED.
+          Path traversal requires: (1) traversal sequence accepted, (2) file CONTENT returned.
+          "No such file" errors indicate the path was rejected or doesn't exist.
+
+2. PARAMETER NAME ASSUMPTION:
+   WRONG: "Parameter named 'file' or 'path' exists, path traversal likely"
+   RIGHT: Parameter names don't indicate vulnerability. You must PROVE:
+          - The parameter influences filesystem operations
+          - Traversal sequences bypass path restrictions
+          - Out-of-root file content is actually returned
+          Many "file" params refer to database IDs or virtual paths.
+
+3. ENCODING WITHOUT EXPLOITATION:
+   WRONG: "I sent ..%2f..%2f and got a different response, confirming bypass"
+   RIGHT: Different responses can be: (1) WAF blocking, (2) 400 bad request,
+          (3) application error. Vulnerability requires ACTUAL file content.
+          Prove: Show /etc/passwd content or other known file, not just response differences.
+
+4. RELATIVE PATH ACCEPTANCE:
+   WRONG: "Server accepts 'documents/report.pdf' without error, path traversal possible"
+   RIGHT: Accepting relative paths within the intended directory is NORMAL.
+          Path traversal requires ESCAPING the intended directory.
+          Test: ../../../etc/passwd - did you get passwd content or an error?
+
+5. LFI WRAPPER CONFUSION:
+   WRONG: "php://filter returned base64 content, LFI confirmed"
+   RIGHT: php://filter returning encoded content IS the proof of LFI.
+          But verify: (1) you controlled the path, (2) content is the target file.
+          Some apps intentionally use wrappers for their own files.
+
+6. ZIP SLIP WITHOUT EXTRACTION:
+   WRONG: "I uploaded a ZIP with ../ entries, Zip Slip vulnerability"
+   RIGHT: Uploading is not the vulnerability. You must prove:
+          - ZIP was actually extracted server-side
+          - Files were written outside target directory
+          - You can access/read the escaped file
+          Many apps store ZIPs without extracting them.
+</llm_reasoning_errors>
+
+<expanded_false_positives>
+FALSE POSITIVE SCENARIOS - DO NOT REPORT:
+
+1. VIRTUAL PATH SYSTEMS:
+   - "file=report-123" mapping to database records, not filesystem
+   - Content served from object storage (S3, GCS) with path-like keys
+   - Template systems using IDs that look like paths
+   - CMS with "path" parameters referring to URL slugs
+
+2. PROPER PATH NORMALIZATION:
+   - Application resolves to canonical path then validates against allowlist
+   - Framework's built-in path handling (e.g., Flask send_from_directory)
+   - Web server properly configured (nginx with correct alias syntax)
+   - Path operations fail cleanly on traversal attempts
+
+3. RESTRICTED WRAPPERS:
+   - php://filter disabled or limited to specific directories
+   - allow_url_include/allow_url_fopen disabled (RFI impossible)
+   - Stream wrappers registered only for safe operations
+   - Include paths hardcoded or from constants only
+
+4. SAFE ARCHIVE HANDLING:
+   - Extraction library validates all paths before writing
+   - Symlinks not followed during extraction
+   - Destination directory enforced after canonicalization
+   - Archive contents validated against allowlist
+
+5. INFORMATIONAL ONLY:
+   - Path disclosed in error message but not exploitable
+   - Server returns 403/404 on traversal (working protection)
+   - Different error codes for ../  vs normal paths (detection, not bypass)
+   - Response size differences without actual file content
+</expanded_false_positives>
+
 <impact>
 - Sensitive configuration/source disclosure → credential and key compromise
 - Code execution via inclusion of attacker-controlled content or overwritten templates

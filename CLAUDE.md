@@ -99,6 +99,72 @@ STRIX_SANDBOX_MODE  # Set to "true" when running inside sandbox container
 - Follow existing patterns in each module
 - Tool schemas use XML format in `*_schema.xml` files
 
+## Vulnerability Reporting
+
+### Evidence Requirements
+
+The `create_vulnerability_report` tool requires structured evidence to eliminate false positives:
+
+```python
+evidence = {
+    # Required: HTTP request/response pairs proving the vulnerability
+    "primary_evidence": [
+        {
+            "method": "GET",
+            "url": "https://example.com/api/users/999",
+            "response_status": 200,
+            "response_body_snippet": '{"id": 999, "email": "other@user.com"}',
+            "timestamp": "2024-01-01T00:00:00Z"
+        }
+    ],
+    # Required: Step-by-step reproduction instructions
+    "reproduction_steps": [
+        {
+            "step_number": 1,
+            "description": "Access another user's data via IDOR",
+            "expected_result": "Should see other user's data",
+            "actual_result": "Saw other user's email address"
+        }
+    ],
+    # Required: The actual exploit payload
+    "poc_payload": "GET /api/users/999",
+    # Required: Affected URL
+    "target_url": "https://example.com/api/users/999",
+    # Optional fields
+    "affected_parameter": "user_id",
+    "baseline_state": "Normal user can only see their own data",
+    "exploited_state": "User accessed another user's private data"
+}
+```
+
+### Verification Workflow
+
+1. **Pending Queue**: Reports enter `pending_verification` status, not immediately finalized
+2. **Auto-Verification**: A `VerificationAgent` spawns to reproduce the finding
+3. **Finalization**: Only verified reports move to `vulnerability_reports`
+4. **Rejection Tracking**: False positives are saved to `rejected_vulnerability_reports`
+
+### Report States
+
+- `pending_verification` - Initial state, awaiting verification
+- `verified` - Reproduction confirmed, finalized as vulnerability
+- `rejected` - Could not reproduce, marked as false positive
+
+### Output Directories
+
+- `strix_runs/<run>/vulnerability_reports/` - Verified vulnerabilities
+- `strix_runs/<run>/pending_verification/` - Awaiting verification
+- `strix_runs/<run>/rejected_false_positives/` - Rejected reports
+
+### Prompt Module Structure
+
+Vulnerability prompt modules in `strix/prompts/vulnerabilities/` include:
+
+- `<llm_reasoning_errors>` - Common AI mistakes that cause false positives
+- `<expanded_false_positives>` - Scenarios that should NOT be reported
+- `<validation>` - Criteria for confirming a vulnerability
+- `<false_positives>` - Quick reference for non-vulnerable scenarios
+
 ## Contributing Prompt Modules
 
 Add `.jinja` files to appropriate category in `strix/prompts/`:

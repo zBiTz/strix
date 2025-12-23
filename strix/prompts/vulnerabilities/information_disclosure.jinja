@@ -201,6 +201,87 @@
 - Owner-visible-only details that do not cross identity/tenant boundaries
 </false_positives>
 
+<llm_reasoning_errors>
+COMMON AI MISTAKES THAT CAUSE FALSE POSITIVES - AVOID THESE:
+
+1. INTENTIONAL DISCLOSURE CONFUSION:
+   WRONG: "OpenAPI/Swagger endpoint exists, information disclosure vulnerability"
+   RIGHT: Many applications intentionally expose API documentation.
+          OpenAPI endpoints are often meant to be public for API consumers.
+          Vulnerability: Only if it reveals undocumented sensitive operations
+          that should not be accessible to the caller.
+
+2. GENERIC VERSION STRINGS:
+   WRONG: "Server header says 'nginx', information disclosure"
+   RIGHT: Generic server identification with no version is not exploitable.
+          Vulnerability requires: (1) specific version number, (2) known CVE
+          for that version, (3) the vulnerable component is actually reachable.
+          "nginx" alone provides no attack path.
+
+3. PUBLIC DATA CONFUSION:
+   WRONG: "robots.txt lists /admin, sensitive path disclosed"
+   RIGHT: robots.txt is intentionally public and often lists paths for SEO.
+          The vulnerability is not the disclosure but whether /admin is
+          actually accessible without proper authorization.
+          Test: Can you access /admin without proper auth?
+
+4. ERROR MESSAGE WITHOUT EXPLOITATION:
+   WRONG: "Stack trace shows file path /app/src/handler.py"
+   RIGHT: Path disclosure is low severity without escalation.
+          You must show: (1) how this path enables further attack (LFI, RCE),
+          (2) actual exploitation of the disclosed information.
+          Just seeing a path is informational, not exploitable on its own.
+
+5. OWNER-VISIBLE DATA:
+   WRONG: "User can see their own email address, PII disclosure"
+   RIGHT: Users are supposed to see their own data.
+          Information disclosure requires: (1) data visible to WRONG user,
+          (2) cross-tenant leakage, (3) unauthenticated access to private data.
+          Self-visible data is expected behavior.
+
+6. DEBUG/DEV ENVIRONMENT CONFUSION:
+   WRONG: "Debug mode is enabled, critical information disclosure"
+   RIGHT: Debug mode on production IS serious, but verify:
+          - Is this actually production? (Check domain, certificates)
+          - Is the environment meant for testing?
+          Report only if: confirmed production AND sensitive data exposed.
+</llm_reasoning_errors>
+
+<expanded_false_positives>
+FALSE POSITIVE SCENARIOS - DO NOT REPORT:
+
+1. INTENTIONALLY PUBLIC INFORMATION:
+   - OpenAPI/Swagger for documented public APIs
+   - GraphQL introspection on public APIs (if intended)
+   - Health check endpoints returning "OK"
+   - Public marketing information in source
+   - robots.txt and sitemap.xml (their existence is normal)
+
+2. NON-ACTIONABLE VERSION STRINGS:
+   - Server: nginx (no version)
+   - X-Powered-By: Express (no version)
+   - Version strings with no known exploitable CVE
+   - Version strings where the vulnerable component isn't exposed
+
+3. OWNER/SELF-VISIBLE DATA:
+   - User seeing their own profile information
+   - Account holder viewing their own orders/history
+   - Admin seeing admin-appropriate information
+   - Tenant seeing their own tenant's data
+
+4. GENERIC ERROR MESSAGES:
+   - "An error occurred" without details
+   - HTTP 500 with generic body
+   - Error codes without stack traces
+   - Validation messages about expected input format
+
+5. DEVELOPMENT/TESTING ENVIRONMENTS:
+   - Debug enabled on localhost/staging
+   - Verbose logging in test environments
+   - Development-only endpoints not exposed to production
+   - Test data in non-production environments
+</expanded_false_positives>
+
 <impact>
 - Accelerated exploitation of RCE/LFI/SSRF via precise versions and paths
 - Credential/secret exposure leading to persistent external compromise

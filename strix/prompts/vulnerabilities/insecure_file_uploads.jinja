@@ -164,6 +164,88 @@
 - AV/CDR blocks the payload and quarantines; access before scan is impossible by design
 </false_positives>
 
+<llm_reasoning_errors>
+COMMON AI MISTAKES THAT CAUSE FALSE POSITIVES - AVOID THESE:
+
+1. UPLOAD ACCEPTANCE != VULNERABILITY:
+   WRONG: "Server accepts file upload, insecure file upload confirmed"
+   RIGHT: Accepting uploads is normal functionality. Vulnerability requires:
+          - Uploaded content can be EXECUTED (RCE), or
+          - Uploaded content can be RENDERED with scripts (XSS), or
+          - Uploaded content causes harm when processed (DoS, path traversal)
+          Just accepting a file is not a vulnerability.
+
+2. EXTENSION STORED != EXECUTION:
+   WRONG: "I uploaded shell.php and it was stored with .php extension"
+   RIGHT: Storage with dangerous extension is not enough. You must prove:
+          - File is served through a script engine (Apache+mod_php, etc.)
+          - You can access the file directly and it EXECUTES
+          Many apps store files but serve through application layer.
+
+3. SVG/HTML UPLOAD != STORED XSS:
+   WRONG: "Application accepts SVG uploads, stored XSS vulnerability"
+   RIGHT: SVG/HTML uploads are only XSS if:
+          - Content is served with Content-Type allowing script execution
+          - X-Content-Type-Options: nosniff is missing or Content-Disposition: inline
+          - Scripts in SVG actually execute in victim's browser
+          Check the actual response headers when downloading the file.
+
+4. POLYGLOT UPLOADED != EXPLOITED:
+   WRONG: "I uploaded a JPEG/PHP polyglot, proving bypass"
+   RIGHT: Polyglot uploads prove validation bypass, not exploitation.
+          You must still demonstrate: (1) file serves as PHP, not image,
+          (2) PHP engine processes it, (3) your code executes.
+          Many servers serve polyglots correctly as images.
+
+5. CONTENT-TYPE CONFUSION:
+   WRONG: "Server reflects my Content-Type header, arbitrary type upload"
+   RIGHT: Storing/reflecting Content-Type doesn't mean exploitation.
+          Check: What Content-Type is actually sent when SERVING the file?
+          Serving headers matter, not upload headers.
+
+6. CLOUD STORAGE ASSUMPTION:
+   WRONG: "Files go to S3, direct URL access means insecure"
+   RIGHT: Direct S3 access is common and secure when:
+          - Presigned URLs expire and enforce Content-Disposition
+          - Bucket is not public, files require authentication
+          - Files served with nosniff and attachment headers
+          Verify actual bucket policy and serving configuration.
+</llm_reasoning_errors>
+
+<expanded_false_positives>
+FALSE POSITIVE SCENARIOS - DO NOT REPORT:
+
+1. SAFE SERVING CONFIGURATION:
+   - Files always served with Content-Disposition: attachment
+   - X-Content-Type-Options: nosniff enforced
+   - Content-Type set by server, not from upload
+   - Files served through CDN with forced download
+
+2. NO EXECUTION CONTEXT:
+   - Upload directory outside web root
+   - No script handler configured for upload location
+   - Files renamed to random UUIDs without extensions
+   - Application serves files through a safe download endpoint
+
+3. EFFECTIVE CONTENT TRANSFORMATION:
+   - SVG converted to PNG/JPEG before storage
+   - Images resized/reprocessed (strips payloads)
+   - PDF rendered to images (no JS execution)
+   - Documents converted through sandboxed converters
+
+4. WORKING SECURITY CONTROLS:
+   - AV/CDR scans complete before file is accessible
+   - Dangerous extensions blocked (returned error)
+   - Magic byte validation rejects mismatched files
+   - Archive extraction validates all paths
+
+5. HARMLESS FILE STORAGE:
+   - Files stored but never served to users
+   - Files only accessible to uploading user (self-XSS not a vuln)
+   - Internal processing only, no direct file access
+   - Backup/archive storage without web serving
+</expanded_false_positives>
+
 <impact>
 - Remote code execution on application stack or media toolchain host
 - Persistent cross-site scripting and session/token exfiltration via served uploads

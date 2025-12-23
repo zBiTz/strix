@@ -156,6 +156,80 @@ Test with mixed Unicode normalization and IDNA conversion
 - User prompts that show the exact final destination before navigating and refuse unknown schemes
 </false_positives>
 
+<llm_reasoning_errors>
+COMMON AI MISTAKES THAT CAUSE FALSE POSITIVES - AVOID THESE:
+
+1. REDIRECT PARAMETER EXISTS != VULNERABLE:
+   WRONG: "URL has 'next' or 'redirect' parameter, open redirect confirmed"
+   RIGHT: Having redirect parameters is normal functionality.
+          You must PROVE: (1) external domain accepted, (2) browser navigates there.
+          Many apps validate these parameters against allowlists.
+          Test: Set redirect=https://evil.com - did the browser go there?
+
+2. RELATIVE PATH REDIRECT:
+   WRONG: "Redirect goes to /dashboard, open redirect because I controlled it"
+   RIGHT: Redirecting to relative paths on the SAME ORIGIN is not a vulnerability.
+          Open redirect requires navigation to a DIFFERENT, ATTACKER-CONTROLLED domain.
+          /dashboard, /home, /profile are all safe same-origin redirects.
+
+3. ALLOWLIST WORKING CORRECTLY:
+   WRONG: "Server rejected my evil.com redirect, proving it's checking redirects poorly"
+   RIGHT: Rejection means the allowlist is WORKING, not broken.
+          Open redirect requires the malicious destination to be ACCEPTED.
+          If evil.com is blocked, there is no vulnerability.
+
+4. LOGIN REDIRECT CONFUSION:
+   WRONG: "After login, user is redirected to original page, open redirect"
+   RIGHT: Post-login redirect to the originally requested page is expected behavior.
+          This is only vulnerable if the "original page" can be an external URL.
+          Test: Can you set the original page to https://evil.com?
+
+5. INTERNAL REDIRECT CHAINS:
+   WRONG: "Application redirects from /a to /b, redirect chain is exploitable"
+   RIGHT: Internal redirect chains between same-origin paths are normal.
+          Vulnerability requires an EXTERNAL domain in the chain.
+          If all hops are on the same domain, it's not open redirect.
+
+6. PHISHING ASSUMPTION WITHOUT PROOF:
+   WRONG: "If an attacker could redirect users, they could phish them"
+   RIGHT: You must demonstrate the redirect actually works to an external domain.
+          "If" scenarios without proof are not vulnerabilities.
+          Provide: actual URL that redirects to attacker-controlled domain.
+</llm_reasoning_errors>
+
+<expanded_false_positives>
+FALSE POSITIVE SCENARIOS - DO NOT REPORT:
+
+1. PROPER VALIDATION:
+   - Allowlist of permitted redirect destinations enforced
+   - Only relative paths accepted (no scheme://host)
+   - Strict regex matching approved domains only
+   - Server-side URL parsing and host comparison
+
+2. SAME-ORIGIN REDIRECTS:
+   - Redirect from /login to /dashboard
+   - Post-action navigation to related pages
+   - SPA route changes via client-side router
+   - Locale/language path switches
+
+3. OAUTH/OIDC WORKING CORRECTLY:
+   - Pre-registered redirect_uri enforced exactly
+   - Redirect rejected for unregistered URIs
+   - state parameter validated preventing interception
+   - PKCE preventing code interception
+
+4. USER-VISIBLE CONFIRMATION:
+   - "You are being redirected to X" interstitial page
+   - Explicit user consent before external navigation
+   - Warning for unknown/external destinations
+   - Copy-paste URL instead of automatic redirect
+
+5. CLIENT-SIDE ONLY BEHAVIOR:
+   - JavaScript redirect that validates destination client-side
+   - SPA preventing external navigation
+   - Browser extension blocking external redirects
+</expanded_false_positives>
+
 <impact>
 - Credential and token theft via phishing and OAuth/OIDC interception
 - Internal data exposure when server fetchers follow redirects (previewers/unfurlers)

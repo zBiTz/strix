@@ -129,10 +129,85 @@
 </validation>
 
 <false_positives>
-- “Unknown domain” pages that are not claimable due to enforced TXT/ownership checks.
-- Provider-branded default pages for valid, owned resources (not a takeover) versus “unclaimed resource” states
+- "Unknown domain" pages that are not claimable due to enforced TXT/ownership checks.
+- Provider-branded default pages for valid, owned resources (not a takeover) versus "unclaimed resource" states
 - Soft 404s from your own infrastructure or catch-all vhosts
 </false_positives>
+
+<llm_reasoning_errors>
+COMMON AI MISTAKES THAT CAUSE FALSE POSITIVES - AVOID THESE:
+
+1. CNAME TO PROVIDER != TAKEOVER:
+   WRONG: "Subdomain has CNAME to amazonaws.com, subdomain takeover possible"
+   RIGHT: CNAME to a provider is normal cloud infrastructure.
+          Takeover requires: (1) resource NOT claimed, (2) you CAN claim it.
+          Most AWS/Azure/GCP resources are properly configured and owned.
+          You must prove the resource is claimable, not just that CNAME exists.
+
+2. ERROR PAGE MISINTERPRETATION:
+   WRONG: "Subdomain returns 404, proving it's vulnerable"
+   RIGHT: 404 errors have many causes: misconfiguration, maintenance, intentional.
+          Subdomain takeover requires specific "unclaimed resource" signatures.
+          Generic 404s from working infrastructure are not takeovers.
+
+3. DNS EXISTS != EXPLOITABLE:
+   WRONG: "DNS record points to external service, takeover vulnerability"
+   RIGHT: DNS records pointing to services is how the internet works.
+          You must verify: (1) the target resource doesn't exist, AND
+          (2) you can actually claim/create that resource on the provider.
+          Many providers now require ownership verification.
+
+4. PROVIDER FINGERPRINT WITHOUT CLAIM TEST:
+   WRONG: "Response matches GitHub Pages 'no site here' fingerprint"
+   RIGHT: Matching a fingerprint is step 1 of verification, not final proof.
+          Modern GitHub Pages requires verification via DNS TXT record.
+          You must actually attempt to claim the resource to confirm vulnerability.
+
+5. INTERNAL/PRIVATE SUBDOMAIN:
+   WRONG: "Internal subdomain sub.corp.example.com has dangling CNAME"
+   RIGHT: If subdomain is not publicly accessible or resolvable externally,
+          the impact is limited. Focus on public-facing subdomains.
+          Internal-only misconfigurations may not be security issues.
+
+6. PROVIDER HARDENING NOT CONSIDERED:
+   WRONG: "This worked in 2019, so it still works"
+   RIGHT: Many providers (GitHub, AWS, Azure) have added domain verification.
+          Test with CURRENT provider behavior, not historical knowledge.
+          If provider now requires TXT verification, takeover may be blocked.
+</llm_reasoning_errors>
+
+<expanded_false_positives>
+FALSE POSITIVE SCENARIOS - DO NOT REPORT:
+
+1. PROPERLY OWNED RESOURCES:
+   - CNAME to active S3 bucket owned by the organization
+   - Azure App Service with verified custom domain
+   - CloudFront distribution properly configured for the domain
+   - GitHub Pages with verified DNS ownership
+
+2. PROVIDER VERIFICATION BLOCKS TAKEOVER:
+   - TXT record required before custom domain binding
+   - Domain verification email/DNS required
+   - Provider account linking required
+   - SSL certificate verification required
+
+3. WORKING BUT MISCONFIGURED SERVICES:
+   - 404 from working web server (not unclaimed resource)
+   - SSL errors from misconfigured but owned certificate
+   - Timeouts from overloaded but active service
+   - Maintenance pages from owned infrastructure
+
+4. NON-ACTIONABLE DNS:
+   - CNAME to internal/private service
+   - CNAME to service requiring paid account you can't create
+   - Delegated NS to nameservers you cannot register
+   - MX to mail service with domain verification
+
+5. LIMITED SCOPE ISSUES:
+   - Subdomain only accessible from internal network
+   - Legacy subdomain with no traffic/users
+   - Test/dev subdomains clearly marked as non-production
+</expanded_false_positives>
 
 <impact>
 - Content injection under trusted subdomain: phishing, malware delivery, brand damage
