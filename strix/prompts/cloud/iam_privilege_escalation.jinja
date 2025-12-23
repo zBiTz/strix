@@ -1,0 +1,228 @@
+<cloud_iam_privilege_escalation_guide>
+<title>CLOUD IAM PRIVILEGE ESCALATION</title>
+
+<critical>IAM privilege escalation transforms limited cloud access into full account compromise. A single misconfigured permission can create an escalation chain from read-only user to administrator. Focus on identifying permission combinations that allow assuming higher-privileged roles, modifying policies, or attaching elevated permissions to controlled resources.</critical>
+
+<scope>
+- AWS: iam:PassRole chains, sts:AssumeRole with weak trust policies, lambda:UpdateFunctionCode, ec2:RunInstances with instance profiles, iam:CreatePolicyVersion, iam:AttachUserPolicy/AttachRolePolicy
+- GCP: iam.serviceAccountTokenCreator, iam.serviceAccountUser, resourcemanager.projects.setIamPolicy, cloudfunctions.functions.update, compute.instances.setServiceAccount
+- Azure: User.ReadWrite.All, RoleManagement.ReadWrite.Directory, Microsoft.Authorization/roleAssignments/write, Microsoft.ManagedIdentity operations
+- Cross-cloud: Federated identity trust abuse, OIDC provider misconfigurations, cross-account role assumptions
+</scope>
+
+<methodology>
+1. Enumerate current identity and permissions using cloud CLI tools or APIs. Document the starting privilege level.
+2. Map all IAM policies, roles, and trust relationships. Identify overly permissive wildcards, missing conditions, and resource constraints.
+3. Identify roles with higher privileges that could potentially be assumed or whose permissions could be leveraged.
+4. Test for permission combinations that enable escalation (PassRole + service creation, policy modification rights, trust policy weaknesses).
+5. Validate each escalation step by demonstrating actual privilege gain, not just permission existence.
+6. Document the complete chain from initial access to elevated privileges with evidence at each step.
+</methodology>
+
+<discovery_techniques>
+<aws>
+- Enumerate permissions: `aws iam get-user`, `aws iam list-attached-user-policies`, `aws iam list-user-policies`
+- Check assumable roles: `aws iam list-roles` and inspect AssumeRolePolicyDocument for trust policy weaknesses
+- Find PassRole targets: `aws iam list-roles --query 'Roles[*].[RoleName,Arn]'` combined with service permissions
+- Check policy versions: `aws iam list-policy-versions` for rollback opportunities
+- Instance profile enumeration: `aws iam list-instance-profiles`, `aws ec2 describe-instances --query 'Reservations[*].Instances[*].IamInstanceProfile'`
+</aws>
+
+<gcp>
+- Enumerate permissions: `gcloud projects get-iam-policy PROJECT_ID`, `gcloud iam roles describe ROLE`
+- Find service accounts: `gcloud iam service-accounts list`
+- Check SA permissions: `gcloud projects get-iam-policy PROJECT_ID --flatten="bindings[].members" --filter="bindings.members:serviceAccount"`
+- Test impersonation: `gcloud auth print-access-token --impersonate-service-account=SA_EMAIL`
+- Cloud Functions: `gcloud functions list`, `gcloud functions describe FUNC --format="value(serviceAccountEmail)"`
+</gcp>
+
+<azure>
+- Enumerate roles: `az role assignment list --assignee PRINCIPAL_ID`
+- List custom roles: `az role definition list --custom-role-only`
+- Check managed identities: `az identity list`, `az vm identity show`
+- Service principals: `az ad sp list --filter "displayName eq 'NAME'"`
+- App registrations: `az ad app list --query "[].{appId:appId,displayName:displayName}"`
+</azure>
+</discovery_techniques>
+
+<escalation_paths>
+<aws_paths>
+1. PassRole + Lambda: User with iam:PassRole and lambda:CreateFunction/UpdateFunctionCode can attach high-privilege role to Lambda, execute code as that role
+2. PassRole + EC2: iam:PassRole + ec2:RunInstances allows launching instance with privileged instance profile, access via IMDS
+3. PassRole + Glue: iam:PassRole + glue:CreateDevEndpoint creates notebook with attached role
+4. CreatePolicyVersion: iam:CreatePolicyVersion on customer-managed policy allows adding admin permissions, then setting as default
+5. AttachUserPolicy/AttachRolePolicy: Direct attachment of AdministratorAccess or custom powerful policies
+6. UpdateAssumeRolePolicy: Modify trust policy to allow assumption from attacker-controlled principal
+7. CreateAccessKey: iam:CreateAccessKey on other users enables credential creation for lateral movement
+8. PutUserPolicy/PutRolePolicy: Inline policy injection with elevated permissions
+9. AddUserToGroup: Add user to admin group if group membership not restricted
+10. SetDefaultPolicyVersion: Rollback to previous policy version with more permissions
+</aws_paths>
+
+<gcp_paths>
+1. serviceAccountTokenCreator: Generate access tokens for any service account in project
+2. serviceAccountUser: Impersonate service accounts when launching compute resources
+3. setIamPolicy: Modify project IAM to grant self owner role
+4. cloudfunctions.functions.update: Attach high-privilege SA to cloud function, execute as SA
+5. compute.instances.setServiceAccount: Change SA on running instance to escalate
+6. deploymentmanager.deployments.create: Deploy resources with elevated SA
+7. iam.serviceAccounts.actAs: Required for most SA-based escalations, often overlooked in audits
+8. storage.buckets.setIamPolicy: Grant self access to sensitive buckets
+9. container.clusters.getCredentials: Access GKE cluster credentials
+10. orgpolicy.policy.set: Disable organization-level security controls
+</gcp_paths>
+
+<azure_paths>
+1. User.ReadWrite.All: Modify any user including password reset capabilities
+2. RoleManagement.ReadWrite.Directory: Assign Global Administrator role to any principal
+3. Application.ReadWrite.All: Add credentials to service principals
+4. AppRoleAssignment.ReadWrite.All: Grant app roles enabling access to resources
+5. roleAssignments/write: Assign Owner or Contributor at subscription/resource group level
+6. managedIdentities/userAssignedIdentities/assign: Attach privileged managed identity to controlled resource
+7. Microsoft.Compute/virtualMachines/write: Modify VM to attach privileged identity
+8. Microsoft.Web/sites/config/write: Modify function app to use privileged identity
+9. Microsoft.KeyVault/vaults/accessPolicies/write: Grant self secrets access
+10. Microsoft.Authorization/policyAssignments/write: Disable security policies
+</azure_paths>
+</escalation_paths>
+
+<bypass_techniques>
+- Permission boundaries: Check if boundaries actually restrict the problematic permissions
+- Service Control Policies (AWS): Some accounts exempt from SCPs (management account)
+- Conditional policies: Test if conditions (IP, MFA, time) can be satisfied or bypassed
+- Resource-based policies: Some resources have their own policies that override IAM denies
+- Trust policy wildcards: `"Principal": "*"` or `"AWS": "*"` allows any account to assume
+- Missing ExternalId: AssumeRole without ExternalId enables cross-account confused deputy
+- Tag-based conditions: Create resources with required tags to satisfy conditions
+</bypass_techniques>
+
+<validation>
+1. Demonstrate the complete escalation chain with command output at each step.
+2. Show before/after permission comparison proving actual privilege gain.
+3. Perform an action that was previously unauthorized to confirm escalation success.
+4. Document the specific permissions that enabled each step of the escalation.
+5. Verify the escalation is reproducible and not dependent on temporary state.
+6. Confirm the target role/policy actually grants meaningful elevated access (not just different access).
+</validation>
+
+<false_positives>
+- Permission exists but no viable escalation target (PassRole with no high-privilege roles)
+- Policy allows action but resource constraints prevent exploitation
+- Trust policy allows assumption but MFA/ExternalId requirements block it
+- Service-linked roles that cannot be assumed by users
+- Permissions on resources you already control
+- Theoretical escalation paths blocked by permission boundaries or SCPs
+</false_positives>
+
+<llm_reasoning_errors>
+COMMON AI MISTAKES THAT CAUSE FALSE POSITIVES - AVOID THESE:
+
+1. PERMISSION EXISTENCE VS EXPLOITATION:
+   WRONG: "User has iam:PassRole permission, privilege escalation confirmed"
+   RIGHT: iam:PassRole alone is not exploitable. You need BOTH:
+          - iam:PassRole permission AND
+          - A service permission (lambda:CreateFunction, ec2:RunInstances, etc.) AND
+          - A target role that is PassRole-able AND actually has higher privileges
+          Each component must be verified independently.
+
+2. ASSUMING ROLES ARE HIGH-PRIVILEGE:
+   WRONG: "User can assume role X, this enables privilege escalation"
+   RIGHT: Verify what permissions role X actually has. Many roles are:
+          - Service-linked roles with narrow scope
+          - Read-only roles
+          - Roles with permission boundaries
+          The target role must actually provide elevated access beyond current permissions.
+
+3. TRUST POLICY MISINTERPRETATION:
+   WRONG: "Trust policy allows sts:AssumeRole, so any user can assume this role"
+   RIGHT: Trust policies specify WHO can assume, not just that assumption is allowed.
+          - Check Principal field for specific accounts/users/roles
+          - Check Condition field for MFA, ExternalId, source IP requirements
+          - A trust policy allowing "arn:aws:iam::123456789012:root" means that ACCOUNT's users, not everyone.
+
+4. IGNORING CONDITIONS AND BOUNDARIES:
+   WRONG: "Policy grants iam:CreatePolicyVersion, can escalate"
+   RIGHT: Check for:
+          - Permission boundaries that restrict the effective permissions
+          - Conditions (aws:RequestTag, aws:ResourceTag, aws:PrincipalTag)
+          - Resource constraints (specific policy ARNs only)
+          - SCPs at organization level blocking the action
+
+5. SERVICE-LINKED ROLE CONFUSION:
+   WRONG: "Found role AWSServiceRoleForElasticLoadBalancing, can assume for escalation"
+   RIGHT: Service-linked roles (SLR) CANNOT be assumed by users. They are:
+          - Exclusively for AWS service use
+          - Created/managed by AWS services
+          - Have trust policies only for specific AWS services
+          Do not report SLR assumption as escalation paths.
+
+6. CONFUSING DIFFERENT ACCESS WITH ELEVATED ACCESS:
+   WRONG: "User can assume role with S3 access, privilege escalation achieved"
+   RIGHT: If the user already has equivalent or greater S3 access, this is not escalation.
+          Privilege escalation requires gaining capabilities BEYOND current permissions.
+          Compare before/after permission sets to confirm actual elevation.
+</llm_reasoning_errors>
+
+<expanded_false_positives>
+FALSE POSITIVE SCENARIOS - DO NOT REPORT:
+
+1. PASSROLE WITHOUT TARGETS:
+   - User has iam:PassRole/* but no service permissions to use it
+   - PassRole restricted to specific role ARNs that don't exist or have low privileges
+   - PassRole exists but all assumable roles have equivalent or lesser permissions
+
+2. BLOCKED ESCALATION PATHS:
+   - Permission boundaries prevent the escalating action
+   - SCP at org level denies the required permissions
+   - Resource policies block access despite IAM allow
+   - Conditional requirements (MFA, source IP) cannot be satisfied
+
+3. THEORETICAL BUT IMPRACTICAL:
+   - Can create policy versions but all managed policies are AWS-managed (immutable)
+   - Can modify trust policies but no roles worth assuming exist
+   - Can create users but organization has strict user creation controls
+   - Escalation requires resource that doesn't exist in the account
+
+4. ALREADY-AUTHORIZED ACCESS:
+   - User assumes role with permissions they already have
+   - Cross-account assumption to own account (no actual cross-boundary access)
+   - Modifying own inline policy (if that's their designated permissions)
+
+5. MISCONFIGURED BUT NOT EXPLOITABLE:
+   - Wildcard permissions on non-existent resources
+   - PassRole to role that cannot be attached to any service
+   - Trust policy allows assumption but role has no permissions
+   - Credentials exist but are disabled or expired
+
+6. DESIGN PATTERNS NOT VULNERABILITIES:
+   - CI/CD roles with deployment permissions (intended for automation)
+   - Admin roles intended for administrators
+   - Break-glass roles with proper approval workflows
+   - Federated roles with appropriate identity provider restrictions
+</expanded_false_positives>
+
+<impact>
+- Full cloud account compromise from limited initial access
+- Persistent backdoor access via modified trust policies or created credentials
+- Data exfiltration from storage, databases, and secrets managers
+- Resource manipulation (compute, networking, DNS) for further attacks
+- Billing fraud via resource creation
+- Supply chain attacks via CI/CD pipeline compromise
+- Lateral movement to connected accounts and services
+</impact>
+
+<pro_tips>
+1. Always map the complete IAM graph before testing - permissions are interconnected.
+2. PassRole is the most common AWS escalation primitive; always check what can be passed to what.
+3. GCP serviceAccountUser alone is rarely useful; look for actAs permissions on compute resources.
+4. Azure escalation often requires chaining multiple Graph API permissions.
+5. Check for permission boundary gaps - they only restrict, never grant.
+6. Trust policy analysis is crucial - look for wildcards, missing ExternalId, and overly broad conditions.
+7. Resource-based policies can override IAM denies in some cases (S3, KMS, Lambda).
+8. Instance metadata credentials refresh; document the credential validity window.
+9. Some services have their own IAM-like systems (Cognito, IoT, Greengrass) with separate escalation paths.
+10. Organization SCPs can block escalation even with permissive IAM; verify SCP inheritance.
+</pro_tips>
+
+<remember>Privilege escalation requires demonstrating a complete chain from current access to elevated access with evidence at each step. Permission existence alone is not a vulnerability - you must prove the escalation path is viable and results in meaningful privilege gain.</remember>
+</cloud_iam_privilege_escalation_guide>

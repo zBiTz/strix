@@ -1,0 +1,292 @@
+<oauth_oidc_misconfiguration_guide>
+<title>OAUTH AND OIDC MISCONFIGURATION</title>
+
+<critical>OAuth and OpenID Connect misconfigurations enable account takeover, unauthorized API access, and identity impersonation. Flaws in redirect URI validation, state handling, token validation, and scope enforcement allow attackers to steal authorization codes, access tokens, and hijack user sessions. These vulnerabilities bypass application-level security entirely.</critical>
+
+<scope>
+- Redirect URI vulnerabilities: Open redirects, path traversal, parameter pollution
+- State parameter flaws: Missing, predictable, or non-validated state
+- PKCE bypass: Missing or optional PKCE for public clients
+- Token leakage: Tokens in referrer, URL fragments, logs
+- Scope issues: Over-privileged tokens, scope upgrade attacks
+- Token validation: Missing signature verification, audience checks
+- IdP mix-up: Confused provider attacks
+- JWT issues: Algorithm confusion, weak signing, missing claims validation
+</scope>
+
+<methodology>
+1. Map the OAuth/OIDC flow: Identify endpoints, parameters, and token handling.
+2. Test redirect_uri validation: Try subdomain, path, parameter manipulation.
+3. Check state parameter: Missing, predictable, or reused state values.
+4. Analyze token handling: Where tokens appear, how they're validated.
+5. Test scope boundaries: Request elevated scopes, test enforcement.
+6. Verify token validation: Signature, audience, issuer checks.
+7. Demonstrate account takeover or unauthorized access.
+</methodology>
+
+<discovery_techniques>
+<identify_oauth_flow>
+- Authorization endpoint: `/authorize`, `/oauth/authorize`, `/.well-known/openid-configuration`
+- Token endpoint: `/token`, `/oauth/token`
+- Look for: client_id, redirect_uri, response_type, scope, state, nonce, code_challenge
+- OIDC discovery: `/.well-known/openid-configuration`
+- Provider identification: Google, Facebook, Microsoft, Okta, Auth0, custom
+</identify_oauth_flow>
+
+<redirect_uri_testing>
+Manipulation techniques:
+- Subdomain: `redirect_uri=https://evil.target.com/callback`
+- Path traversal: `redirect_uri=https://target.com/callback/../evil`
+- Parameter addition: `redirect_uri=https://target.com/callback?evil=1`
+- Fragment: `redirect_uri=https://target.com/callback#evil`
+- Open redirect chain: `redirect_uri=https://target.com/redirect?url=https://evil.com`
+- Encoded characters: `redirect_uri=https://target.com%2F@evil.com`
+- Localhost bypass: `redirect_uri=http://localhost.evil.com`
+- Null origin: `redirect_uri=https://target.com\@evil.com`
+</redirect_uri_testing>
+
+<state_parameter_testing>
+- Remove state parameter entirely
+- Use predictable/static state value
+- Reuse state from different session
+- Empty state value
+- State not validated on callback
+</state_parameter_testing>
+
+<token_testing>
+- Check where access_token appears: URL, headers, cookies, localStorage
+- Look for token in Referer header on navigation
+- Check if tokens appear in server logs
+- Test token without signature (alg:none for JWT)
+- Modify token claims without re-signing
+- Test audience validation with token from different client
+</token_testing>
+</discovery_techniques>
+
+<vulnerability_types>
+<redirect_uri_bypass>
+If redirect_uri validation is flawed:
+1. Register attacker domain matching pattern: `evil-target.com`
+2. Craft authorization URL with malicious redirect
+3. Victim authorizes, code/token sent to attacker
+4. Attacker exchanges code for access token
+
+Example patterns that bypass validation:
+- Exact match but allows subdomains: `https://*.target.com`
+- Path match but allows traversal: `https://target.com/callback/../`
+- Query string allowed: `https://target.com/callback?x=https://evil.com`
+</redirect_uri_bypass>
+
+<csrf_via_missing_state>
+If state parameter is missing or not validated:
+1. Attacker initiates OAuth flow with their account
+2. Stops at authorization URL with code
+3. Sends URL to victim (login CSRF)
+4. Victim's session linked to attacker's account
+</csrf_via_missing_state>
+
+<code_interception>
+If authorization code is exposed:
+1. Code appears in URL (response_mode=query or default)
+2. Code sent to malicious redirect_uri or leaked via Referer
+3. Attacker intercepts code, exchanges for token
+4. Access victim's account
+
+Prevention: PKCE (code_challenge/code_verifier)
+</code_interception>
+
+<token_leakage>
+Common leakage vectors:
+- URL fragment with response_type=token (implicit flow)
+- Referer header when navigating away
+- Browser history for GET requests with tokens
+- Server logs capturing query strings
+- Third-party scripts accessing URL
+</token_leakage>
+
+<scope_escalation>
+If scopes are not properly validated:
+1. Request minimal scope in authorization
+2. Modify scope in token request to include admin/elevated
+3. Server grants elevated token
+4. Access resources beyond authorized scope
+</scope_escalation>
+
+<jwt_vulnerabilities>
+- Algorithm confusion: Change RS256 to HS256, sign with public key
+- None algorithm: Remove signature, set alg=none
+- Key confusion: Use different key than expected
+- Missing claims: No exp, aud, iss validation
+- Token replay: No jti or nonce validation
+</jwt_vulnerabilities>
+
+<idp_mixup>
+When application supports multiple identity providers:
+1. Start flow with legitimate IdP
+2. Switch callback to respond as different IdP
+3. Application confuses identity, grants wrong access
+4. Can link accounts incorrectly or bypass restrictions
+</idp_mixup>
+</vulnerability_types>
+
+<exploitation>
+<account_takeover_flow>
+Via redirect_uri bypass:
+1. Find bypass in redirect_uri validation
+2. Create malicious authorization URL:
+   `https://target.com/oauth/authorize?client_id=X&redirect_uri=https://evil.com&response_type=code&scope=openid`
+3. Send to victim (phishing, XSS, etc.)
+4. Victim authenticates with IdP
+5. Code/token sent to attacker's server
+6. Exchange code for access token
+7. Access victim's account/data
+</account_takeover_flow>
+
+<login_csrf>
+Via missing state:
+1. Initiate OAuth login with attacker's account
+2. Capture authorization URL with code
+3. Send URL to victim
+4. Victim's browser completes flow
+5. Victim now logged in as attacker (or linked to attacker)
+6. Attacker accesses victim's future data via shared account
+</login_csrf>
+
+<api_access>
+Via scope escalation:
+1. Obtain token with basic scope
+2. Use token against APIs expecting elevated scope
+3. If server doesn't validate scope, access granted
+4. Extract sensitive data or perform privileged actions
+</api_access>
+</exploitation>
+
+<validation>
+1. Demonstrate redirect_uri bypass with actual code/token capture.
+2. Show account takeover or unauthorized data access.
+3. Verify the attack works end-to-end, not just parameter manipulation.
+4. Document the specific validation flaw (regex, allowlist bypass, etc.).
+5. Test with actual victim scenario (different browser, session).
+6. Confirm tokens received are valid and usable.
+</validation>
+
+<false_positives>
+- Redirect URI to same domain/subdomain (may be intended)
+- State parameter present but not verified during testing
+- Token appears in URL but immediately cleared
+- Scope requested but properly denied by server
+- Test accounts or sandbox environments with relaxed validation
+- Open redirect that doesn't leak OAuth tokens
+</false_positives>
+
+<llm_reasoning_errors>
+COMMON AI MISTAKES THAT CAUSE FALSE POSITIVES - AVOID THESE:
+
+1. REDIRECT URI ON SAME DOMAIN:
+   WRONG: "redirect_uri accepts path variations like /callback2, vulnerability"
+   RIGHT: Multiple callback paths on SAME domain is often intended:
+          - Different flows (login, link, signup) use different paths
+          - Subdirectories on trusted domain are typically safe
+          - Attack requires redirect to ATTACKER-CONTROLLED domain
+          Focus on off-domain redirects, not same-domain paths.
+
+2. STATE PARAMETER PRESENT:
+   WRONG: "State parameter is short/numeric, weak state vulnerability"
+   RIGHT: State parameter quality matters less than validation:
+          - Short state is fine if cryptographically random
+          - Numeric is fine if unique and validated
+          - Issue is MISSING state or NO VALIDATION on callback
+          Test if state is validated, not just its format.
+
+3. IMPLICIT FLOW WARNING:
+   WRONG: "Application uses implicit flow (response_type=token), insecure"
+   RIGHT: Implicit flow is deprecated but not automatically vulnerable:
+          - Mobile apps legitimately used implicit flow
+          - Vulnerability requires token LEAKAGE (referer, logs)
+          - Modern apps should use PKCE, but implicit alone isn't exploit
+          Report concrete leakage, not just flow type.
+
+4. SCOPE IN URL:
+   WRONG: "Elevated scope can be requested, scope escalation possible"
+   RIGHT: Requesting scope is expected behavior:
+          - Users may decline elevated scopes
+          - IdP may limit scopes to pre-registered
+          - Application may enforce scope server-side
+          Test if elevated scope is GRANTED and USABLE.
+
+5. JWT FORMAT ISSUES:
+   WRONG: "JWT uses HS256, should use RS256, insecure"
+   RIGHT: Algorithm choice depends on context:
+          - HS256 is secure when secret is properly protected
+          - RS256 is preferred for distributed verification
+          - Issue is algorithm CONFUSION attack, not just algorithm choice
+          Test actual attacks: none algorithm, key confusion.
+
+6. SANDBOX OR TEST ENVIRONMENT:
+   WRONG: "OAuth misconfiguration found in staging environment"
+   RIGHT: Many issues are intentional in non-production:
+          - Relaxed redirect_uri for development
+          - Test client IDs with permissive settings
+          - Sandbox IdPs with different rules
+          Verify findings in PRODUCTION environment.
+</llm_reasoning_errors>
+
+<expanded_false_positives>
+FALSE POSITIVE SCENARIOS - DO NOT REPORT:
+
+1. SAME-DOMAIN REDIRECTS:
+   - Multiple callback paths on same domain
+   - Subdomains under same organization's control
+   - Path variations within trusted application
+
+2. PROPER STATE HANDLING:
+   - State appears short but is validated
+   - State is session-bound and checked
+   - CSRF protection via other means (SameSite cookies)
+
+3. CONTROLLED TOKEN EXPOSURE:
+   - Token in fragment cleared by JavaScript immediately
+   - Tokens in secure, HttpOnly cookies
+   - Tokens properly scoped to API use
+
+4. SCOPE ENFORCEMENT:
+   - Elevated scope requested but denied
+   - Scope validated server-side despite permissive request
+   - Pre-registered scopes enforced by IdP
+
+5. ENVIRONMENT DIFFERENCES:
+   - Development/staging with relaxed settings
+   - Sandbox IdP configurations
+   - Test client IDs
+
+6. ARCHITECTURAL DECISIONS:
+   - Backend-for-frontend (BFF) handling tokens
+   - Server-side flow where tokens never reach browser
+   - Proper PKCE implementation
+</expanded_false_positives>
+
+<impact>
+- Full account takeover via code/token theft
+- Unauthorized API access with stolen tokens
+- Identity impersonation across services
+- Data breach via elevated scope access
+- Account linking attacks connecting attacker to victim
+- Session hijacking via token replay
+- Privilege escalation via scope manipulation
+</impact>
+
+<pro_tips>
+1. Always test redirect_uri bypass to attacker-controlled domains, not just path changes.
+2. State parameter must be validated on callback - test by modifying state after authorization.
+3. PKCE is critical for mobile/SPA - test if code_verifier is actually required.
+4. Check /.well-known/openid-configuration for supported flows and endpoints.
+5. Token leakage via Referer is common - navigate from page containing token.
+6. Multiple IdP support increases attack surface - test IdP confusion attacks.
+7. JWT alg:none attack requires server to accept unsigned tokens - rare but critical.
+8. Implicit flow tokens in URL history are a finding even without active interception.
+9. Test token audience validation by using token from different client_id.
+10. OIDC nonce parameter prevents token replay - test if required and validated.
+</pro_tips>
+
+<remember>OAuth/OIDC vulnerabilities require demonstrating actual token theft, account takeover, or unauthorized access. Parameter manipulation alone is not sufficient - the attack must result in the attacker gaining access they should not have. Focus on redirect_uri bypasses to attacker domains and missing/weak state validation.</remember>
+</oauth_oidc_misconfiguration_guide>

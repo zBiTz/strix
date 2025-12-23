@@ -1,0 +1,273 @@
+<k8s_workload_escape_guide>
+<title>KUBERNETES WORKLOAD ESCAPE AND NODE COMPROMISE</title>
+
+<critical>Misconfigured Kubernetes workloads can break container isolation and compromise the underlying node. Privileged containers, dangerous host mounts, and elevated capabilities allow escaping container boundaries to access the node filesystem, other containers, and cluster control plane. A single compromised node often leads to full cluster takeover.</critical>
+
+<scope>
+- Privileged containers: privileged: true flag disabling all container isolation
+- Host namespace sharing: hostPID, hostNetwork, hostIPC enabling process/network/IPC access
+- Dangerous host mounts: hostPath volumes mounting sensitive node directories
+- Elevated capabilities: CAP_SYS_ADMIN, CAP_NET_ADMIN, and other dangerous capabilities
+- runAsRoot: Containers running as root inside the container
+- Seccomp/AppArmor/SELinux disabled: Security profiles not enforced
+- Docker socket mounts: /var/run/docker.sock enabling container creation on host
+</scope>
+
+<methodology>
+1. Enumerate running pods and their security contexts.
+2. Identify pods with dangerous configurations (privileged, hostPath, capabilities).
+3. Assess exploitability based on current access level (pod exec, deployment creation).
+4. Demonstrate container escape or node access via the misconfiguration.
+5. Document the path from container to node-level access.
+6. Assess impact on cluster (other nodes, secrets, workloads).
+</methodology>
+
+<discovery_techniques>
+<find_dangerous_pods>
+- Privileged pods: `kubectl get pods -o json --all-namespaces | jq '.items[] | select(.spec.containers[].securityContext.privileged==true) | {name: .metadata.name, namespace: .metadata.namespace}'`
+- HostPID: `kubectl get pods -o json --all-namespaces | jq '.items[] | select(.spec.hostPID==true) | {name: .metadata.name, namespace: .metadata.namespace}'`
+- HostNetwork: `kubectl get pods -o json --all-namespaces | jq '.items[] | select(.spec.hostNetwork==true) | {name: .metadata.name, namespace: .metadata.namespace}'`
+- HostPath mounts: `kubectl get pods -o json --all-namespaces | jq '.items[] | select(.spec.volumes[].hostPath != null) | {name: .metadata.name, namespace: .metadata.namespace, paths: [.spec.volumes[] | select(.hostPath != null) | .hostPath.path]}'`
+</find_dangerous_pods>
+
+<check_security_context>
+- Pod security context: `kubectl get pod POD_NAME -o jsonpath='{.spec.securityContext}'`
+- Container security context: `kubectl get pod POD_NAME -o jsonpath='{.spec.containers[*].securityContext}'`
+- Capabilities: `kubectl get pod POD_NAME -o jsonpath='{.spec.containers[*].securityContext.capabilities}'`
+- Run as user: `kubectl get pod POD_NAME -o jsonpath='{.spec.containers[*].securityContext.runAsUser}'`
+</check_security_context>
+
+<dangerous_hostpath_locations>
+Critical mounts to look for:
+- /: Root filesystem access
+- /etc: System configuration, cron, passwd, shadow
+- /var/run/docker.sock: Docker daemon control
+- /var/lib/kubelet: Kubelet credentials and configuration
+- /var/lib/docker: Container storage, can access other containers
+- /root: Root user home directory, SSH keys
+- /home: User home directories
+- /proc: Process information (if combined with hostPID)
+- /sys: System devices and kernel parameters
+</dangerous_hostpath_locations>
+
+<check_pod_security>
+- Pod Security Standards: `kubectl get ns NAMESPACE -o jsonpath='{.metadata.labels}'` (check pod-security.kubernetes.io labels)
+- Pod Security Policies (deprecated): `kubectl get psp`
+- OPA/Gatekeeper constraints: `kubectl get constraints`
+- Kyverno policies: `kubectl get clusterpolicy`
+</check_pod_security>
+</discovery_techniques>
+
+<escape_techniques>
+<privileged_container_escape>
+If inside a privileged container:
+1. Mount host filesystem:
+   ```
+   mkdir /mnt/host
+   mount /dev/sda1 /mnt/host
+   chroot /mnt/host
+   ```
+2. Access host processes via /proc
+3. Load kernel modules
+4. Modify cgroups to escape
+5. Use nsenter to enter host namespaces
+</privileged_container_escape>
+
+<hostpid_escape>
+If hostPID is enabled:
+1. View all host processes: `ps aux`
+2. Read process environments: `cat /proc/1/environ`
+3. Attach to host processes with ptrace
+4. Access host filesystem via /proc/1/root
+5. Inject into host processes
+</hostpid_escape>
+
+<hostnetwork_exploitation>
+If hostNetwork is enabled:
+1. Bind to host network interfaces
+2. Sniff network traffic on host
+3. Access services bound to localhost/127.0.0.1
+4. Attack other nodes directly
+5. Access cloud metadata without IMDS restrictions
+</hostnetwork_exploitation>
+
+<docker_socket_escape>
+If /var/run/docker.sock is mounted:
+1. List containers: `docker ps`
+2. Create privileged container on host:
+   ```
+   docker run -it --privileged --pid=host --net=host -v /:/mnt/host alpine chroot /mnt/host
+   ```
+3. Access any container: `docker exec -it CONTAINER sh`
+4. Read container images for secrets
+5. Modify running containers
+</docker_socket_escape>
+
+<cap_sys_admin_escape>
+If CAP_SYS_ADMIN is granted:
+1. Mount filesystems
+2. Create device nodes
+3. Modify cgroups
+4. Use cgroup release_agent for escape:
+   ```
+   mkdir /tmp/cgrp && mount -t cgroup -o rdma cgroup /tmp/cgrp
+   mkdir /tmp/cgrp/child && echo 1 > /tmp/cgrp/child/notify_on_release
+   echo "/path/to/payload" > /tmp/cgrp/release_agent
+   sh -c "echo \$\$ > /tmp/cgrp/child/cgroup.procs"
+   ```
+</cap_sys_admin_escape>
+
+<hostpath_exploitation>
+If sensitive hostPath is mounted:
+1. /etc mounted: Modify /etc/crontab, /etc/passwd, add SSH keys
+2. /var/lib/kubelet mounted: Read kubeconfig, CA certs, tokens
+3. / mounted: Full host filesystem access
+4. /root mounted: Add SSH keys to /root/.ssh/authorized_keys
+</hostpath_exploitation>
+</escape_techniques>
+
+<from_pod_exec_to_escape>
+If you can exec into a dangerous pod:
+1. Check security context: `cat /proc/1/status | grep -i cap`
+2. Check mounted paths: `mount | grep hostPath` or `df -h`
+3. Check for docker socket: `ls -la /var/run/docker.sock`
+4. Check namespace sharing: `ls /proc/1/ns/`
+5. Attempt escape using available primitives
+</from_pod_exec_to_escape>
+
+<validation>
+1. Demonstrate actual container escape or node access, not just misconfiguration existence.
+2. Show command execution on the node or access to node-level resources.
+3. Document the specific misconfiguration enabling escape.
+4. Verify the escape path is reproducible.
+5. Assess impact: Can you access other containers? Read kubelet credentials? Pivot to cluster-admin?
+6. Note if Pod Security Standards or admission controllers would prevent new deployments.
+</validation>
+
+<false_positives>
+- Dangerous configurations on pods you cannot exec into
+- Misconfigured pods with no running containers
+- Configurations blocked by PodSecurity admission for new deployments
+- Node-level access that requires additional authentication
+- Privileged pods for legitimate purposes (CNI, monitoring agents)
+- Development clusters with different security requirements
+</false_positives>
+
+<llm_reasoning_errors>
+COMMON AI MISTAKES THAT CAUSE FALSE POSITIVES - AVOID THESE:
+
+1. CONFIGURATION VS EXPLOITATION:
+   WRONG: "Pod has privileged: true, container escape vulnerability"
+   RIGHT: Privileged configuration alone is not sufficient. You need:
+          - Ability to execute commands in that pod (kubectl exec or RCE)
+          - OR ability to create new pods with similar configuration
+          Configuration without access path is not exploitable.
+
+2. SYSTEM POD MISIDENTIFICATION:
+   WRONG: "Found privileged pod in kube-system, critical vulnerability"
+   RIGHT: Many system components REQUIRE elevated privileges:
+          - kube-proxy: hostNetwork for networking
+          - CNI plugins (calico, cilium): privileged for network setup
+          - Storage drivers: hostPath for persistence
+          - Monitoring agents: various host access for metrics
+          Legitimate system pods are not vulnerabilities.
+
+3. HOSTPATH WITHOUT SENSITIVE DATA:
+   WRONG: "Pod mounts /data hostPath, node compromise possible"
+   RIGHT: Not all hostPath mounts are dangerous:
+          - Application data directories (intended mount)
+          - Empty directories for temporary data
+          - Paths that don't contain credentials or escalation primitives
+          Only mounts of SENSITIVE paths enable escalation.
+
+4. POD SECURITY BLOCKING NEW DEPLOYMENTS:
+   WRONG: "Found privileged pod, anyone can deploy privileged pods"
+   RIGHT: Existing pods may predate Pod Security Standards:
+          - Namespace may now have "restricted" enforcement
+          - Admission controllers may block new privileged pods
+          - Historical configuration doesn't reflect current policy
+          Test if you can CREATE new privileged pods.
+
+5. CAPABILITY MISUNDERSTANDING:
+   WRONG: "Pod has CAP_NET_ADMIN, full escape possible"
+   RIGHT: Capabilities have specific, limited powers:
+          - CAP_NET_ADMIN: Network configuration, not escape
+          - CAP_SYS_PTRACE: Process tracing, not direct escape
+          - Only CAP_SYS_ADMIN and few others enable full escape
+          Understand what each capability actually permits.
+
+6. CONTAINERD/CRI-O VS DOCKER:
+   WRONG: "Mount /var/run/docker.sock for container escape"
+   RIGHT: Many clusters use containerd or CRI-O, not Docker:
+          - Docker socket doesn't exist on containerd nodes
+          - Different socket paths: /run/containerd/containerd.sock
+          - Different APIs require different exploitation
+          Check what container runtime the cluster uses.
+</llm_reasoning_errors>
+
+<expanded_false_positives>
+FALSE POSITIVE SCENARIOS - DO NOT REPORT:
+
+1. LEGITIMATE SYSTEM COMPONENTS:
+   - CNI plugins requiring privileged mode (Calico, Cilium, Weave)
+   - kube-proxy with hostNetwork
+   - Node problem detector with hostPID
+   - Log collectors mounting /var/log
+   - Monitoring agents with host access
+
+2. NO ACCESS PATH:
+   - Privileged pods you cannot exec into
+   - Dangerous configurations on pods in namespaces you cannot access
+   - Pods with no running containers
+   - Completed Job pods
+
+3. ADMISSION CONTROL ENFORCEMENT:
+   - Pods created before Pod Security Standards enforcement
+   - Cannot create new pods with dangerous configuration
+   - OPA/Gatekeeper blocks privileged deployments
+   - Kyverno policies prevent dangerous configurations
+
+4. NON-SENSITIVE HOSTPATH:
+   - Application data directories (intended use)
+   - Empty directories for temporary storage
+   - Log directories without credentials
+   - Cache directories
+
+5. LIMITED CAPABILITIES:
+   - Network-only capabilities (CAP_NET_ADMIN, CAP_NET_RAW)
+   - Audit capabilities (CAP_AUDIT_*)
+   - Setuid/setgid only (CAP_SETUID, CAP_SETGID)
+   - Capabilities insufficient for escape
+
+6. DEVELOPMENT/TEST CONTEXT:
+   - Development clusters with relaxed security
+   - CI/CD runner pods with necessary privileges
+   - Debug/troubleshooting pods (temporary)
+</expanded_false_positives>
+
+<impact>
+- Full node compromise and root access
+- Access to all containers on the node
+- Kubelet credential theft for cluster API access
+- Cloud credential theft from node metadata or kubelet
+- Lateral movement to other nodes
+- Persistent backdoor at node level
+- Denial of service via node resource exhaustion
+- Supply chain attacks via container image modification
+</impact>
+
+<pro_tips>
+1. Check what container runtime is in use before assuming Docker socket exists.
+2. hostPID + ptrace capability is often as dangerous as privileged.
+3. The cgroup escape technique requires specific kernel versions and configurations.
+4. Node filesystem access via hostPath can be limited by read-only mounts.
+5. Even read-only access to sensitive paths (/etc, /var/lib/kubelet) is dangerous.
+6. Check for Pod Security admission labels on namespaces before claiming new privileged pods are possible.
+7. Service mesh sidecars may have elevated permissions by design.
+8. DaemonSets often require node-level access for their function.
+9. Some escapes require specific kernel modules or features to be available.
+10. After node escape, the kubelet kubeconfig typically has limited permissions - check the actual access level.
+</pro_tips>
+
+<remember>Workload escape vulnerabilities require demonstrating an access path to execute in the dangerous pod AND actual escape from container to node. Configuration alone is not a vulnerability without the ability to exploit it. Distinguish between legitimate system pods and exploitable misconfigurations.</remember>
+</k8s_workload_escape_guide>

