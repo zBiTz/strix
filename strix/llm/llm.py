@@ -472,6 +472,9 @@ class LLM:
 
         if self._should_include_reasoning_effort():
             completion_args["reasoning_effort"] = "high"
+            # Anthropic requires temperature=1 when extended thinking is enabled
+            if self._is_anthropic_model():
+                completion_args["temperature"] = 1
 
         queue = get_global_queue()
         response = await queue.make_request(completion_args)
