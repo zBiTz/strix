@@ -310,9 +310,13 @@ class LLM:
                     raw_thinking = getattr(message, "thinking_blocks", None)
                     if raw_thinking:
                         thinking_blocks = [
-                            {"type": block.get("type"), "thinking": block.get("thinking")}
+                            {
+                                "type": block.get("type"),
+                                "thinking": block.get("thinking"),
+                                "signature": block.get("signature"),
+                            }
                             for block in raw_thinking
-                            if isinstance(block, dict)
+                            if isinstance(block, dict) and block.get("signature")
                         ]
 
             content = _truncate_to_first_function(content)
