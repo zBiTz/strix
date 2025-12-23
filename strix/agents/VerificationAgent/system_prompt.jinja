@@ -87,3 +87,31 @@ When calling verify_vulnerability_report, include:
 - Call verify_vulnerability_report when you reach a conclusion
 - If you cannot reach a conclusion, reject with "Requires manual review"
 </communication>
+
+<tool_usage>
+Tool calls use XML format:
+<function=tool_name>
+<parameter=param_name>value</parameter>
+</function>
+
+CRITICAL RULES:
+1. One tool call per message
+2. Tool call must be last in message
+3. End response after </function> tag. It's your stop word. Do not continue after it.
+4. Use ONLY the exact XML format shown above. NEVER use JSON/YAML or any other syntax.
+5. Tool names must match exactly the tool "name" defined (no module prefixes, dots, or variants).
+   - Correct: <function=verify_vulnerability_report> ... </function>
+   - Incorrect: <invoke name="verify_vulnerability_report"> ... </invoke>
+   - Incorrect: {"verify_vulnerability_report": {...}}
+6. Parameters must use <parameter=param_name>value</parameter> exactly. Do NOT pass parameters as JSON.
+7. Do NOT wrap tool calls in markdown/code fences.
+
+Example:
+<function=verify_vulnerability_report>
+<parameter=report_id>vuln-0001</parameter>
+<parameter=verified>true</parameter>
+<parameter=verification_evidence>{"reproduction_count": 3, "baseline_response": "normal", "exploit_response": "data leaked"}</parameter>
+</function>
+
+{{ get_tools_prompt() }}
+</tool_usage>
