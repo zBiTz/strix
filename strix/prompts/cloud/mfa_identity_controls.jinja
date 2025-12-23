@@ -1,0 +1,386 @@
+<mfa_identity_controls_guide>
+<title>MFA AND IDENTITY CONTROL WEAKNESSES</title>
+
+<critical>Missing or weak multi-factor authentication (MFA) and identity controls leave high-privilege accounts vulnerable to credential attacks. When privileged access lacks MFA, a single compromised password leads to complete environment takeover. Identity misconfigurations like weak conditional access policies create bypass opportunities for attackers.</critical>
+
+<scope>
+- Missing MFA: Root accounts, admin users, service accounts with console access
+- Weak MFA: SMS-based, easily bypassable factors
+- MFA bypass: Conditional access gaps, enrollment flaws
+- SSO misconfiguration: SAML vulnerabilities, OAuth weaknesses
+- Password policies: Weak requirements, no rotation, shared credentials
+- Session management: Long sessions, no reauthentication for sensitive actions
+- Recovery mechanisms: Weak recovery bypasses MFA
+- Identity federation: Overly permissive trust relationships
+</scope>
+
+<methodology>
+1. Identify privileged accounts: Root, admin, service accounts.
+2. Check MFA enrollment status for each account.
+3. Evaluate MFA strength: TOTP, hardware keys, SMS (weak).
+4. Test conditional access policies for bypasses.
+5. Review SSO and federation configurations.
+6. Analyze password and session policies.
+7. Document MFA gaps with account privilege levels.
+</methodology>
+
+<discovery_techniques>
+<identify_privileged_accounts>
+AWS:
+```bash
+# List IAM users with console access
+aws iam list-users --query 'Users[*].UserName'
+aws iam get-login-profile --user-name USERNAME 2>/dev/null && echo "Has console access"
+
+# Check MFA status
+aws iam list-mfa-devices --user-name USERNAME
+aws iam list-virtual-mfa-devices
+
+# Root account MFA (requires console or credential report)
+aws iam get-credential-report --output text | base64 -d | grep "root"
+```
+
+Azure:
+```bash
+# List privileged role assignments
+az role assignment list --role "Owner" --all
+az role assignment list --role "Global Administrator" --all
+
+# Check MFA status (requires Graph API)
+az rest --method GET --uri "https://graph.microsoft.com/v1.0/reports/credentialUserRegistrationDetails"
+```
+
+GCP:
+```bash
+# List IAM policy
+gcloud projects get-iam-policy PROJECT_ID
+
+# Check for users with elevated roles
+gcloud projects get-iam-policy PROJECT_ID --format=json | \
+  jq '.bindings[] | select(.role | contains("roles/owner") or contains("roles/editor"))'
+```
+</identify_privileged_accounts>
+
+<mfa_status_checks>
+AWS MFA indicators:
+- `aws iam get-credential-report` - Shows MFA status per user
+- `mfa_active` column indicates MFA enrollment
+- Check both virtual (TOTP) and hardware MFA
+
+Azure MFA indicators:
+- Azure AD > Users > Authentication methods
+- Per-user MFA status in Azure portal
+- Conditional Access policies requiring MFA
+
+GCP MFA indicators:
+- Cloud Identity console > Users > 2-Step Verification
+- Organization policy for MFA enforcement
+- Check workspace admin console if using Google Workspace
+</mfa_status_checks>
+
+<conditional_access_analysis>
+Azure Conditional Access bypass tests:
+- Geographic bypass: VPN to allowed location
+- Device bypass: Claim compliant device without compliance
+- Application bypass: Use unprotected legacy apps
+- Risk bypass: Manipulate sign-in risk signals
+- Session bypass: Use existing session tokens
+
+AWS conditions to test:
+- aws:MultiFactorAuthPresent condition in policies
+- Source IP conditions (aws:SourceIp)
+- Time-based conditions
+</conditional_access_analysis>
+
+<sso_analysis>
+SAML configuration review:
+- Signature validation: Is response signature required?
+- Audience restriction: Is it properly scoped?
+- NameID format: Can it be manipulated?
+- Attribute mapping: Can roles be escalated?
+
+OAuth/OIDC review:
+- Token validation: Are ID tokens verified?
+- Scope handling: Can scopes be escalated?
+- Redirect URI: Open redirect to token theft?
+- Client secrets: Exposed or weak?
+</sso_analysis>
+</discovery_techniques>
+
+<vulnerability_types>
+<missing_mfa_privileged>
+Risk: Admin accounts without MFA vulnerable to credential attacks
+Attack:
+1. Phishing or credential stuffing against admin account
+2. Password obtained, no MFA to stop access
+3. Full administrative access to cloud environment
+4. Complete compromise of all resources
+
+Severity factors:
+- Root/Owner accounts: Critical
+- Admin accounts: High
+- Developer accounts with deployment access: High
+- Read-only admin: Medium
+</missing_mfa_privileged>
+
+<weak_mfa_factors>
+SMS-based MFA weaknesses:
+- SIM swapping: Attacker transfers victim's number
+- SS7 attacks: Intercept SMS messages
+- Social engineering: Trick carrier support
+- Voicemail access: Some services fall back to voice
+
+Phone-based vulnerabilities:
+- Call forwarding attacks
+- Voicemail PIN brute force
+- Port-out scams
+</weak_mfa_factors>
+
+<conditional_access_bypass>
+Common bypass scenarios:
+1. Legacy protocol bypass: Use IMAP/SMTP that doesn't support MFA
+2. Location bypass: VPN to whitelisted geography
+3. Device compliance: Claim device is compliant without verification
+4. Risk-based bypass: Avoid triggering risk signals
+5. Break-glass bypass: Abuse emergency access accounts
+
+Testing approach:
+- Identify conditional access policies
+- Find conditions that can be spoofed
+- Test access with manipulated conditions
+</conditional_access_bypass>
+
+<session_token_abuse>
+If sessions don't require reauthentication:
+1. Steal session token (via XSS, malware, logs)
+2. Use token without MFA challenge
+3. Perform privileged operations
+4. Persist access via token refresh
+
+Long-lived tokens enable:
+- Pass-the-cookie attacks
+- API token theft
+- Refresh token persistence
+</session_token_abuse>
+
+<recovery_bypass>
+Account recovery weaknesses:
+- Security questions: Often guessable
+- Email recovery: Email account may lack MFA
+- Phone recovery: Same risks as SMS MFA
+- Support bypass: Social engineering help desk
+
+Attack flow:
+1. Trigger account recovery
+2. Complete recovery (bypasses MFA)
+3. Reset MFA to attacker-controlled
+4. Full account access
+</recovery_bypass>
+
+<sso_vulnerabilities>
+SAML-specific:
+- Missing signature validation: Modify assertions
+- XML signature wrapping: Bypass verification
+- Comment injection in NameID: Identity confusion
+- Attribute manipulation: Escalate roles
+
+OAuth-specific:
+- Authorization code interception
+- Token leakage via referrer
+- State parameter bypass (CSRF)
+- Scope escalation
+</sso_vulnerabilities>
+</vulnerability_types>
+
+<exploitation>
+<credential_report_analysis>
+AWS credential report review:
+```bash
+# Generate and download credential report
+aws iam generate-credential-report
+aws iam get-credential-report --query 'Content' --output text | base64 -d > cred_report.csv
+
+# Analyze for MFA gaps
+cat cred_report.csv | awk -F',' '{if ($4=="true" && $8=="false") print $1, "- Console access WITHOUT MFA"}'
+```
+
+Evidence for report:
+- User name with console access
+- mfa_active = false
+- Access level/permissions of account
+- Any recent activity showing active use
+</credential_report_analysis>
+
+<azure_mfa_audit>
+Azure MFA status check:
+```powershell
+# Get MFA status for all users
+Get-MsolUser -All | Select-Object DisplayName,UserPrincipalName,StrongAuthenticationRequirements
+
+# Check for users without MFA
+Get-MsolUser -All | Where-Object {$_.StrongAuthenticationRequirements.Count -eq 0}
+
+# Check conditional access policies
+Get-AzureADMSConditionalAccessPolicy
+```
+
+Evidence:
+- Global admin without MFA
+- Privileged role holder without MFA
+- No conditional access requiring MFA for admins
+</azure_mfa_audit>
+
+<legacy_protocol_bypass>
+Testing legacy auth bypass:
+1. Identify if basic auth is enabled (Azure AD)
+2. Attempt IMAP/SMTP login (bypasses MFA)
+   ```bash
+   openssl s_client -connect outlook.office365.com:993
+   a LOGIN user@domain.com password
+   ```
+3. If successful, MFA is bypassed
+
+Evidence:
+- Basic auth/legacy protocols enabled
+- Successful authentication without MFA
+- Access to mailbox or API
+</legacy_protocol_bypass>
+</exploitation>
+
+<validation>
+1. Identify specific privileged accounts without MFA.
+2. Document the account's permission level (root, admin, specific privileges).
+3. Verify MFA status through appropriate means (credential report, console).
+4. For bypasses, demonstrate actual bypass, not theoretical.
+5. Show attack path: credential theft → access without MFA → impact.
+6. Distinguish between no MFA and weak MFA (both valid but different severity).
+7. Consider compensating controls (IP restrictions, VPN-only, etc.).
+</validation>
+
+<false_positives>
+- Service accounts that cannot have MFA (API-only, no console)
+- Break-glass accounts with documented exception process
+- Accounts with alternative strong controls (certificate auth, IP restriction)
+- SSO-only accounts where IdP enforces MFA
+- Automation accounts with tightly scoped permissions
+- Recently created accounts in grace period for MFA enrollment
+</false_positives>
+
+<llm_reasoning_errors>
+COMMON AI MISTAKES THAT CAUSE FALSE POSITIVES - AVOID THESE:
+
+1. SERVICE ACCOUNT CONFUSION:
+   WRONG: "Service account lacks MFA, vulnerability confirmed"
+   RIGHT: Service accounts typically CANNOT have MFA:
+          - They're for programmatic access, not human login
+          - MFA requires human interaction
+          - Compensating controls: API keys, role assumption, IP restrictions
+          Focus on service accounts with CONSOLE ACCESS, not all service accounts.
+
+2. SSO-PROTECTED ACCOUNTS:
+   WRONG: "AWS user has no MFA in IAM, missing MFA"
+   RIGHT: User may authenticate via SSO where MFA is enforced:
+          - SAML federation with IdP MFA
+          - Azure AD/Okta requiring MFA at IdP
+          - AWS IAM is just the role assumption, not authentication
+          Check if SSO/federation handles MFA.
+
+3. COMPENSATING CONTROLS:
+   WRONG: "Admin account without MFA, critical finding"
+   RIGHT: Other controls may mitigate the risk:
+          - VPN-only access with strong VPN auth
+          - IP allowlisting to corporate network
+          - Just-in-time access requiring approval
+          - Certificate-based authentication
+          Document if compensating controls exist.
+
+4. BREAK-GLASS ACCOUNTS:
+   WRONG: "Emergency admin account without MFA"
+   RIGHT: Break-glass accounts intentionally skip MFA:
+          - By design for emergency access scenarios
+          - Should have strong monitoring/alerting
+          - May require physical safe storage
+          Check if this is documented emergency access.
+
+5. WEAK MFA VS NO MFA:
+   WRONG: "SMS MFA configured, treat same as no MFA"
+   RIGHT: SMS MFA is WEAKER but not equivalent to NO MFA:
+          - SMS still prevents most credential attacks
+          - SIM swap requires targeted effort
+          - Report as "Weak MFA" not "Missing MFA"
+          Differentiate severity appropriately.
+
+6. POLICY VS ENFORCEMENT:
+   WRONG: "No MFA policy found, MFA not enforced"
+   RIGHT: MFA may be enforced without visible policy:
+          - IdP-level MFA requirement
+          - Organization-wide default settings
+          - Legacy policy formats
+          Verify actual login behavior, not just policy existence.
+</llm_reasoning_errors>
+
+<expanded_false_positives>
+FALSE POSITIVE SCENARIOS - DO NOT REPORT:
+
+1. SERVICE ACCOUNTS (NO CONSOLE):
+   - API-only service accounts
+   - Automation accounts with no login profile
+   - Machine identity accounts
+   - Service principals with certificate auth
+
+2. FEDERATED/SSO ACCOUNTS:
+   - SAML-federated users where IdP requires MFA
+   - Azure AD B2B guests with home tenant MFA
+   - Google Workspace users with workspace MFA
+   - Okta-managed accounts with Okta MFA
+
+3. DOCUMENTED EXCEPTIONS:
+   - Break-glass/emergency access accounts
+   - Accounts in MFA enrollment grace period
+   - Accounts with approved security exception
+   - Test accounts in isolated environments
+
+4. COMPENSATING CONTROLS:
+   - VPN-only access requiring VPN MFA
+   - IP allowlisting to secure networks
+   - Hardware certificate authentication
+   - Just-in-time privileged access systems
+
+5. READ-ONLY/LIMITED ACCOUNTS:
+   - Billing-only accounts
+   - Read-only audit accounts
+   - Accounts with no sensitive access
+   - Monitoring-only service accounts
+
+6. INTENTIONAL ARCHITECTURE:
+   - Accounts that assume roles with MFA requirements
+   - Step-up authentication for sensitive operations
+   - Risk-based MFA (MFA triggered on suspicious activity)
+</expanded_false_positives>
+
+<impact>
+- Account takeover: Compromised credentials lead to full access
+- Privilege escalation: Admin account compromise = environment takeover
+- Data breach: Access to all data and resources in environment
+- Persistence: Create backdoor accounts, keys, roles
+- Lateral movement: Pivot to connected systems
+- Compliance violation: PCI DSS, SOC2, HIPAA require MFA
+- Regulatory fines: GDPR and other regulations mandate strong auth
+- Reputational damage: Breach disclosure requirements
+</impact>
+
+<pro_tips>
+1. AWS root account MFA is CRITICAL - check credential report root row specifically.
+2. Azure Global Administrators should ALWAYS have MFA - no exceptions.
+3. GCP organization admins need 2SV enforced at org policy level.
+4. Check for legacy/basic authentication that bypasses MFA entirely.
+5. Hardware security keys (FIDO2) are strongest - note if only TOTP available.
+6. Conditional access "All users" policies may have exclusions - check these.
+7. Service accounts with console access are HIGH risk - should be rare.
+8. MFA enrollment status vs enforcement - user can be enrolled but not required.
+9. Check if password-only auth is possible during MFA reset flows.
+10. Multi-cloud environments need MFA at each cloud, not just the IdP.
+</pro_tips>
+
+<remember>MFA vulnerabilities require identifying PRIVILEGED accounts with CONSOLE/INTERACTIVE access that lack MFA. Service accounts for automation, SSO-federated accounts with IdP MFA, and accounts with compensating controls are not automatically vulnerable. Document the specific privilege level and potential impact of each finding.</remember>
+</mfa_identity_controls_guide>

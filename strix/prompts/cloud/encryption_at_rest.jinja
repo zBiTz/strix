@@ -1,0 +1,404 @@
+<encryption_at_rest_guide>
+<title>ENCRYPTION AT REST VULNERABILITIES</title>
+
+<critical>Missing or weak encryption at rest leaves sensitive data vulnerable to unauthorized access through storage breaches, backup theft, or insider threats. When storage volumes, databases, or object stores lack encryption, data exfiltration becomes trivial upon gaining any storage access. Misconfigured KMS further compromises encryption effectiveness.</critical>
+
+<scope>
+- Unencrypted storage: S3 buckets, EBS volumes, RDS instances, Azure Blob, GCS buckets
+- Weak encryption: Customer-managed keys with overly permissive policies
+- KMS misconfiguration: Public key policies, cross-account access
+- Key exposure: Keys stored in code, logs, or accessible locations
+- Backup encryption: Unencrypted snapshots, backup files
+- Database encryption: TDE disabled, column-level encryption gaps
+- Secrets in storage: Sensitive data in unencrypted object storage
+</scope>
+
+<methodology>
+1. Inventory storage resources: Volumes, buckets, databases, backups.
+2. Check encryption status for each resource type.
+3. Analyze key management: CMK policies, access controls.
+4. Verify backup/snapshot encryption.
+5. Check for sensitive data in unencrypted storage.
+6. Document findings with data sensitivity context.
+</methodology>
+
+<discovery_techniques>
+<aws_storage_audit>
+S3 bucket encryption:
+```bash
+# List buckets without default encryption
+for bucket in $(aws s3api list-buckets --query 'Buckets[*].Name' --output text); do
+    encryption=$(aws s3api get-bucket-encryption --bucket $bucket 2>/dev/null)
+    if [ -z "$encryption" ]; then
+        echo "UNENCRYPTED: $bucket"
+    fi
+done
+
+# Check individual object encryption
+aws s3api head-object --bucket mybucket --key mykey --query 'ServerSideEncryption'
+```
+
+EBS volume encryption:
+```bash
+# Find unencrypted volumes
+aws ec2 describe-volumes --query 'Volumes[?Encrypted==`false`].[VolumeId,State,Attachments[0].InstanceId]' --output table
+
+# Check if default encryption is enabled
+aws ec2 get-ebs-encryption-by-default
+```
+
+RDS encryption:
+```bash
+# Find unencrypted RDS instances
+aws rds describe-db-instances --query 'DBInstances[?StorageEncrypted==`false`].[DBInstanceIdentifier,Engine]' --output table
+
+# Check RDS snapshots
+aws rds describe-db-snapshots --query 'DBSnapshots[?Encrypted==`false`].DBSnapshotIdentifier'
+```
+</aws_storage_audit>
+
+<azure_storage_audit>
+Storage account encryption:
+```bash
+# Check blob encryption
+az storage account list --query '[].{Name:name,Encryption:encryption.services.blob.enabled}'
+
+# Check for customer-managed keys
+az storage account list --query '[].{Name:name,KeySource:encryption.keySource}'
+```
+
+Disk encryption:
+```bash
+# Find unencrypted managed disks
+az disk list --query '[?encryptionSettings==null].{Name:name,ResourceGroup:resourceGroup}'
+
+# Check encryption set
+az disk-encryption-set list
+```
+
+Azure SQL:
+```bash
+# Check TDE status
+az sql db tde show --server myserver --database mydb --resource-group myrg
+```
+</azure_storage_audit>
+
+<gcp_storage_audit>
+GCS bucket encryption:
+```bash
+# Check default encryption
+gsutil encryption get gs://mybucket
+
+# List all buckets and encryption
+for bucket in $(gsutil ls); do
+    echo "$bucket:"
+    gsutil encryption get $bucket
+done
+```
+
+Persistent disk encryption:
+```bash
+# Check disk encryption
+gcloud compute disks list --format='table(name,zone,diskEncryptionKey)'
+
+# All GCP disks encrypted by default, check for CMEK
+gcloud compute disks describe DISK --zone=ZONE --format='value(diskEncryptionKey.kmsKeyName)'
+```
+
+Cloud SQL:
+```bash
+# Check encryption
+gcloud sql instances describe INSTANCE --format='value(diskEncryptionConfiguration)'
+```
+</gcp_storage_audit>
+
+<kms_analysis>
+AWS KMS policy check:
+```bash
+# Get key policy
+aws kms get-key-policy --key-id KEY_ID --policy-name default
+
+# Look for:
+# - Principal: "*" (public access)
+# - Condition: None (no restrictions)
+# - Allow: kms:* (overly permissive)
+
+# List keys and their descriptions
+aws kms list-keys
+aws kms describe-key --key-id KEY_ID
+```
+
+Azure Key Vault:
+```bash
+# Check access policies
+az keyvault show --name myvault --query 'properties.accessPolicies'
+
+# Check network ACLs
+az keyvault show --name myvault --query 'properties.networkAcls'
+```
+
+GCP KMS:
+```bash
+# Get IAM policy for key
+gcloud kms keys get-iam-policy KEY --keyring=KEYRING --location=LOCATION
+
+# Check for allUsers or allAuthenticatedUsers
+```
+</kms_analysis>
+</discovery_techniques>
+
+<vulnerability_types>
+<unencrypted_storage>
+Risk: Data accessible in plaintext upon storage access
+AWS examples:
+- S3 bucket without ServerSideEncryption
+- EBS volume with Encrypted: false
+- RDS instance with StorageEncrypted: false
+- ElastiCache without at-rest encryption
+
+Azure examples:
+- Storage account without encryption
+- Unmanaged disks without Azure Disk Encryption
+- Azure SQL without TDE
+
+GCP examples:
+- Only default Google-managed encryption (no CMEK for compliance)
+- Cloud SQL without customer-managed encryption
+</unencrypted_storage>
+
+<weak_key_management>
+KMS misconfigurations:
+- Public key policy allowing any AWS account
+- Key accessible cross-account without conditions
+- No key rotation configured
+- Key alias exposing key purpose
+- Admin permissions granted too broadly
+
+Example vulnerable policy:
+```json
+{
+  "Principal": {"AWS": "*"},
+  "Action": "kms:*",
+  "Resource": "*"
+}
+```
+</weak_key_management>
+
+<unencrypted_backups>
+Backup encryption gaps:
+- RDS snapshots shared unencrypted
+- EBS snapshots without encryption
+- Manual backups to unencrypted S3
+- Cross-region copies losing encryption
+
+Check:
+```bash
+# Find shared, unencrypted snapshots
+aws rds describe-db-snapshots --query 'DBSnapshots[?Encrypted==`false` && DBSnapshotIdentifier!=`null`]'
+aws ec2 describe-snapshots --owner-ids self --query 'Snapshots[?Encrypted==`false`]'
+```
+</unencrypted_backups>
+
+<key_exposure>
+Keys exposed in:
+- Source code repositories
+- Environment variables in logs
+- CI/CD pipeline outputs
+- Configuration files in storage
+- Container images
+
+Detection:
+```bash
+# Search for key patterns
+grep -r "AKIA[A-Z0-9]{16}" .  # AWS access key
+grep -r "-----BEGIN.*KEY-----" .  # Private keys
+grep -r "\"kms\":" . # KMS references in configs
+```
+</key_exposure>
+</vulnerability_types>
+
+<exploitation>
+<data_access_scenario>
+Attack flow when encryption missing:
+1. Attacker gains read access to storage (SSRF, exposed credentials, insider)
+2. Without encryption:
+   - S3: Download objects in plaintext
+   - EBS: Snapshot volume, attach to attacker instance
+   - RDS: Access via snapshot restore or backup
+3. All data immediately readable
+4. No additional key access required
+
+With encryption (requires key access):
+1. Must also compromise KMS permissions
+2. Need kms:Decrypt in addition to storage read
+3. Defense in depth - two compromises required
+</data_access_scenario>
+
+<kms_exploitation>
+Exploiting weak KMS policy:
+1. Identify key with public or cross-account access
+2. From attacker account, call:
+   ```bash
+   aws kms decrypt --key-id arn:aws:kms:region:victim:key/xxx \
+       --ciphertext-blob fileb://encrypted_data
+   ```
+3. If policy allows, data decrypted
+4. Extract sensitive information
+
+Evidence gathering:
+- Document the permissive policy
+- Show cross-account decrypt is possible
+- Identify data protected by vulnerable key
+</kms_exploitation>
+
+<backup_exploitation>
+Unencrypted snapshot attack:
+1. Find shared unencrypted snapshot
+2. Copy to attacker account (if shared)
+3. For EBS: Attach to EC2, mount, read data
+4. For RDS: Restore database, query data
+
+```bash
+# Attacker copies victim's shared snapshot
+aws ec2 copy-snapshot --source-snapshot-id snap-xxx --source-region us-east-1
+
+# Restore and access
+aws ec2 create-volume --snapshot-id snap-yyy --availability-zone us-east-1a
+```
+</backup_exploitation>
+</exploitation>
+
+<validation>
+1. Identify SENSITIVE data in unencrypted storage (not just any unencrypted resource).
+2. Document the specific resource and encryption status.
+3. Assess data sensitivity: PII, credentials, financial, health data.
+4. For KMS issues, show the permissive policy and potential exploit.
+5. Consider compliance context: PCI, HIPAA, GDPR requirements.
+6. Verify this is production data, not test/development.
+7. Check for compensating controls (network isolation, access controls).
+</validation>
+
+<false_positives>
+- Unencrypted storage containing only public/non-sensitive data
+- Server-side encryption present but not customer-managed (may be acceptable)
+- Development/test environments with intentionally relaxed encryption
+- Resources protected by strong network and access controls
+- Encryption in transit (TLS) confused with encryption at rest
+- Google-managed encryption (default in GCP) when CMEK not required
+</false_positives>
+
+<llm_reasoning_errors>
+COMMON AI MISTAKES THAT CAUSE FALSE POSITIVES - AVOID THESE:
+
+1. ENCRYPTION TYPE CONFUSION:
+   WRONG: "S3 bucket doesn't have AES-256-CTR, insufficient encryption"
+   RIGHT: Cloud providers use appropriate encryption algorithms:
+          - AWS SSE-S3 uses AES-256
+          - SSE-KMS uses AES-256-GCM
+          - Specific algorithm choice is rarely a finding
+          Focus on WHETHER encryption exists, not algorithm details.
+
+2. DEFAULT ENCRYPTION ADEQUATE:
+   WRONG: "Using AWS-managed keys instead of CMK, encryption vulnerability"
+   RIGHT: AWS-managed keys (SSE-S3) are secure for many use cases:
+          - Fully managed, automatic rotation
+          - No customer key management burden
+          - CMK required for specific compliance, not always
+          Only flag if compliance explicitly requires CMK.
+
+3. NON-SENSITIVE DATA:
+   WRONG: "S3 bucket with logs is unencrypted, encryption missing"
+   RIGHT: Not all data requires encryption at rest:
+          - Public website assets
+          - Non-sensitive logs (no PII)
+          - Temporary processing data
+          Assess DATA SENSITIVITY, not just encryption status.
+
+4. TRANSIT VS REST:
+   WRONG: "Data sent over HTTPS, encryption at rest confirmed"
+   RIGHT: Encryption in transit ≠ encryption at rest:
+          - TLS encrypts network communication
+          - At-rest encryption protects stored data
+          - Both are independent requirements
+          Check storage-level encryption separately.
+
+5. GCP DEFAULT ENCRYPTION:
+   WRONG: "GCP disk without CMEK, unencrypted storage"
+   RIGHT: GCP encrypts all data at rest by default:
+          - Google-managed keys applied automatically
+          - CMEK is additional control, not required
+          - Only flag if compliance requires CMEK
+          Understand platform defaults.
+
+6. COMPLIANCE CONTEXT MISSING:
+   WRONG: "RDS without encryption, critical finding"
+   RIGHT: Severity depends on compliance requirements:
+          - PCI DSS requires encryption for cardholder data
+          - HIPAA requires encryption for PHI
+          - Non-regulated data may not require encryption
+          Document compliance context for accurate severity.
+</llm_reasoning_errors>
+
+<expanded_false_positives>
+FALSE POSITIVE SCENARIOS - DO NOT REPORT:
+
+1. NON-SENSITIVE DATA:
+   - Static website content in S3
+   - Public documentation
+   - Open source code repositories
+   - Marketing assets
+
+2. PLATFORM DEFAULTS ACCEPTABLE:
+   - GCP default encryption (Google-managed keys)
+   - AWS SSE-S3 when CMK not required
+   - Azure Storage Service Encryption (Microsoft-managed)
+
+3. DEVELOPMENT/TEST:
+   - Non-production environments
+   - Test data without real PII
+   - Sandbox accounts
+   - Ephemeral resources
+
+4. COMPENSATING CONTROLS:
+   - Network isolation (private VPC only)
+   - Strong access controls (no public access)
+   - No data residency requirements
+   - Data classification as non-sensitive
+
+5. ENCRYPTION PRESENT:
+   - Different encryption than expected but still encrypted
+   - Encryption managed at application layer
+   - Field-level encryption for sensitive columns
+
+6. COMPLIANCE NOT APPLICABLE:
+   - No PCI scope (no payment data)
+   - No HIPAA scope (no health data)
+   - No GDPR scope (no EU personal data)
+   - Internal-only systems with accepted risk
+</expanded_false_positives>
+
+<impact>
+- Data breach: Exposed sensitive data without encryption protection
+- Compliance violation: PCI DSS, HIPAA, GDPR, SOX requirements
+- Regulatory fines: GDPR up to 4% global revenue
+- Credential theft: Exposed secrets enable further attacks
+- Intellectual property theft: Unprotected business data
+- Customer data exposure: PII, financial, health records
+- Reputational damage: Breach disclosure requirements
+</impact>
+
+<pro_tips>
+1. Check encryption defaults: EBS default encryption, S3 bucket policies.
+2. Snapshots inherit encryption status from source - check both.
+3. Cross-region copies may need re-encryption - verify encryption survives.
+4. KMS key deletion has 7-30 day waiting period - check pending deletions.
+5. SSE-S3 vs SSE-KMS: KMS provides audit trail via CloudTrail.
+6. Azure Key Vault soft delete may expose "deleted" keys.
+7. GCP CMEK key destruction orphans data - significant operational risk.
+8. Check for customer data first, then assess encryption requirements.
+9. Some databases require application-side encryption for specific columns.
+10. Backup encryption is often overlooked - check snapshot policies.
+</pro_tips>
+
+<remember>Encryption at rest vulnerabilities require context: sensitive data in unencrypted storage, or weak key management enabling unauthorized decryption. Platform defaults (GCP default encryption, AWS SSE-S3) are often acceptable. Focus on data sensitivity, compliance requirements, and actual exploitability rather than just checking encryption boxes.</remember>
+</encryption_at_rest_guide>

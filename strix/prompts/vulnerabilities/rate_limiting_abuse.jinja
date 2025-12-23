@@ -1,0 +1,328 @@
+<rate_limiting_abuse_guide>
+<title>RATE LIMITING AND BRUTE FORCE VULNERABILITIES</title>
+
+<critical>Missing or insufficient rate limiting allows attackers to perform brute force attacks, credential stuffing, account enumeration, and resource exhaustion. These vulnerabilities enable automated attacks at scale, leading to account compromise, data scraping, and denial of service. The impact is multiplied when combined with leaked credential databases.</critical>
+
+<scope>
+- Authentication brute force: Login, password reset, MFA codes, API keys
+- Credential stuffing: Automated testing of leaked username/password combinations
+- Account enumeration: Detecting valid usernames via timing or response differences
+- API abuse: Excessive requests to scrape data, exhaust resources, or bypass limits
+- OTP/MFA bypass: Brute forcing time-based or SMS codes
+- Account lockout bypass: Circumventing lockout mechanisms
+- Resource exhaustion: Expensive operations without throttling
+- CAPTCHA bypass: Weak or missing bot protection
+</scope>
+
+<methodology>
+1. Identify authentication and sensitive endpoints.
+2. Test for rate limits: Send rapid requests and observe responses.
+3. Measure lockout behavior: Check if accounts lock, when, and how to bypass.
+4. Test enumeration: Compare responses for valid vs invalid users.
+5. Analyze OTP/MFA: Check code length, validity window, attempt limits.
+6. Document missing limits with concrete attack scenarios.
+7. Verify bypass techniques don't trigger other protections.
+</methodology>
+
+<discovery_techniques>
+<identify_targets>
+High-value endpoints for rate limit testing:
+- `/login`, `/signin`, `/authenticate` - Primary authentication
+- `/api/auth/token` - API authentication
+- `/password/reset`, `/forgot-password` - Password reset
+- `/register`, `/signup` - Account creation
+- `/verify`, `/confirm` - Email/phone verification
+- `/mfa`, `/2fa`, `/otp` - Multi-factor authentication
+- `/api/v*/` - API endpoints generally
+- `/search`, `/query` - Data retrieval
+- `/export`, `/download` - Bulk operations
+</identify_targets>
+
+<rate_limit_detection>
+Testing methodology:
+1. Send 10-20 requests rapidly, note any rate limit headers
+2. Look for: X-RateLimit-Limit, X-RateLimit-Remaining, Retry-After
+3. Check for 429 Too Many Requests responses
+4. Monitor for CAPTCHA challenges
+5. Test from same IP, then different IPs
+6. Check if authenticated vs unauthenticated differs
+
+Rate limit bypass techniques:
+- IP rotation: Different source IPs
+- Header manipulation: X-Forwarded-For, X-Real-IP, X-Originating-IP
+- User-Agent rotation: Appear as different clients
+- Slow and steady: Stay just under threshold
+- Distributed: Multiple accounts/sessions
+- Parameter variation: Slightly modify requests
+</rate_limit_detection>
+
+<brute_force_analysis>
+Password brute force indicators:
+- No lockout after multiple failed attempts (10, 50, 100)
+- Lockout resets too quickly (< 15 minutes)
+- Lockout per IP only (not per account)
+- Different response for valid vs invalid username
+- Timing differences revealing valid accounts
+
+OTP/MFA weakness indicators:
+- Short codes (4 digits = 10,000 combinations)
+- Long validity windows (> 5 minutes)
+- No attempt limits on verification
+- Same code valid for multiple attempts
+- No rate limiting on code requests
+</brute_force_analysis>
+
+<account_enumeration>
+Detection via response differences:
+- Login: "Invalid username" vs "Invalid password"
+- Registration: "Email already registered" vs success
+- Password reset: "Email sent" vs "User not found"
+- Timing: Valid user takes longer (database lookup)
+
+Testing approach:
+1. Test with known-valid username (if available)
+2. Test with clearly-invalid username
+3. Compare response body, status code, timing
+4. Check for differences in headers, redirects
+5. Test case sensitivity variations
+</account_enumeration>
+</discovery_techniques>
+
+<attack_techniques>
+<credential_stuffing>
+Attack pattern:
+1. Obtain leaked credential database (breached passwords)
+2. Normalize credentials (email:password pairs)
+3. Automate login attempts against target
+4. Track successful authentications
+5. Exploit compromised accounts
+
+Indicators of vulnerability:
+- No rate limiting (can test thousands of creds)
+- No account lockout
+- No anomaly detection (mass login from one IP)
+- No CAPTCHA or bot protection
+- No notification to users of suspicious activity
+</credential_stuffing>
+
+<password_spray>
+Attack pattern:
+1. Collect list of valid usernames
+2. Try common passwords against ALL accounts
+3. Rotate passwords, not users (avoids lockout)
+4. Example: Try "Password123" against all users, then "Summer2024"
+
+Common passwords to test:
+- Season+Year: Summer2024, Winter2023
+- Company variations: CompanyName1, Company123
+- Keyboard patterns: qwerty, 123456
+- Default passwords: password, admin, welcome
+</password_spray>
+
+<otp_brute_force>
+Attack pattern for 4-digit OTP:
+1. Trigger OTP generation (password reset, login)
+2. Send all 10,000 combinations (0000-9999)
+3. Valid code allows access
+
+6-digit with rate limiting bypass:
+1. If 3 attempts per code, request new code after 3 tries
+2. If per-session limit, create new sessions
+3. If IP-based, rotate IPs
+4. If time-window is long, slow attack over validity period
+</otp_brute_force>
+
+<lockout_bypass>
+Common bypass techniques:
+- IP rotation: Lockout per IP, not per account
+- Case variation: admin vs Admin vs ADMIN
+- Unicode normalization: admin vs admın (Turkish i)
+- Whitespace: "admin " vs "admin"
+- Special characters: admin%00
+- Password field injection: password=x&password=y
+- Different endpoints: /login vs /api/login vs /mobile/login
+</lockout_bypass>
+</attack_techniques>
+
+<exploitation>
+<credential_stuffing_poc>
+Proof of concept steps:
+1. Identify login endpoint and request format
+2. Create script to iterate through credential list
+3. Run with small sample (10 credentials)
+4. Check for successful logins (200 OK, session token)
+5. Document success rate and detection
+
+Sample evidence:
+- X requests sent in Y seconds without rate limiting
+- N successful logins from credential list
+- No account lockout triggered
+- No CAPTCHA presented
+</credential_stuffing_poc>
+
+<enumeration_poc>
+Proof of concept steps:
+1. Send login with valid username, wrong password
+2. Send login with invalid username, any password
+3. Document response differences:
+   - Status codes: 401 vs 404
+   - Response body: "Wrong password" vs "User not found"
+   - Response time: 500ms vs 50ms
+   - Headers: Different Set-Cookie behavior
+</enumeration_poc>
+
+<resource_exhaustion>
+Testing expensive operations:
+1. Identify resource-intensive endpoints:
+   - PDF generation, report export
+   - Complex search queries
+   - File uploads/processing
+   - Password hashing endpoints
+2. Send concurrent requests
+3. Measure server response degradation
+4. Document impact on legitimate users
+</resource_exhaustion>
+</exploitation>
+
+<validation>
+1. Demonstrate actual attack feasibility (not theoretical).
+2. Show specific number of attempts allowed before lockout (or no lockout).
+3. Document time window for attack (attempts per minute/hour).
+4. Prove account enumeration with response comparison evidence.
+5. For brute force, calculate realistic attack time (e.g., 4-digit OTP = 10k combos / rate = time).
+6. Show bypass works end-to-end, not just avoids one control.
+7. Verify the endpoint is security-sensitive (auth, not public API).
+</validation>
+
+<false_positives>
+- Public APIs intentionally without rate limits (status endpoints, public data)
+- Rate limits present but threshold not reached during testing
+- CAPTCHA or other protections triggered but not observed
+- Account lockout present but with appropriate threshold (e.g., 5 attempts)
+- Different response due to other factors (caching, load balancing)
+- Test/development environments with relaxed limits
+- Honeypot responses that appear successful but aren't
+</false_positives>
+
+<llm_reasoning_errors>
+COMMON AI MISTAKES THAT CAUSE FALSE POSITIVES - AVOID THESE:
+
+1. RATE LIMIT NOT TESTED:
+   WRONG: "Login endpoint exists, no rate limit observed in single request"
+   RIGHT: Single request doesn't test rate limits:
+          - Must send MANY requests rapidly (50-100+)
+          - Must verify no 429 or CAPTCHA appears
+          - Must confirm repeated attempts possible
+          Test actual rate limit behavior, not existence of endpoint.
+
+2. PUBLIC API CONFUSION:
+   WRONG: "API endpoint allows unlimited requests, rate limiting missing"
+   RIGHT: Many endpoints are intentionally unlimited:
+          - Public data APIs (weather, stock quotes)
+          - Health check/status endpoints
+          - Read-only public information
+          - Explicitly documented unlimited endpoints
+          Focus on AUTHENTICATION and SENSITIVE endpoints.
+
+3. RESPONSE DIFFERENCE VS ENUMERATION:
+   WRONG: "Different error message for invalid login, enumeration vulnerability"
+   RIGHT: Generic differences may not be exploitable:
+          - "Invalid credentials" is fine (no username leak)
+          - Timing must be significant (>100ms consistent)
+          - Must actually reveal valid usernames
+          Verify the difference LEAKS INFORMATION.
+
+4. LOCKOUT THRESHOLD MISUNDERSTANDING:
+   WRONG: "Can attempt 5 logins, insufficient rate limiting"
+   RIGHT: Low thresholds are often security features:
+          - 3-5 attempts before lockout is standard
+          - Progressive delays are valid protection
+          - CAPTCHA after few attempts is acceptable
+          Issue is NO lockout or VERY HIGH threshold (100+).
+
+5. DEVELOPMENT ENVIRONMENT:
+   WRONG: "Staging server has no rate limits, vulnerability confirmed"
+   RIGHT: Non-production may intentionally relax limits:
+          - Testing environments disable security
+          - Load testing requires no throttling
+          - Debug modes bypass protections
+          Verify findings in PRODUCTION environment.
+
+6. THEORETICAL VS PRACTICAL:
+   WRONG: "4-digit OTP could be brute forced in theory"
+   RIGHT: Theoretical possibility is not vulnerability:
+          - Check if attempts are actually limited
+          - Check OTP validity window
+          - Check if IP/session limits exist
+          - Calculate ACTUAL attack feasibility
+          Prove attack is PRACTICAL, not just POSSIBLE.
+</llm_reasoning_errors>
+
+<expanded_false_positives>
+FALSE POSITIVE SCENARIOS - DO NOT REPORT:
+
+1. APPROPRIATE PROTECTIONS:
+   - Account lockout after 3-5 attempts
+   - CAPTCHA after few failed attempts
+   - Progressive delays (1s, 2s, 4s, 8s...)
+   - Email notification of suspicious activity
+   - IP-based blocking after threshold
+
+2. INTENTIONALLY UNLIMITED:
+   - Public read-only APIs
+   - Status/health endpoints
+   - Static asset requests
+   - Documented unlimited endpoints
+   - Internal/service-to-service APIs
+
+3. NON-SECURITY SENSITIVE:
+   - Search APIs (unless data scraping is the risk)
+   - Public directory listings
+   - Non-authenticated endpoints
+   - Rate limits for cost, not security
+
+4. UNVERIFIED CLAIMS:
+   - Didn't actually test rate limit
+   - Small sample size (< 20 requests)
+   - Didn't wait for lockout to trigger
+   - Didn't verify successful exploitation
+
+5. ENVIRONMENTAL ISSUES:
+   - Testing/staging environment
+   - Rate limit header present but not triggered
+   - CDN/WAF blocking not accounted for
+   - Load balancer affecting test results
+
+6. MITIGATING FACTORS:
+   - MFA required regardless of password
+   - Certificate-based authentication
+   - Hardware token requirement
+   - Risk-based authentication stepping up
+</expanded_false_positives>
+
+<impact>
+- Account takeover: Brute force passwords or OTP codes
+- Credential stuffing: Compromise accounts using leaked databases
+- Data scraping: Extract user data, pricing, or proprietary information
+- Resource exhaustion: Degrade service for legitimate users
+- Account enumeration: Harvest valid usernames for targeted attacks
+- Financial fraud: Brute force payment verification codes
+- Reputation damage: Mass account compromises
+- Compliance violations: PCI DSS, GDPR require rate limiting
+</impact>
+
+<pro_tips>
+1. Always test from the perspective of an unauthenticated attacker first.
+2. X-Forwarded-For bypass is common - test header injection for IP rotation.
+3. Check if mobile app endpoints have different (weaker) rate limits than web.
+4. Password reset OTPs are often less protected than login OTPs.
+5. Some WAFs rate limit by session cookie - test without cookies.
+6. Account lockout may not apply to API authentication vs web login.
+7. Timing-based enumeration requires statistical analysis (multiple samples).
+8. GraphQL endpoints may expose batch operations that bypass rate limits.
+9. Check if rate limits reset on successful authentication (allows credential stuffing).
+10. Document the exact threshold where rate limiting kicks in (requests per time window).
+</pro_tips>
+
+<remember>Rate limiting vulnerabilities require demonstrating PRACTICAL attack feasibility against SECURITY-SENSITIVE endpoints. Theoretical possibilities, public APIs, and appropriate lockout thresholds (3-5 attempts) are not vulnerabilities. Prove that an attacker can actually brute force credentials, enumerate users, or exhaust resources without triggering adequate protections.</remember>
+</rate_limiting_abuse_guide>
