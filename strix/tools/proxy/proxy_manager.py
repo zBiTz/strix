@@ -571,8 +571,7 @@ class ProxyManager:
         handler = handlers.get(action)
         if not handler:
             return {
-                "error": f"Unsupported action: {action}. Use 'get', 'list', 'create', "
-                f"'update', or 'delete'"
+                "error": f"Unsupported action: {action}. Use 'get', 'list', 'create', 'update', or 'delete'"
             }
 
         try:

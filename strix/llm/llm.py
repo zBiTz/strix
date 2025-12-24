@@ -427,8 +427,7 @@ class LLM:
                             filtered_content.append(
                                 {
                                     "type": "text",
-                                    "text": "[Screenshot removed - model does not support "
-                                    "vision. Use view_source or execute_js instead.]",
+                                    "text": "[Screenshot removed - model does not support vision. Use view_source or execute_js instead.]",
                                 }
                             )
                         else:

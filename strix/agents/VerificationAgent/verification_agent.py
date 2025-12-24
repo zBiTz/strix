@@ -14,8 +14,8 @@ from typing import Any
 from strix.agents.base_agent import BaseAgent
 from strix.llm.config import LLMConfig
 from strix.tools.reporting.vulnerability_types import (
-    get_vulnerability_type_spec,
     VulnerabilityTypeSpec,
+    get_vulnerability_type_spec,
 )
 
 
@@ -145,7 +145,9 @@ class VerificationAgent(BaseAgent):
         # Format reporter's control tests (for reference, NOT to reproduce)
         reporter_tests_text = ""
         if reporter_control_tests:
-            reporter_tests_text = "\n## Reporter's Control Tests (FOR REFERENCE ONLY - DO NOT REPRODUCE)\n"
+            reporter_tests_text = (
+                "\n## Reporter's Control Tests (FOR REFERENCE ONLY - DO NOT REPRODUCE)\n"
+            )
             for i, test in enumerate(reporter_control_tests, 1):
                 reporter_tests_text += f"""
 ### Test #{i}: {test.get("test_name", "Unnamed")}
@@ -254,9 +256,7 @@ MANUAL REVIEW (verified=False):
 </rules>
 </verification_task>"""
 
-    def _build_type_validation_section(
-        self, type_spec: VulnerabilityTypeSpec | None
-    ) -> str:
+    def _build_type_validation_section(self, type_spec: VulnerabilityTypeSpec | None) -> str:
         """Build the type-specific validation requirements section.
 
         Args:

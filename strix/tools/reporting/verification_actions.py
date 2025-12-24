@@ -72,20 +72,15 @@ def _validate_two_phase_evidence(
     if vulnerability_type and vulnerability_type != "unknown":
         type_spec = get_vulnerability_type_spec(vulnerability_type)
         if type_spec:
-            required_test_names = {
-                req.name for req in type_spec.control_test_requirements
-            }
-            provided_test_names = {
-                test.get("test_name", "") for test in control_tests
-            }
+            required_test_names = {req.name for req in type_spec.control_test_requirements}
+            provided_test_names = {test.get("test_name", "") for test in control_tests}
 
             # Check if at least one required test was performed
             overlap = required_test_names & provided_test_names
             if not overlap:
                 return (
                     False,
-                    f"Phase 2 requires control tests matching type spec. "
-                    f"Required: {required_test_names}, Provided: {provided_test_names}",
+                    f"Phase 2 requires control tests matching type spec. Required: {required_test_names}, Provided: {provided_test_names}",
                 )
 
     # Require validity reasoning
@@ -171,9 +166,7 @@ def verify_vulnerability_report(  # noqa: PLR0911
 
         if verified:
             # ENFORCEMENT: Validate two-phase verification evidence
-            vulnerability_type = report.get("evidence", {}).get(
-                "vulnerability_type", "unknown"
-            )
+            vulnerability_type = report.get("evidence", {}).get("vulnerability_type", "unknown")
             is_valid, error_msg = _validate_two_phase_evidence(
                 verification_evidence, vulnerability_type
             )

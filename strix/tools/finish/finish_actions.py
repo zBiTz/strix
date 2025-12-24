@@ -12,8 +12,7 @@ def _validate_root_agent(agent_state: Any) -> dict[str, Any] | None:
         return {
             "success": False,
             "message": (
-                "This tool can only be used by the root/main agent. "
-                "Subagents must use agent_finish instead."
+                "This tool can only be used by the root/main agent. Subagents must use agent_finish instead."
             ),
         }
     return None
@@ -201,8 +200,7 @@ def _finalize_with_tracer(content: str, success: bool) -> dict[str, Any]:
             if rejected_count > 0:
                 result["false_positives_rejected"] = rejected_count
                 result["note"] = (
-                    f"{rejected_count} potential finding(s) were rejected during verification. "
-                    "See rejected_false_positives/ directory for details."
+                    f"{rejected_count} potential finding(s) were rejected during verification. See rejected_false_positives/ directory for details."
                 )
 
             return result

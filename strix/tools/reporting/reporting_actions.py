@@ -49,12 +49,12 @@ def _register_verification_timeout(
         timeout_seconds: Seconds to wait before auto-rejecting
         thread: The thread running the verification agent
     """
+
     def timeout_handler() -> None:
         if thread.is_alive():
             # Agent still running after timeout - force cleanup
             logger.warning(
-                f"Verification agent {agent_id} for report {report_id} timed out "
-                f"after {timeout_seconds} seconds. Moving to manual review."
+                f"Verification agent {agent_id} for report {report_id} timed out after {timeout_seconds} seconds. Moving to manual review."
             )
             _auto_reject_pending_report(report_id, agent_id, "verification_timeout")
             _update_verification_agent_status(agent_id, "timeout")
@@ -180,8 +180,7 @@ def _spawn_verification_agent(  # noqa: PLR0915
                     if tracer and not tracer.is_report_verified(report_id):
                         # Agent completed but didn't record verification - move to manual review
                         logger.warning(
-                            f"Verification agent for {report_id} completed without recording "
-                            "verification decision. Moving to manual review."
+                            f"Verification agent for {report_id} completed without recording verification decision. Moving to manual review."
                         )
                         _auto_reject_pending_report(
                             report_id, state.agent_id, "max_iterations_without_decision"
@@ -307,12 +306,10 @@ def _auto_reject_pending_report(report_id: str, agent_id: str, reason_code: str)
 
         reason_messages = {
             "max_iterations_without_decision": (
-                f"Verification agent {agent_id} reached maximum iterations without "
-                "recording a verification decision. Report requires manual review."
+                f"Verification agent {agent_id} reached maximum iterations without recording a verification decision. Report requires manual review."
             ),
             "agent_exception": (
-                f"Verification agent {agent_id} encountered an error during verification. "
-                "Report requires manual review."
+                f"Verification agent {agent_id} encountered an error during verification. Report requires manual review."
             ),
         }
 
@@ -407,8 +404,7 @@ def create_vulnerability_report(  # noqa: PLR0911, PLR0912
         return {
             "success": False,
             "message": (
-                "vulnerability_type is required. Specify the type of vulnerability from the registry. "
-                f"Valid types: {', '.join(sorted(all_types))}"
+                f"vulnerability_type is required. Specify the type of vulnerability from the registry. Valid types: {', '.join(sorted(all_types))}"
             ),
         }
 

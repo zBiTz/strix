@@ -364,10 +364,7 @@ class TerminalSession:
                 )
                 self.prev_status = BashCommandStatus.CONTINUE
 
-                timeout_msg = (
-                    f"\n[Command still running after {timeout}s - showing output so far. "
-                    "Use C-c to interrupt if needed.]"
-                )
+                timeout_msg = f"\n[Command still running after {timeout}s - showing output so far. Use C-c to interrupt if needed.]"
                 return {
                     "content": command_output + timeout_msg,
                     "status": "running",
@@ -405,8 +402,7 @@ class TerminalSession:
         if is_command_running:
             return {
                 "content": (
-                    "A command is already running. Use is_input=true to send input to it, "
-                    "or interrupt it first (e.g., with C-c)."
+                    "A command is already running. Use is_input=true to send input to it, or interrupt it first (e.g., with C-c)."
                 ),
                 "status": "error",
                 "exit_code": None,

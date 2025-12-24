@@ -123,16 +123,12 @@ def register_tool(
                     func_dict["xml_schema"] = xml_tools[f.__name__]
                 else:
                     func_dict["xml_schema"] = (
-                        f'<tool name="{f.__name__}">'
-                        "<description>Schema not found for tool.</description>"
-                        "</tool>"
+                        f'<tool name="{f.__name__}"><description>Schema not found for tool.</description></tool>'
                     )
             except (TypeError, FileNotFoundError) as e:
                 logger.warning(f"Error loading schema for {f.__name__}: {e}")
                 func_dict["xml_schema"] = (
-                    f'<tool name="{f.__name__}">'
-                    "<description>Error loading schema.</description>"
-                    "</tool>"
+                    f'<tool name="{f.__name__}"><description>Error loading schema.</description></tool>'
                 )
 
         tools.append(func_dict)

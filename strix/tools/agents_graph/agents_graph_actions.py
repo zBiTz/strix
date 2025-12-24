@@ -168,7 +168,9 @@ def view_agent_graph(agent_state: Any) -> dict[str, Any]:
                 1 for node in _agent_graph["nodes"].values() if node["status"] == "stopped"
             )
             failed_count = sum(
-                1 for node in _agent_graph["nodes"].values() if node["status"] in ["failed", "error"]
+                1
+                for node in _agent_graph["nodes"].values()
+                if node["status"] in ["failed", "error"]
             )
 
     except Exception as e:  # noqa: BLE001
@@ -210,8 +212,7 @@ def create_agent(
             return {
                 "success": False,
                 "error": (
-                    "Cannot specify more than 5 prompt modules for an agent "
-                    "(use comma-separated format)"
+                    "Cannot specify more than 5 prompt modules for an agent (use comma-separated format)"
                 ),
                 "agent_id": None,
             }
@@ -225,8 +226,7 @@ def create_agent(
                 return {
                     "success": False,
                     "error": (
-                        f"Invalid prompt modules: {validation['invalid']}. "
-                        f"Available modules: {', '.join(available_modules)}"
+                        f"Invalid prompt modules: {validation['invalid']}. Available modules: {', '.join(available_modules)}"
                     ),
                     "agent_id": None,
                 }
@@ -388,8 +388,7 @@ def agent_finish(
             return {
                 "agent_completed": False,
                 "error": (
-                    "This tool can only be used by subagents. "
-                    "Root/main agents must use finish_scan instead."
+                    "This tool can only be used by subagents. Root/main agents must use finish_scan instead."
                 ),
                 "parent_notified": False,
             }
@@ -526,7 +525,8 @@ def _stop_child_agents(parent_id: str) -> list[str]:
     """
     stopped_children = []
     child_edges = [
-        e for e in _agent_graph["edges"]
+        e
+        for e in _agent_graph["edges"]
         if e.get("from") == parent_id and e.get("type") == "delegation"
     ]
     for edge in child_edges:

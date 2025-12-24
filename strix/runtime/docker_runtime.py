@@ -264,8 +264,7 @@ class DockerRuntime(AbstractRuntime):
 
             if target_name:
                 logger.info(
-                    f"Copying local directory {local_path_obj} to container at "
-                    f"/workspace/{target_name}"
+                    f"Copying local directory {local_path_obj} to container at /workspace/{target_name}"
                 )
             else:
                 logger.info(f"Copying local directory {local_path_obj} to container")

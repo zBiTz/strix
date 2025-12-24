@@ -244,8 +244,7 @@ class Tracer:
                 self.pending_vulnerability_reports.pop(i)
 
                 logger.info(
-                    f"Rejected vulnerability report: {report_id} - "
-                    f"{report['title']} (Reason: {reason})"
+                    f"Rejected vulnerability report: {report_id} - {report['title']} (Reason: {reason})"
                 )
 
                 self.save_run_data()
@@ -568,8 +567,7 @@ class Tracer:
 
                 if new_manual_review:
                     logger.info(
-                        f"Saved {len(new_manual_review)} report(s) requiring "
-                        f"manual review to: {manual_review_dir}"
+                        f"Saved {len(new_manual_review)} report(s) requiring manual review to: {manual_review_dir}"
                     )
 
             logger.info(f"📊 Essential scan data saved to: {run_dir}")

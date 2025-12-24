@@ -203,10 +203,7 @@ def _format_tool_result(tool_name: str, result: Any) -> tuple[str, list[dict[str
             end_part = final_result_str[-4000:]
             final_result_str = start_part + "\n\n... [middle content truncated] ...\n\n" + end_part
 
-    observation_xml = (
-        f"<tool_result>\n<tool_name>{tool_name}</tool_name>\n"
-        f"<result>{final_result_str}</result>\n</tool_result>"
-    )
+    observation_xml = f"<tool_result>\n<tool_name>{tool_name}</tool_name>\n<result>{final_result_str}</result>\n</tool_result>"
 
     return observation_xml, images
 
@@ -306,10 +303,7 @@ async def _execute_parallel_tools(
             xml, imgs, finish = await _execute_single_tool(tool_inv, agent_state, tracer, agent_id)
         except Exception as e:  # noqa: BLE001
             tool_name = tool_inv.get("toolName", "unknown")
-            error_xml = (
-                f"<tool_result>\n<tool_name>{tool_name}</tool_name>\n"
-                f"<result>Error: {e}</result>\n</tool_result>"
-            )
+            error_xml = f"<tool_result>\n<tool_name>{tool_name}</tool_name>\n<result>Error: {e}</result>\n</tool_result>"
             return (idx, error_xml, [], False)
         else:
             return (idx, xml, imgs, finish)

@@ -240,8 +240,7 @@ class BrowserTabManager:
             truncated_text = " (truncated)" if truncated else ""
 
             result["message"] = (
-                f"Console logs {action_text} for tab "
-                f"{result.get('tab_id', 'current')}{truncated_text}"
+                f"Console logs {action_text} for tab {result.get('tab_id', 'current')}{truncated_text}"
             )
         except (OSError, ValueError, RuntimeError) as e:
             raise RuntimeError(f"Failed to get console logs: {e}") from e

@@ -94,8 +94,7 @@ class BrowserInstance:
         self.context = await self.browser.new_context(
             viewport={"width": 1280, "height": 720},
             user_agent=(
-                "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
-                "(KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+                "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
             ),
         )
 
@@ -384,8 +383,7 @@ class BrowserInstance:
                 truncation_notice = {
                     "type": "info",
                     "text": (
-                        f"[TRUNCATED: {len(logs) - len(truncated_logs)} older logs "
-                        f"removed to stay within {MAX_CONSOLE_LOG_LENGTH} character limit]"
+                        f"[TRUNCATED: {len(logs) - len(truncated_logs)} older logs removed to stay within {MAX_CONSOLE_LOG_LENGTH} character limit]"
                     ),
                     "location": {},
                     "timestamp": 0,
@@ -417,10 +415,7 @@ class BrowserInstance:
         original_length = len(source)
 
         if original_length > MAX_PAGE_SOURCE_LENGTH:
-            truncation_message = (
-                f"\n\n<!-- [TRUNCATED: {original_length - MAX_PAGE_SOURCE_LENGTH} "
-                "characters removed] -->\n\n"
-            )
+            truncation_message = f"\n\n<!-- [TRUNCATED: {original_length - MAX_PAGE_SOURCE_LENGTH} characters removed] -->\n\n"
             available_space = MAX_PAGE_SOURCE_LENGTH - len(truncation_message)
             truncate_point = available_space // 2
 

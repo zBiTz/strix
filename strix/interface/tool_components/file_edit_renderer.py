@@ -151,10 +151,7 @@ class SearchFilesRenderer(BaseToolRenderer):
         if path and regex:
             path_display = path[-30:] if len(path) > 30 else path
             regex_display = regex[:30] if len(regex) > 30 else regex
-            content_text = (
-                f"{header} [dim]{cls.escape_markup(path_display)} for "
-                f"'{cls.escape_markup(regex_display)}'[/]"
-            )
+            content_text = f"{header} [dim]{cls.escape_markup(path_display)} for '{cls.escape_markup(regex_display)}'[/]"
         elif path:
             path_display = path[-60:] if len(path) > 60 else path
             content_text = f"{header} [dim]{cls.escape_markup(path_display)}[/]"
