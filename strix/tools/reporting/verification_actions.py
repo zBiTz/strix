@@ -236,7 +236,7 @@ def verify_vulnerability_report(  # noqa: PLR0911
         }
 
 
-@register_tool(sandbox_execution=False, parallelizable=True)
+@register_tool(sandbox_execution=False)
 def list_pending_verifications(
     agent_state: Any = None,
 ) -> dict[str, Any]:
