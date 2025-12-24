@@ -20,12 +20,66 @@ from typing import Any
 from strix.tools.registry import register_tool
 from strix.tools.reporting.evidence import validate_evidence
 from strix.tools.reporting.vulnerability_types import (
-    validate_vulnerability_type,
     get_all_type_ids,
+    validate_vulnerability_type,
 )
 
 
 logger = logging.getLogger(__name__)
+
+# Verification timeout tracking (Phase 2 fix)
+_verification_timeouts: dict[str, threading.Timer] = {}
+_verification_timeouts_lock = threading.Lock()
+
+
+def _register_verification_timeout(
+    report_id: str,
+    agent_id: str,
+    timeout_seconds: int,
+    thread: threading.Thread,
+) -> None:
+    """Register a timeout to auto-reject if verification agent hangs.
+
+    If the verification agent is still running after timeout_seconds,
+    the report will be moved to manual review.
+
+    Args:
+        report_id: The report ID being verified
+        agent_id: The verification agent ID
+        timeout_seconds: Seconds to wait before auto-rejecting
+        thread: The thread running the verification agent
+    """
+    def timeout_handler() -> None:
+        if thread.is_alive():
+            # Agent still running after timeout - force cleanup
+            logger.warning(
+                f"Verification agent {agent_id} for report {report_id} timed out "
+                f"after {timeout_seconds} seconds. Moving to manual review."
+            )
+            _auto_reject_pending_report(report_id, agent_id, "verification_timeout")
+            _update_verification_agent_status(agent_id, "timeout")
+
+        with _verification_timeouts_lock:
+            _verification_timeouts.pop(report_id, None)
+
+    timer = threading.Timer(timeout_seconds, timeout_handler)
+    timer.daemon = True
+    timer.start()
+
+    with _verification_timeouts_lock:
+        _verification_timeouts[report_id] = timer
+
+
+def _cancel_verification_timeout(report_id: str) -> None:
+    """Cancel timeout when verification completes normally.
+
+    Args:
+        report_id: The report ID whose timeout should be cancelled
+    """
+    with _verification_timeouts_lock:
+        timer = _verification_timeouts.pop(report_id, None)
+        if timer:
+            timer.cancel()
 
 
 def _spawn_verification_agent(  # noqa: PLR0915
@@ -174,6 +228,14 @@ def _spawn_verification_agent(  # noqa: PLR0915
             running[state.agent_id] = thread
         except ImportError:
             pass
+
+        # Register verification timeout (10 minutes = 600 seconds)
+        _register_verification_timeout(
+            report_id=report_id,
+            agent_id=state.agent_id,
+            timeout_seconds=600,
+            thread=thread,
+        )
 
         return {  # noqa: TRY300
             "spawned": True,

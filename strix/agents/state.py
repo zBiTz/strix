@@ -116,16 +116,18 @@ class AgentState(BaseModel):
         return self.iteration >= int(self.max_iterations * threshold)
 
     def has_waiting_timeout(self) -> bool:
+        """Check if waiting state has timed out (600 seconds).
+
+        Returns True if the agent has been waiting for more than 600 seconds,
+        regardless of other state flags. This ensures agents don't get stuck
+        waiting indefinitely.
+        """
         if not self.waiting_for_input or not self.waiting_start_time:
             return False
 
-        if (
-            self.stop_requested
-            or self.llm_failed
-            or self.completed
-            or self.has_reached_max_iterations()
-        ):
-            return False
+        # Note: We intentionally do NOT check stop_requested, llm_failed, completed,
+        # or max_iterations here. The timeout should trigger regardless of these
+        # flags to prevent agents from getting stuck indefinitely.
 
         elapsed = (datetime.now(UTC) - self.waiting_start_time).total_seconds()
         return elapsed > 600

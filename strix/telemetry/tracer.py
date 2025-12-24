@@ -633,4 +633,17 @@ class Tracer:
         }
 
     def cleanup(self) -> None:
+        """Clean up all agents and save run data.
+
+        This method first stops all running agents and waits for their threads
+        to complete, then saves the run data to disk.
+        """
+        # Stop all agents first
+        try:
+            from strix.tools.agents_graph.agents_graph_actions import cleanup_all_agents
+
+            cleanup_all_agents(timeout=5.0)
+        except ImportError:
+            pass
+
         self.save_run_data(mark_complete=True)

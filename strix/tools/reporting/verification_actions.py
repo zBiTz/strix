@@ -158,6 +158,14 @@ def verify_vulnerability_report(  # noqa: PLR0911
                 "message": f"Report {report_id} not found in pending queue or already processed",
             }
 
+        # Cancel the verification timeout since we're now recording a decision
+        try:
+            from strix.tools.reporting.reporting_actions import _cancel_verification_timeout
+
+            _cancel_verification_timeout(report_id)
+        except ImportError:
+            pass
+
         # Increment verification attempt counter
         tracer.increment_verification_attempt(report_id)
 
