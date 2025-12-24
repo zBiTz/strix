@@ -1,0 +1,57 @@
+<insecure_file_uploads_verification>
+<validity_requirements>
+For an insecure file upload claim to be VALID, you must independently verify:
+
+1. EXECUTABLE FILE UPLOADED
+   - Server-side executable file can be uploaded
+   - NOT: Just any file upload (that's a feature)
+   - Check: .php, .jsp, .aspx with code content?
+
+2. FILE ACCESSIBLE VIA URL
+   - Uploaded file is accessible via web request
+   - NOT: File stored but not accessible
+   - Check: Can you request the uploaded file?
+
+3. CODE EXECUTION
+   - Server executes the uploaded code
+   - NOT: File served as static content
+   - Check: Does PHP/JSP/ASPX execute, not download?
+</validity_requirements>
+
+<independent_control_tests>
+YOU MUST DESIGN YOUR OWN TESTS. Do not reproduce the reporter's tests.
+
+TEST 1: EXECUTION VERIFICATION
+Purpose: Verify uploaded file executes
+Steps:
+1. Upload file with executable extension (.php, .jsp)
+2. Content: <?php echo "EXECUTED"; ?>
+3. Request the uploaded file URL
+4. Check response: "EXECUTED" = code ran, PHP source = static
+
+TEST 2: CONTENT TYPE BYPASS
+Purpose: Verify restrictions are bypassable
+Steps:
+1. Test extension manipulation: .php.jpg, .pHp, .php%00.jpg
+2. Test content type mismatch: image/jpeg with PHP content
+3. Verify bypass results in executable file
+</independent_control_tests>
+
+<validity_decision_matrix>
+| File Uploaded | File Accessible | Execution | Decision |
+|--------------|-----------------|-----------|----------|
+| Executable ext | Via URL | Code executes | VULNERABLE |
+| Executable ext | Via URL | Served static | NOT VULNERABLE |
+| Executable ext | Not accessible | N/A | NOT VULNERABLE |
+| Safe ext only | N/A | N/A | NOT VULNERABLE |
+</validity_decision_matrix>
+
+<common_false_positive_patterns>
+REJECT if you observe:
+- Files served as static/binary content
+- Files stored with sanitized extensions
+- Execution prevented by server config
+- Files stored outside web root
+- Upload blocked by extension filter
+</common_false_positive_patterns>
+</insecure_file_uploads_verification>

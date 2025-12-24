@@ -1,0 +1,57 @@
+<mass_assignment_verification>
+<validity_requirements>
+For a mass assignment claim to be VALID, you must independently verify:
+
+1. RESTRICTED PROPERTY MODIFIED
+   - Can set properties that should be protected
+   - NOT: Setting properties you're allowed to modify
+   - Check: role, isAdmin, verified, balance, etc.?
+
+2. CHANGE PERSISTS
+   - Modified property is saved to database
+   - NOT: Just accepted in request but ignored
+   - Check: Subsequent requests show the change?
+
+3. SECURITY IMPACT
+   - Modified property affects security
+   - NOT: Cosmetic or non-security property
+   - Check: Privilege escalation? Balance change?
+</validity_requirements>
+
+<independent_control_tests>
+YOU MUST DESIGN YOUR OWN TESTS. Do not reproduce the reporter's tests.
+
+TEST 1: PROPERTY INJECTION TEST
+Purpose: Verify restricted properties can be set
+Steps:
+1. Identify protected properties (role, isAdmin)
+2. Add property to request: {"name": "test", "isAdmin": true}
+3. Check if property was set on server
+4. Verify change persists in subsequent requests
+
+TEST 2: IMPACT VERIFICATION
+Purpose: Verify property change has security impact
+Steps:
+1. Before: Verify user is not admin
+2. Inject: isAdmin: true
+3. After: Verify admin access granted
+</independent_control_tests>
+
+<validity_decision_matrix>
+| Property Type | Server Accepts | Persists | Impact | Decision |
+|--------------|----------------|----------|--------|----------|
+| Security (role) | Yes | Yes | Privilege | VULNERABLE |
+| Security (role) | Ignored | No | N/A | NOT VULNERABLE |
+| Non-security | Yes | Yes | None | LOW/NO impact |
+| Any | Error | No | N/A | NOT VULNERABLE |
+</validity_decision_matrix>
+
+<common_false_positive_patterns>
+REJECT if you observe:
+- Property ignored by server
+- Allowlist prevents restricted properties
+- Property set but no security impact
+- Read-only fields unaffected
+- Validation rejects unexpected fields
+</common_false_positive_patterns>
+</mass_assignment_verification>

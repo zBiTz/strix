@@ -1,0 +1,57 @@
+<http_request_smuggling_verification>
+<validity_requirements>
+For an HTTP smuggling claim to be VALID, you must independently verify:
+
+1. DESYNCHRONIZATION
+   - Frontend and backend interpret boundaries differently
+   - NOT: Single-server setup with consistent parsing
+   - Check: Does smuggled request affect next request?
+
+2. REQUEST POISONING
+   - Smuggled request affects subsequent requests
+   - NOT: Just unusual parsing without effect
+   - Check: Can you hijack another user's request?
+
+3. REPRODUCIBLE TECHNIQUE
+   - CL.TE or TE.CL works consistently
+   - NOT: One-time anomaly
+   - Check: Works across multiple attempts?
+</validity_requirements>
+
+<independent_control_tests>
+YOU MUST DESIGN YOUR OWN TESTS. Do not reproduce the reporter's tests.
+
+TEST 1: DESYNC VERIFICATION
+Purpose: Verify request desynchronization
+Steps:
+1. Craft CL.TE or TE.CL smuggling payload
+2. Send smuggled request + normal request
+3. Check if second request is affected
+4. Verify response mismatch or poisoning
+
+TEST 2: IMPACT VERIFICATION
+Purpose: Verify smuggling has impact
+Steps:
+1. Smuggle request to different endpoint
+2. Verify next request goes to smuggled destination
+3. Demonstrate request hijacking capability
+</independent_control_tests>
+
+<validity_decision_matrix>
+| Technique | Second Request Affected | Reproducible | Decision |
+|-----------|------------------------|--------------|----------|
+| CL.TE | Yes, different response | Consistent | VULNERABLE |
+| TE.CL | Yes, different response | Consistent | VULNERABLE |
+| Any | No effect | N/A | NOT VULNERABLE |
+| Any | Inconsistent | Variable | INVESTIGATE |
+</validity_decision_matrix>
+
+<common_false_positive_patterns>
+REJECT if you observe:
+- Single-server setup (no FE/BE mismatch)
+- Proper normalization of ambiguous requests
+- Requests properly synchronized
+- Ambiguous parsing rejected with error
+- Only affects attacker's own requests
+</common_false_positive_patterns>
+</http_request_smuggling_verification>

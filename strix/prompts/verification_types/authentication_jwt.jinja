@@ -1,0 +1,60 @@
+<authentication_jwt_verification>
+<validity_requirements>
+For an authentication/JWT claim to be VALID, you must independently verify:
+
+1. BYPASS OR FORGERY POSSIBLE
+   - Authentication can be bypassed or tokens forged
+   - NOT: Just decoding JWT (that's by design)
+   - Check: Can you access protected resources without valid credentials?
+
+2. PROTECTED RESOURCE ACCESS
+   - Bypass grants access to actually protected resources
+   - NOT: Public resources accessible anyway
+   - Check: Does bypass give you access normal auth would deny?
+
+3. SERVER-SIDE VALIDATION FAILURE
+   - Server accepts invalid/forged tokens
+   - NOT: Client-side checks bypassed (irrelevant)
+   - Check: Does server process the forged token?
+</validity_requirements>
+
+<independent_control_tests>
+YOU MUST DESIGN YOUR OWN TESTS. Do not reproduce the reporter's tests.
+
+TEST 1: BYPASS VERIFICATION
+Purpose: Verify auth can be bypassed
+Steps:
+1. Identify auth mechanism (JWT, session, API key)
+2. Test bypass techniques:
+   - JWT: alg=none, HS256 with known key, expired tokens
+   - Session: Null session, predictable ID
+3. Verify bypassed auth grants protected access
+
+TEST 2: TOKEN MANIPULATION TEST
+Purpose: For JWT - verify manipulation accepted
+Steps:
+1. Decode JWT and modify claims (role, user_id)
+2. Test algorithm attacks:
+   - Change RS256 to HS256, sign with public key
+   - Set alg=none, remove signature
+3. Verify modified token accepted with elevated access
+</independent_control_tests>
+
+<validity_decision_matrix>
+| Token Modification | Server Response | Access Level | Decision |
+|-------------------|-----------------|--------------|----------|
+| alg=none | Accepted | Admin/elevated | VULNERABLE |
+| Modified claims | Signature error | N/A | NOT VULNERABLE |
+| Expired token | Accepted | Normal | VULNERABLE |
+| Invalid signature | Rejected | N/A | NOT VULNERABLE |
+</validity_decision_matrix>
+
+<common_false_positive_patterns>
+REJECT if you observe:
+- Modified tokens rejected with signature error
+- Expired tokens correctly rejected
+- Algorithm confusion not possible (strict validation)
+- None algorithm explicitly rejected
+- Accessing resources that are public anyway
+</common_false_positive_patterns>
+</authentication_jwt_verification>

@@ -1,0 +1,57 @@
+<information_disclosure_verification>
+<validity_requirements>
+For an information disclosure claim to be VALID, you must independently verify:
+
+1. SENSITIVE INFORMATION
+   - Disclosed data is actually sensitive
+   - NOT: Version numbers or public info
+   - Check: Credentials? PII? Source code? Internal paths?
+
+2. UNINTENDED EXPOSURE
+   - Information should not be publicly accessible
+   - NOT: Intentionally public data
+   - Check: Would this data normally require auth?
+
+3. ACTIONABLE IMPACT
+   - Disclosure enables further attacks or causes harm
+   - NOT: Theoretical risk only
+   - Check: Can leaked info be used for attacks?
+</validity_requirements>
+
+<independent_control_tests>
+YOU MUST DESIGN YOUR OWN TESTS. Do not reproduce the reporter's tests.
+
+TEST 1: SENSITIVITY VERIFICATION
+Purpose: Verify information is sensitive
+Steps:
+1. Classify the information type
+2. Assess: credentials, PII, internal paths, source code?
+3. Determine if info enables further attacks
+
+TEST 2: ACCESS CONTROL TEST
+Purpose: Verify information should be restricted
+Steps:
+1. Check if intentionally public (API docs, public profiles)
+2. Compare authenticated vs unauthenticated access
+3. Review application purpose - is disclosure expected?
+</independent_control_tests>
+
+<validity_decision_matrix>
+| Information Type | Intended Public | Enables Attacks | Decision |
+|-----------------|-----------------|-----------------|----------|
+| Credentials | No | Yes | VULNERABLE |
+| PII | No | Possible | VULNERABLE |
+| Version numbers | Usually | Rarely | LOW/NO impact |
+| Error messages | Sometimes | Maybe | CONTEXT dependent |
+| Source code | No | Yes | VULNERABLE |
+</validity_decision_matrix>
+
+<common_false_positive_patterns>
+REJECT if you observe:
+- Publicly intended information
+- Version numbers or generic headers
+- Debug info that doesn't enable attacks
+- Error messages without sensitive data
+- Information available through other channels
+</common_false_positive_patterns>
+</information_disclosure_verification>

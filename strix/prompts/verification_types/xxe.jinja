@@ -1,0 +1,58 @@
+<xxe_verification>
+<validity_requirements>
+For an XXE claim to be VALID, you must independently verify:
+
+1. ENTITY EXPANSION
+   - External entities are processed by the parser
+   - NOT: XML accepted but entities ignored
+   - Check: Does entity reference return file content or trigger OAST?
+
+2. FILE OR NETWORK ACCESS
+   - Can read local files or make network requests
+   - NOT: Just XML parsing without side effects
+   - Check: /etc/passwd content or OAST callback?
+
+3. SERVER-SIDE PARSING
+   - XML is parsed on the SERVER
+   - NOT: Client-side XML parsing (browser)
+   - Check: OAST callback from server IP?
+</validity_requirements>
+
+<independent_control_tests>
+YOU MUST DESIGN YOUR OWN TESTS. Do not reproduce the reporter's tests.
+
+TEST 1: ENTITY EXPANSION TEST
+Purpose: Verify external entities are processed
+Steps:
+1. Submit XXE payload:
+   <!DOCTYPE test [<!ENTITY xxe SYSTEM "file:///etc/passwd">]>
+   <root>&xxe;</root>
+2. Check response for /etc/passwd content
+3. For blind: Use OAST URL instead of file://
+
+TEST 2: PARSER CONFIGURATION TEST
+Purpose: Verify parser allows external entities
+Steps:
+1. Test different entity types: SYSTEM, PUBLIC
+2. Try parameter entities for blind XXE
+3. Check error messages for parser hints
+</independent_control_tests>
+
+<validity_decision_matrix>
+| Entity Reference | Response Content | OAST Callback | Decision |
+|-----------------|------------------|---------------|----------|
+| &xxe; | File content | N/A | VULNERABLE |
+| &xxe; | Error | Yes (from server) | VULNERABLE (blind) |
+| &xxe; | Entity literally | No | NOT VULNERABLE |
+| &xxe; | Empty/ignored | No | NOT VULNERABLE |
+</validity_decision_matrix>
+
+<common_false_positive_patterns>
+REJECT if you observe:
+- Entity references returned literally (not expanded)
+- Parser errors without file content
+- DTD processing explicitly disabled
+- Client-side XML parsing only
+- OAST callback from your browser, not server
+</common_false_positive_patterns>
+</xxe_verification>

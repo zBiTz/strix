@@ -1,0 +1,57 @@
+<race_conditions_verification>
+<validity_requirements>
+For a race condition claim to be VALID, you must independently verify:
+
+1. EXPLOITABLE TIMING WINDOW
+   - Race condition can be practically exploited
+   - NOT: Theoretical TOCTOU without practical exploitation
+   - Check: Can parallel requests achieve the race?
+
+2. MEANINGFUL IMPACT
+   - Race leads to security-relevant outcome
+   - NOT: Transient state with no lasting effect
+   - Check: Double spend? Auth bypass? Privilege escalation?
+
+3. REPRODUCIBILITY
+   - Race can be reliably triggered
+   - NOT: One-time occurrence
+   - Check: Works consistently across multiple attempts?
+</validity_requirements>
+
+<independent_control_tests>
+YOU MUST DESIGN YOUR OWN TESTS. Do not reproduce the reporter's tests.
+
+TEST 1: TIMING EXPLOITATION TEST
+Purpose: Verify race condition is exploitable
+Steps:
+1. Identify the TOCTOU window
+2. Send 10+ parallel requests within timing window
+3. Check for race success: duplicate transactions, balance errors
+4. Repeat multiple times to confirm reproducibility
+
+TEST 2: IMPACT VERIFICATION
+Purpose: Verify race has meaningful impact
+Steps:
+1. Document what the race achieves
+2. Quantify impact: financial, privilege, data
+3. Verify impact persists (not auto-corrected)
+</independent_control_tests>
+
+<validity_decision_matrix>
+| Race Success | Impact Persists | Reproducible | Decision |
+|--------------|-----------------|--------------|----------|
+| Yes | Yes | Consistent | VULNERABLE |
+| Yes | Auto-corrected | Any | LIMITED impact |
+| No | N/A | Multiple attempts | NOT VULNERABLE |
+| Yes | Yes | Once only | INVESTIGATE |
+</validity_decision_matrix>
+
+<common_false_positive_patterns>
+REJECT if you observe:
+- Database transactions prevent race
+- Atomic operations in use
+- Effects auto-corrected by reconciliation
+- Theoretical race without practical exploitation
+- Race only possible with localhost timing
+</common_false_positive_patterns>
+</race_conditions_verification>

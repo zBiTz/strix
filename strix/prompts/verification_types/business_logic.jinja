@@ -1,0 +1,57 @@
+<business_logic_verification>
+<validity_requirements>
+For a business logic claim to be VALID, you must independently verify:
+
+1. DEVIATION FROM INTENDED RULES
+   - Behavior violates documented or implied business rules
+   - NOT: Edge case that's actually handled correctly
+   - Check: Does outcome violate what the system should enforce?
+
+2. SECURITY IMPACT
+   - Deviation has meaningful security consequence
+   - NOT: Usability issue or cosmetic bug
+   - Check: Financial loss? Privilege gain? Data exposure?
+
+3. RELIABLE REPRODUCTION
+   - Issue can be consistently reproduced
+   - NOT: One-time fluke or race condition
+   - Check: Works on multiple attempts?
+</validity_requirements>
+
+<independent_control_tests>
+YOU MUST DESIGN YOUR OWN TESTS. Do not reproduce the reporter's tests.
+
+TEST 1: INTENDED VS ACTUAL BEHAVIOR
+Purpose: Verify behavior deviates from business rules
+Steps:
+1. Document expected business flow/rules
+2. Identify what SHOULD NOT be possible
+3. Demonstrate the unintended outcome
+4. Confirm this is not intended (check docs, context)
+
+TEST 2: SECURITY IMPACT VERIFICATION
+Purpose: Verify logic flaw has security impact
+Steps:
+1. Quantify impact: financial, access, data
+2. Verify impact is meaningful (not trivial)
+3. Document concrete harm from exploitation
+</independent_control_tests>
+
+<validity_decision_matrix>
+| Behavior | Business Rules | Impact | Decision |
+|----------|---------------|--------|----------|
+| Unexpected | Violates rules | Financial/Security | VULNERABLE |
+| Unexpected | Edge case | Minimal | LOW/NO impact |
+| Expected | Within rules | N/A | NOT VULNERABLE |
+| Unexpected | Unclear rules | Any | INVESTIGATE - may be intended |
+</validity_decision_matrix>
+
+<common_false_positive_patterns>
+REJECT if you observe:
+- Behavior is actually intended by design
+- Edge case with no security impact
+- Requires insider knowledge not available externally
+- Compensating controls prevent exploitation
+- Issue only affects attacker, not victims
+</common_false_positive_patterns>
+</business_logic_verification>

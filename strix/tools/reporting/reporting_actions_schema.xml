@@ -1,15 +1,25 @@
 <tools>
   <tool name="create_vulnerability_report">
-    <description>Create a vulnerability report with MANDATORY structured evidence.
+    <description>Create a vulnerability report with MANDATORY structured evidence for two-phase verification.
 
-Reports are submitted to a verification queue and must pass verification before becoming final.
-This eliminates false positives by requiring concrete proof of exploitation.
+Reports are submitted to a verification queue and must pass TWO-PHASE VERIFICATION:
+- Phase 1: Reproducibility - Can the verification agent reproduce the behavior?
+- Phase 2: Validity - Does the behavior actually prove the claimed vulnerability?
+
+This eliminates false positives by requiring:
+1. A classified vulnerability_type from the registry
+2. A specific claim_assertion describing what you're claiming
+3. Reporter-performed control tests demonstrating the vulnerability
+4. Proper negative control validation
 
 MANDATORY PRE-SUBMISSION CHECKLIST - Verify ALL before calling:
+[ ] Vulnerability type: You specified the correct vulnerability_type from the registry
+[ ] Claim assertion: You documented the specific security claim being made
 [ ] Baseline established: You documented normal behavior BEFORE the exploit
 [ ] Controlled test: Your specific payload caused the specific effect
 [ ] Reproducible: You reproduced this 3+ times consecutively
-[ ] Negative control: You verified unauthorized users are denied
+[ ] Negative control PASSED: You verified the target resource IS protected
+[ ] Control tests: You included at least one control test proving the vulnerability
 [ ] Impact demonstrated: You proved actual security consequence (not just an error)
 [ ] Evidence included: Raw requests/responses are in the evidence parameter
 
@@ -20,9 +30,16 @@ DO NOT USE THIS TOOL IF:
 - You see errors but have not demonstrated data extraction (SQLi)
 - You accessed data but have not proven it should be protected (IDOR)
 - You caused a server request but cannot access internal resources (SSRF)
+- You tested the WRONG control (e.g., testing inside path vs. direct access)
+- Your negative control did NOT pass (resource was publicly accessible)
 - You are guessing about impact rather than demonstrating it
 - You are the Discovery agent (only Reporting agents may use this)
 - You did not receive validation evidence from a Validation agent
+
+CRITICAL: Your control tests must prove the SEMANTIC CLAIM, not just reproduce behavior.
+For path traversal: test DIRECT access to the target resource (not just traversal)
+For IDOR: test access as DIFFERENT user (not just different ID)
+For SQLi: test TRUE vs FALSE predicates returning DIFFERENT data
 
 SEVERITY GUIDE - Use demonstrated impact, not theoretical maximum:
 - CRITICAL: You demonstrated RCE, full DB dump, or admin takeover
@@ -37,7 +54,7 @@ SEVERITY GUIDE - Use demonstrated impact, not theoretical maximum:
       <parameter name="content" type="string" required="true">
         <description>REQUIRED SECTIONS:
 ## Vulnerability Summary
-[Type, location, root cause]
+[Type, location, root cause, claim being made]
 
 ## Affected Endpoint
 [Exact URL, method, parameter]
@@ -51,6 +68,9 @@ SEVERITY GUIDE - Use demonstrated impact, not theoretical maximum:
 
 ### Exploit Request/Response
 [Request with payload and response showing impact]
+
+### Control Tests Performed
+[YOUR control tests proving the vulnerability - not just reproduction]
 
 ### Negative Control
 [Proof that authorization exists - unauthorized request fails]
@@ -66,6 +86,20 @@ SEVERITY GUIDE - Use demonstrated impact, not theoretical maximum:
       </parameter>
       <parameter name="evidence" type="object" required="true">
         <description>MANDATORY structured evidence object containing:
+
+vulnerability_type: (REQUIRED) Type from registry. Valid types:
+  sql_injection, xss, idor, ssrf, rce, csrf, path_traversal_lfi_rfi,
+  authentication_jwt, xxe, business_logic, race_conditions, insecure_file_uploads,
+  mass_assignment, information_disclosure, open_redirect, subdomain_takeover,
+  broken_function_level_authorization, http_request_smuggling, cache_poisoning,
+  crlf_header_injection, oauth_oidc_misconfiguration, deserialization,
+  nosql_ldap_injection, ssti, rate_limiting_abuse, cors_misconfiguration,
+  application_dos, clickjacking
+
+claim_assertion: (REQUIRED, min 20 chars) The specific security claim being made.
+  Example: "Path traversal bypasses directory restriction to access protected config file"
+  Example: "IDOR allows authenticated user to access another user's private data"
+  Example: "SQL injection allows extraction of user credentials from database"
 
 primary_evidence: Array of HTTP request/response objects (at least 1 required):
   - method: HTTP method (GET, POST, etc.)
@@ -90,19 +124,38 @@ target_url: The primary affected URL (required)
 
 affected_parameter: The specific vulnerable parameter (optional)
 
-baseline_state: State before exploitation, e.g., "user has no admin access" (optional but recommended)
+baseline_state: State before exploitation (optional but recommended)
 
-exploited_state: State after exploitation, e.g., "user now has admin access" (optional but recommended)
+exploited_state: State after exploitation (optional but recommended)
 
 reproduction_count: Number of successful reproductions (default 1, recommend 3+)
 
-negative_control_passed: Boolean indicating if negative control was tested (recommend true)
+negative_control_passed: (REQUIRED, must be true) Boolean confirming negative control passed.
+  This MUST be true - you must have verified that the target resource IS protected.
+  If your negative control fails (resource is publicly accessible), DO NOT REPORT.
 
-negative_control_description: Description of negative control test performed (optional)</description>
+negative_control_description: (REQUIRED, min 20 chars) Description of negative control test.
+  Must describe what you tested and why it proves authorization exists.
+  Example: "Tested direct GET /csscw3.nsf/ without auth - returned 401 Unauthorized"
+  Example: "Accessed /api/users/999 as user 123 without admin role - returned 403 Forbidden"
+
+reporter_control_tests: (REQUIRED, at least 1) Array of control test objects:
+  - test_name: Name of the control test (e.g., "direct_access_test", "unauthorized_user_test")
+  - description: What this test proves
+  - request: HTTP evidence object for this test
+  - expected_if_vulnerable: What result indicates vulnerability
+  - expected_if_not_vulnerable: What result indicates no vulnerability
+  - actual_result: What actually happened
+  - conclusion: One of "vulnerable", "not_vulnerable", or "inconclusive"
+
+CRITICAL: reporter_control_tests must prove the SEMANTIC claim:
+  - For path traversal: Test DIRECT access to the resolved path
+  - For IDOR: Test as unauthorized user to same resource
+  - For SQLi: Test TRUE vs FALSE predicates with different data results</description>
       </parameter>
     </parameters>
     <returns type="Dict[str, Any]">
-      <description>Response with report_id, status (pending_verification), and message. Reports must be verified before becoming final.</description>
+      <description>Response with report_id, status (pending_verification), and message. Reports must pass two-phase verification before becoming final.</description>
     </returns>
   </tool>
 </tools>

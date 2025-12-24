@@ -1,0 +1,58 @@
+<oauth_oidc_misconfiguration_verification>
+<validity_requirements>
+For an OAuth/OIDC misconfiguration claim to be VALID, you must independently verify:
+
+1. EXPLOITABLE WEAKNESS
+   - OAuth flow has exploitable vulnerability
+   - NOT: Just poor practices without exploitation
+   - Check: Can you steal tokens or impersonate users?
+
+2. TOKEN/CODE THEFT OR BYPASS
+   - Can obtain tokens/codes belonging to others
+   - NOT: Your own tokens (that's normal)
+   - Check: Can you get victim's access token?
+
+3. REDIRECT_URI MANIPULATION
+   - Can redirect auth flow to attacker domain
+   - NOT: Strict validation preventing redirect
+   - Check: Does token/code go to your server?
+</validity_requirements>
+
+<independent_control_tests>
+YOU MUST DESIGN YOUR OWN TESTS. Do not reproduce the reporter's tests.
+
+TEST 1: TOKEN THEFT OR BYPASS
+Purpose: Verify OAuth flow can be exploited
+Steps:
+1. Test redirect_uri manipulation to attacker domain
+2. Check for token leakage (missing state, fragment)
+3. Test PKCE bypass if applicable
+4. Verify token/code can be captured
+
+TEST 2: REDIRECT_URI VALIDATION
+Purpose: Verify redirect_uri not properly validated
+Steps:
+1. Try: redirect_uri=https://evil.com
+2. Try bypass: redirect_uri=https://trusted.com@evil.com
+3. Try subdomain: redirect_uri=https://evil.trusted.com
+4. Verify code/token delivered to attacker
+</independent_control_tests>
+
+<validity_decision_matrix>
+| Weakness | Token Theft Possible | Reproducible | Decision |
+|----------|---------------------|--------------|----------|
+| Open redirect_uri | Yes | Consistent | VULNERABLE |
+| Missing state | CSRF possible | Consistent | VULNERABLE |
+| Strict validation | No | N/A | NOT VULNERABLE |
+| PKCE enforced | Partial | Limited | INVESTIGATE |
+</validity_decision_matrix>
+
+<common_false_positive_patterns>
+REJECT if you observe:
+- Strict redirect_uri allowlist enforced
+- State parameter properly implemented
+- PKCE required and validated
+- Token binding prevents theft
+- Only theoretical weakness without PoC
+</common_false_positive_patterns>
+</oauth_oidc_misconfiguration_verification>

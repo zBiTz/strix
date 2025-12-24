@@ -1,0 +1,57 @@
+<subdomain_takeover_verification>
+<validity_requirements>
+For a subdomain takeover claim to be VALID, you must independently verify:
+
+1. DANGLING DNS RECORD
+   - DNS points to unclaimed/claimable resource
+   - NOT: Working resource or unresolvable domain
+   - Check: CNAME/A to unclaimed S3, Heroku, Azure, etc.?
+
+2. RESOURCE CLAIMABLE
+   - The target resource can be claimed by attacker
+   - NOT: Resource owned by organization or uncreatable
+   - Check: Can you claim the bucket/app/blob?
+
+3. CONTENT CONTROL
+   - Your content is served on the subdomain
+   - NOT: Just DNS pointing to error page
+   - Check: Can you serve arbitrary content?
+</validity_requirements>
+
+<independent_control_tests>
+YOU MUST DESIGN YOUR OWN TESTS. Do not reproduce the reporter's tests.
+
+TEST 1: DNS CLAIM VERIFICATION
+Purpose: Verify subdomain can be claimed
+Steps:
+1. Identify dangling CNAME/A record
+2. Check if target service allows claiming
+3. Claim the resource (S3 bucket, Heroku app)
+4. Verify your content is served on subdomain
+
+TEST 2: CONTROL DEMONSTRATION
+Purpose: Verify full control of content
+Steps:
+1. Serve custom HTML on the subdomain
+2. Verify accessible via subdomain URL
+3. Demonstrate control (custom content, cookies)
+</independent_control_tests>
+
+<validity_decision_matrix>
+| DNS Record | Resource Status | Content Control | Decision |
+|------------|-----------------|-----------------|----------|
+| Dangling CNAME | Claimable | Full control | VULNERABLE |
+| Dangling CNAME | Already owned | None | NOT VULNERABLE |
+| Valid CNAME | Working resource | N/A | NOT VULNERABLE |
+| Dangling CNAME | Unclaimable service | None | NOT VULNERABLE |
+</validity_decision_matrix>
+
+<common_false_positive_patterns>
+REJECT if you observe:
+- Resource already claimed by organization
+- DNS properly configured and working
+- Service doesn't allow external claiming
+- Subdomain not in main domain trust boundary
+- Generic error page without content control
+</common_false_positive_patterns>
+</subdomain_takeover_verification>

@@ -1,0 +1,57 @@
+<deserialization_verification>
+<validity_requirements>
+For a deserialization claim to be VALID, you must independently verify:
+
+1. GADGET CHAIN EXECUTION
+   - Deserialization triggers exploitable gadget chain
+   - NOT: Just deserialization happening (that's a feature)
+   - Check: Does RCE or logic bypass occur?
+
+2. UNTRUSTED INPUT DESERIALIZED
+   - You control the serialized input
+   - NOT: Internal serialization only
+   - Check: Can you submit crafted serialized data?
+
+3. OBSERVABLE IMPACT
+   - Execution produces verifiable effect
+   - NOT: Just acceptance without side effects
+   - Check: OAST callback or command output?
+</validity_requirements>
+
+<independent_control_tests>
+YOU MUST DESIGN YOUR OWN TESTS. Do not reproduce the reporter's tests.
+
+TEST 1: GADGET CHAIN EXECUTION
+Purpose: Verify deserialization executes gadget
+Steps:
+1. Identify serialization format (Java, Python pickle, PHP)
+2. Craft payload with known gadget chain
+3. Submit serialized payload
+4. Verify execution via OAST or observable effect
+
+TEST 2: IMPACT VERIFICATION
+Purpose: Verify RCE or logic bypass achieved
+Steps:
+1. Use OAST callback in gadget payload
+2. Verify callback received from target server
+3. Test command execution if possible
+</independent_control_tests>
+
+<validity_decision_matrix>
+| Serialized Input | Gadget Available | Execution | Decision |
+|-----------------|------------------|-----------|----------|
+| Attacker-controlled | Yes | RCE/callback | VULNERABLE |
+| Attacker-controlled | No gadgets | None | NOT VULNERABLE |
+| Internal only | Any | N/A | NOT VULNERABLE |
+| Attacker-controlled | Yes | Filtered | NOT VULNERABLE |
+</validity_decision_matrix>
+
+<common_false_positive_patterns>
+REJECT if you observe:
+- Type filtering prevents gadget loading
+- Look-ahead deserialization blocks dangerous classes
+- No exploitable gadget chain in classpath
+- Serialized data is signed/encrypted
+- Internal serialization not accepting external input
+</common_false_positive_patterns>
+</deserialization_verification>

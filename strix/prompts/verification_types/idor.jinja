@@ -1,0 +1,69 @@
+<idor_verification>
+<validity_requirements>
+For an IDOR claim to be VALID, you must independently verify:
+
+1. CROSS-ACCOUNT ACCESS
+   - Data accessed belongs to a DIFFERENT user than the authenticated requester
+   - NOT: Accessing your own data via a different ID format
+   - Check: Does the user ID in response differ from your authenticated user?
+
+2. DATA SHOULD BE PRIVATE
+   - The accessed data type is meant to be protected, not public
+   - NOT: Public profiles, published posts, directory listings
+   - Check: Would a reasonable user expect this data to be private?
+
+3. AUTHORIZATION BOUNDARY EXISTS
+   - Proper authorization would deny this access
+   - NOT: Admin accessing any user (that's their job)
+   - Check: Does unauthorized access to the same resource fail?
+</validity_requirements>
+
+<independent_control_tests>
+YOU MUST DESIGN YOUR OWN TESTS. Do not reproduce the reporter's tests.
+
+TEST 1: AUTHORIZATION BOUNDARY TEST
+Purpose: Verify authorization exists and is being bypassed
+Steps:
+1. Identify the resource (e.g., /api/users/123)
+2. Access it as an UNAUTHENTICATED user or with a DIFFERENT account
+3. Compare responses:
+   - If unauthorized returns 403/401 but ID swap works -> VULNERABLE
+   - If unauthorized also returns data -> Resource may be public
+   - If both fail -> No IDOR, authorization working
+
+TEST 2: CROSS-ACCOUNT VERIFICATION
+Purpose: Confirm you accessed another user's data
+Steps:
+1. Use Account A credentials
+2. Request resource belonging to Account B
+3. Verify returned data has Account B identifiers (different user_id, email, etc.)
+4. Confirm Account A does NOT legitimately have access to Account B
+
+TEST 3: PUBLIC DATA EXCLUSION
+Purpose: Confirm data should be private
+Steps:
+1. Identify the data type (profile, invoice, message, etc.)
+2. Check if this data type is intentionally public
+3. Test if unauthenticated users can access similar data types
+</independent_control_tests>
+
+<validity_decision_matrix>
+| Unauthorized Access | ID Swap Access | Data Type | Decision |
+|--------------------|----------------|-----------|----------|
+| 403 Forbidden | 200 with other's data | Private (PII, financial) | VULNERABLE |
+| 200 with data | 200 with same data | Public (profiles) | NOT VULNERABLE |
+| 401 Unauthorized | 200 with other's data | Private | VULNERABLE |
+| 200 with data | 200 with other's data | Any | Check if role-appropriate |
+| 403 Forbidden | 403 Forbidden | Any | NOT VULNERABLE |
+</validity_decision_matrix>
+
+<common_false_positive_patterns>
+REJECT if you observe:
+- Accessing your own data via different ID format
+- Public user profiles or published content
+- Admin/staff accessing data they're authorized to view
+- ID enumeration (existence detection) without content access
+- Manager seeing team member data (role-appropriate)
+- Directory listings designed for discovery
+</common_false_positive_patterns>
+</idor_verification>

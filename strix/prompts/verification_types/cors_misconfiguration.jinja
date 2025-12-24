@@ -1,0 +1,57 @@
+<cors_misconfiguration_verification>
+<validity_requirements>
+For a CORS misconfiguration claim to be VALID, you must independently verify:
+
+1. SENSITIVE DATA ACCESSIBLE
+   - Cross-origin request returns sensitive data
+   - NOT: Public data accessible anyway
+   - Check: Is response data authenticated/private?
+
+2. ORIGIN REFLECTED OR PERMISSIVE
+   - ACAO header reflects attacker origin or is wildcard
+   - NOT: Strict origin allowlist
+   - Check: Does evil.com get ACAO: evil.com?
+
+3. CREDENTIALS INCLUDED
+   - Cookies/auth sent with cross-origin request
+   - NOT: Unauthenticated public data
+   - Check: ACAC: true and authenticated response?
+</validity_requirements>
+
+<independent_control_tests>
+YOU MUST DESIGN YOUR OWN TESTS. Do not reproduce the reporter's tests.
+
+TEST 1: ORIGIN REFLECTION TEST
+Purpose: Verify arbitrary origin accepted
+Steps:
+1. Request with Origin: https://evil.com
+2. Check Access-Control-Allow-Origin header
+3. Verify: reflected origin, or null/wildcard
+4. Confirm sensitive data in response
+
+TEST 2: CREDENTIAL INCLUSION TEST
+Purpose: Verify cookies sent cross-origin
+Steps:
+1. Check ACAC: true in response
+2. Verify cookies sent with request
+3. Confirm authenticated data returned
+</independent_control_tests>
+
+<validity_decision_matrix>
+| ACAO Header | ACAC | Data Type | Decision |
+|-------------|------|-----------|----------|
+| Reflects attacker | true | Sensitive | VULNERABLE |
+| Strict allowlist | Any | Any | NOT VULNERABLE |
+| * (wildcard) | false | Any | LIMITED (no creds) |
+| Reflects attacker | true | Public | NOT VULNERABLE |
+</validity_decision_matrix>
+
+<common_false_positive_patterns>
+REJECT if you observe:
+- Strict origin allowlist in place
+- Wildcard without credentials
+- Only public endpoints affected
+- SameSite cookies prevent abuse
+- Data accessible without auth anyway
+</common_false_positive_patterns>
+</cors_misconfiguration_verification>

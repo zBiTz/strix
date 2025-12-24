@@ -1,0 +1,71 @@
+<path_traversal_verification>
+<validity_requirements>
+For a path traversal claim to be VALID, you must independently verify:
+
+1. FILE CONTENT RETRIEVED (not errors)
+   - Response contains actual file content from OUTSIDE the intended directory
+   - NOT: 404, 403, "file not found", error pages, or traversal sequences echoed back
+   - Check: Does response look like file content or an error page?
+
+2. DIRECT ACCESS COMPARISON (CRITICAL)
+   - Calculate the resolved path: /files/F2/../../etc/passwd resolves to /etc/passwd
+   - Test DIRECT access to the resolved path (without traversal)
+   - Compare: Direct vs traversal responses
+   - If both return same content -> Resource is PUBLIC, NOT a vulnerability
+
+3. CONTENT VERIFICATION
+   - Retrieved content matches expected file format
+   - /etc/passwd: Contains root:x:0:0 format
+   - Config files: Contains configuration syntax
+   - Web files: Contains HTML/JS/CSS structure
+</validity_requirements>
+
+<independent_control_tests>
+YOU MUST DESIGN YOUR OWN TESTS. Do not reproduce the reporter's tests.
+
+TEST 1: DIRECT PATH ACCESS
+Purpose: Verify the target resource is actually access-controlled
+Steps:
+1. Identify what path the traversal resolves to (e.g., ../../csscw3.nsf -> /csscw3.nsf)
+2. Request that path DIRECTLY without any traversal
+3. Compare responses:
+   - If direct returns 403/404 but traversal returns 200 with content -> VULNERABLE
+   - If both return same content -> NOT VULNERABLE (public resource)
+   - If both return errors -> NOT VULNERABLE (properly blocked)
+
+TEST 2: IN-ROOT BASELINE
+Purpose: Establish what authorized access looks like
+Steps:
+1. Access a known file INSIDE the intended directory
+2. Document: response format, size, content type
+3. This is your baseline for "authorized" access
+
+TEST 3: ERROR COMPARISON
+Purpose: Distinguish exploit success from failure
+Steps:
+1. Request a definitely-nonexistent file (e.g., /files/aaaa9999bbbb.txt)
+2. Document the error response
+3. If exploit response matches error response -> NOT exploited
+</independent_control_tests>
+
+<validity_decision_matrix>
+| Direct Access Result | Traversal Result | Decision |
+|---------------------|------------------|----------|
+| 200 with content | 200 with same content | NOT VULNERABLE - public resource |
+| 403 Forbidden | 200 with content | VULNERABLE - access control bypassed |
+| 404 Not Found | 200 with content | VULNERABLE - hidden resource accessed |
+| 404 Not Found | 404 Not Found | NOT VULNERABLE - traversal blocked |
+| Error message | Error message | NOT VULNERABLE - properly handled |
+| N/A | Traversal echoed in response | NOT VULNERABLE - reflection only |
+</validity_decision_matrix>
+
+<common_false_positive_patterns>
+REJECT if you observe:
+- 404 or "file not found" errors on traversal paths
+- Error messages containing path info but no file content
+- Traversal sequences (../) appearing in response body
+- Virtual path systems (database IDs that look like paths)
+- Both direct and traversal returning identical content
+- Response matches error baseline
+</common_false_positive_patterns>
+</path_traversal_verification>

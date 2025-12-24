@@ -7,7 +7,12 @@ by requiring concrete proof of exploitation.
 
 from typing import Any
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
+
+from strix.tools.reporting.vulnerability_types import (
+    get_vulnerability_type_spec,
+    validate_vulnerability_type,
+)
 
 
 class HttpEvidence(BaseModel):
@@ -84,6 +89,54 @@ class ReproductionStep(BaseModel):
     )
 
 
+class ControlTestResult(BaseModel):
+    """Result of an independent control test performed by the reporter.
+
+    Control tests are required to validate that a vulnerability is genuine
+    and not a false positive. Each control test verifies a specific aspect
+    of the vulnerability claim.
+    """
+
+    test_name: str = Field(
+        min_length=1,
+        description="Name of the control test (must match type-specific requirement)",
+    )
+    description: str = Field(
+        min_length=10,
+        description="Description of what this test verifies",
+    )
+    request: HttpEvidence = Field(
+        description="The HTTP request made for this control test",
+    )
+    expected_if_vulnerable: str = Field(
+        min_length=5,
+        description="What response would indicate the vulnerability is genuine",
+    )
+    expected_if_not_vulnerable: str = Field(
+        min_length=5,
+        description="What response would indicate this is a false positive",
+    )
+    actual_result: str = Field(
+        min_length=5,
+        description="What actually happened when the test was executed",
+    )
+    conclusion: str = Field(
+        min_length=5,
+        description="Conclusion: 'vulnerable' or 'not_vulnerable' based on result",
+    )
+
+    @field_validator("conclusion")
+    @classmethod
+    def validate_conclusion(cls, v: str) -> str:
+        """Validate conclusion is a valid value."""
+        v = v.lower().strip()
+        valid_conclusions = {"vulnerable", "not_vulnerable", "inconclusive"}
+        if v not in valid_conclusions:
+            msg = f"Conclusion must be one of: {valid_conclusions}"
+            raise ValueError(msg)
+        return v
+
+
 class VulnerabilityEvidence(BaseModel):
     """Complete evidence package for a vulnerability report.
 
@@ -91,6 +144,20 @@ class VulnerabilityEvidence(BaseModel):
     vulnerability reports have concrete proof of exploitation.
     Reports without proper evidence cannot be submitted.
     """
+
+    # Vulnerability type classification (REQUIRED)
+    vulnerability_type: str = Field(
+        ...,
+        min_length=1,
+        description="Vulnerability type from registry (e.g., 'path_traversal_lfi_rfi', 'idor')",
+    )
+
+    # Claim assertion (REQUIRED)
+    claim_assertion: str = Field(
+        ...,
+        min_length=20,
+        description="The specific security claim being made (e.g., 'Path traversal allows reading /etc/passwd')",
+    )
 
     # Primary evidence: at least one HTTP exchange proving the vulnerability
     primary_evidence: list[HttpEvidence] = Field(
@@ -137,13 +204,22 @@ class VulnerabilityEvidence(BaseModel):
         ge=1,
         description="Number of times this was successfully reproduced",
     )
+
+    # Control test evidence (REQUIRED)
     negative_control_passed: bool = Field(
-        default=False,
-        description="Whether unauthorized access was correctly denied in control test",
+        ...,
+        description="Whether the control test confirmed the vulnerability is genuine (must be True)",
     )
-    negative_control_description: str | None = Field(
-        default=None,
-        description="Description of the negative control test performed",
+    negative_control_description: str = Field(
+        ...,
+        min_length=20,
+        description="Detailed description of the negative control test performed",
+    )
+
+    # Independent control tests performed by reporter (REQUIRED)
+    reporter_control_tests: list[ControlTestResult] = Field(
+        min_length=1,
+        description="Control tests performed by reporter to validate the vulnerability",
     )
 
     @field_validator("primary_evidence")
@@ -165,6 +241,61 @@ class VulnerabilityEvidence(BaseModel):
             msg = f"Reproduction steps must be sequentially numbered 1 to {len(v)}"
             raise ValueError(msg)
         return v
+
+    @field_validator("vulnerability_type")
+    @classmethod
+    def validate_vulnerability_type_exists(cls, v: str) -> str:
+        """Ensure vulnerability type is valid and exists in registry."""
+        is_valid, error = validate_vulnerability_type(v)
+        if not is_valid:
+            raise ValueError(error)
+        return v
+
+    @field_validator("negative_control_passed")
+    @classmethod
+    def validate_negative_control_required(cls, v: bool) -> bool:
+        """Ensure negative control passed - required for valid reports."""
+        if not v:
+            msg = (
+                "negative_control_passed must be True. "
+                "You must perform a control test that confirms the vulnerability is genuine. "
+                "If your control test failed, this indicates a potential false positive."
+            )
+            raise ValueError(msg)
+        return v
+
+    @model_validator(mode="after")
+    def validate_control_tests_cover_requirements(self) -> "VulnerabilityEvidence":
+        """Ensure control tests cover type-specific requirements."""
+        type_spec = get_vulnerability_type_spec(self.vulnerability_type)
+        if type_spec is None:
+            return self  # Type validation will catch invalid types
+
+        # Get required control test names for this type
+        required_tests = {req.name for req in type_spec.control_test_requirements}
+        performed_tests = {test.test_name for test in self.reporter_control_tests}
+
+        # Check all required tests were performed
+        missing = required_tests - performed_tests
+        if missing:
+            msg = (
+                f"Missing required control tests for {self.vulnerability_type}: "
+                f"{', '.join(sorted(missing))}. "
+                f"Each vulnerability type requires specific control tests to validate the claim."
+            )
+            raise ValueError(msg)
+
+        # Check all control tests concluded as vulnerable
+        for test in self.reporter_control_tests:
+            if test.conclusion != "vulnerable":
+                msg = (
+                    f"Control test '{test.test_name}' concluded '{test.conclusion}'. "
+                    f"All control tests must conclude 'vulnerable' for a valid report. "
+                    f"If a control test shows 'not_vulnerable', this is a false positive."
+                )
+                raise ValueError(msg)
+
+        return self
 
 
 def validate_evidence(

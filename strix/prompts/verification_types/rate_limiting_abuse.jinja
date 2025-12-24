@@ -1,0 +1,57 @@
+<rate_limiting_abuse_verification>
+<validity_requirements>
+For a rate limiting abuse claim to be VALID, you must independently verify:
+
+1. LIMIT BYPASS POSSIBLE
+   - Rate limit can be circumvented
+   - NOT: Limit properly enforced
+   - Check: Can you sustain high request rate?
+
+2. MEANINGFUL ATTACK ENABLED
+   - Bypass enables real attack (brute force, scraping)
+   - NOT: Just faster API access
+   - Check: Can you brute force passwords?
+
+3. PRACTICAL EXPLOITATION
+   - Attack is feasible with reasonable resources
+   - NOT: Requires massive infrastructure
+   - Check: Works from single IP with simple bypass?
+</validity_requirements>
+
+<independent_control_tests>
+YOU MUST DESIGN YOUR OWN TESTS. Do not reproduce the reporter's tests.
+
+TEST 1: LIMIT BYPASS TEST
+Purpose: Verify rate limit can be bypassed
+Steps:
+1. Identify rate-limited endpoint (login, API)
+2. Test bypass: different IPs, headers, user agents
+3. Check if limit resets with bypass technique
+4. Verify sustained high rate possible
+
+TEST 2: ATTACK VIABILITY TEST
+Purpose: Verify bypass enables meaningful attack
+Steps:
+1. Identify sensitive operation (login, OTP)
+2. Test brute force with bypass
+3. Verify attack is practical
+</independent_control_tests>
+
+<validity_decision_matrix>
+| Bypass Works | Attack Possible | Practical | Decision |
+|--------------|-----------------|-----------|----------|
+| Yes | Brute force login | Simple bypass | VULNERABLE |
+| Yes | Scraping only | Any | LIMITED impact |
+| No | N/A | N/A | NOT VULNERABLE |
+| Yes | Theoretical | Massive resources | LOW impact |
+</validity_decision_matrix>
+
+<common_false_positive_patterns>
+REJECT if you observe:
+- Rate limit properly enforced
+- Bypass requires unrealistic resources
+- No sensitive operation to brute force
+- Account lockout prevents brute force
+- Limit is generous by design
+</common_false_positive_patterns>
+</rate_limiting_abuse_verification>

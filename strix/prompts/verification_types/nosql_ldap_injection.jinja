@@ -1,0 +1,57 @@
+<nosql_ldap_injection_verification>
+<validity_requirements>
+For a NoSQL/LDAP injection claim to be VALID, you must independently verify:
+
+1. QUERY MANIPULATION
+   - Can manipulate query logic via injection
+   - NOT: Just unusual input handling
+   - Check: Does query behavior change with operators?
+
+2. DATA EXTRACTION OR BYPASS
+   - Can extract data or bypass authentication
+   - NOT: Just error messages
+   - Check: Auth bypass? Data returned?
+
+3. OPERATOR ACCEPTANCE
+   - NoSQL operators or LDAP filters are processed
+   - NOT: Operators escaped or rejected
+   - Check: {$gt:""} or )(uid=*) works?
+</validity_requirements>
+
+<independent_control_tests>
+YOU MUST DESIGN YOUR OWN TESTS. Do not reproduce the reporter's tests.
+
+TEST 1: QUERY MANIPULATION TEST
+Purpose: Verify query can be controlled
+Steps:
+1. For NoSQL: {"$gt":""}, {"$ne":null}, {"$where":"1==1"}
+2. For LDAP: )(uid=*), *)(|(uid=*)
+3. Compare TRUE vs FALSE predicate responses
+4. Verify data extraction or auth bypass
+
+TEST 2: OPERATOR PROCESSING TEST
+Purpose: Verify operators are processed
+Steps:
+1. Inject operator in parameter
+2. Check if behavior changes
+3. Verify not just string comparison
+</independent_control_tests>
+
+<validity_decision_matrix>
+| Operator Handling | Query Effect | Impact | Decision |
+|-------------------|--------------|--------|----------|
+| Processed | Auth bypass | High | VULNERABLE |
+| Processed | Data extraction | High | VULNERABLE |
+| Escaped/rejected | None | None | NOT VULNERABLE |
+| Processed | Error only | Low | LIMITED impact |
+</validity_decision_matrix>
+
+<common_false_positive_patterns>
+REJECT if you observe:
+- Operators properly escaped
+- Parameterized queries used
+- Input sanitization in place
+- No observable query change
+- Only error messages without data
+</common_false_positive_patterns>
+</nosql_ldap_injection_verification>

@@ -1,0 +1,57 @@
+<cache_poisoning_verification>
+<validity_requirements>
+For a cache poisoning claim to be VALID, you must independently verify:
+
+1. SHARED CACHE
+   - Response is cached and shared across users
+   - NOT: Per-user cache or no caching
+   - Check: Does another user receive the cached response?
+
+2. POISONED CONTENT SERVED
+   - Your malicious content is served to others
+   - NOT: Just cached for yourself
+   - Check: Different client gets poisoned response?
+
+3. UNKEYED INPUT
+   - Poisoning input is not part of cache key
+   - NOT: Input becomes cache key (separate cache)
+   - Check: Same cache key, different content?
+</validity_requirements>
+
+<independent_control_tests>
+YOU MUST DESIGN YOUR OWN TESTS. Do not reproduce the reporter's tests.
+
+TEST 1: POISON PROPAGATION TEST
+Purpose: Verify poisoned response served to others
+Steps:
+1. Identify cache key (URL, relevant headers)
+2. Send request with malicious payload
+3. From DIFFERENT client/IP, send clean request
+4. Verify clean client receives poisoned response
+
+TEST 2: CACHE KEY ANALYSIS
+Purpose: Verify input is unkeyed
+Steps:
+1. Identify what varies responses
+2. Check if that input is in cache key
+3. Verify same key serves different content
+</independent_control_tests>
+
+<validity_decision_matrix>
+| Cache Type | Other Users Affected | Reproducible | Decision |
+|------------|---------------------|--------------|----------|
+| Shared | Yes, poisoned content | Consistent | VULNERABLE |
+| Per-user | No, only attacker | Any | NOT VULNERABLE |
+| None | N/A | N/A | NOT VULNERABLE |
+| Shared | Yes, briefly | Inconsistent | LIMITED window |
+</validity_decision_matrix>
+
+<common_false_positive_patterns>
+REJECT if you observe:
+- Cache is per-user only
+- No caching in place
+- Malicious input becomes cache key
+- Cache properly validates responses
+- Only attacker receives poisoned content
+</common_false_positive_patterns>
+</cache_poisoning_verification>

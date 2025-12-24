@@ -1,0 +1,58 @@
+<clickjacking_verification>
+<validity_requirements>
+For a clickjacking claim to be VALID, you must independently verify:
+
+1. PAGE CAN BE FRAMED
+   - Target page loads in cross-origin iframe
+   - NOT: X-Frame-Options or CSP blocks framing
+   - Check: Does page render in your iframe?
+
+2. SENSITIVE ACTION AVAILABLE
+   - Page contains one-click state-changing action
+   - NOT: Just informational content
+   - Check: Button/link that changes state?
+
+3. ACTION EXPLOITABLE
+   - Click can trigger action through overlay
+   - NOT: Action requires additional input
+   - Check: Can invisible iframe capture click?
+</validity_requirements>
+
+<independent_control_tests>
+YOU MUST DESIGN YOUR OWN TESTS. Do not reproduce the reporter's tests.
+
+TEST 1: FRAMING TEST
+Purpose: Verify target can be framed
+Steps:
+1. Check X-Frame-Options header
+2. Check CSP frame-ancestors directive
+3. Attempt to iframe from attacker domain
+4. Verify page renders without blocking
+
+TEST 2: ACTION EXPLOITABILITY TEST
+Purpose: Verify useful action can be clickjacked
+Steps:
+1. Identify one-click action (delete, transfer)
+2. Verify action doesn't require confirmation
+3. Create PoC with invisible iframe
+4. Demonstrate click triggers action
+</independent_control_tests>
+
+<validity_decision_matrix>
+| Frame Headers | Frameable | Action Type | Decision |
+|--------------|-----------|-------------|----------|
+| None | Yes | State-changing | VULNERABLE |
+| X-Frame-Options: DENY | No | Any | NOT VULNERABLE |
+| CSP frame-ancestors: self | No | Any | NOT VULNERABLE |
+| None | Yes | Informational | LOW/NO impact |
+</validity_decision_matrix>
+
+<common_false_positive_patterns>
+REJECT if you observe:
+- X-Frame-Options: DENY/SAMEORIGIN present
+- CSP frame-ancestors restricts framing
+- No sensitive actions on frameable page
+- Action requires confirmation dialog
+- Multi-step actions not clickjackable
+</common_false_positive_patterns>
+</clickjacking_verification>

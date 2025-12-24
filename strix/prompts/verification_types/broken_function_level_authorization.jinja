@@ -1,0 +1,57 @@
+<broken_function_level_authorization_verification>
+<validity_requirements>
+For a BFLA claim to be VALID, you must independently verify:
+
+1. PRIVILEGED FUNCTION
+   - Function requires elevated privileges
+   - NOT: Public function accessible to all
+   - Check: Is this an admin/staff function?
+
+2. UNAUTHORIZED ACCESS
+   - Low-privilege user can access the function
+   - NOT: User has legitimate access
+   - Check: Does a regular user get in?
+
+3. FUNCTION EXECUTES
+   - The function actually runs, not just endpoint discovered
+   - NOT: Just 200 OK without action
+   - Check: Does the admin action complete?
+</validity_requirements>
+
+<independent_control_tests>
+YOU MUST DESIGN YOUR OWN TESTS. Do not reproduce the reporter's tests.
+
+TEST 1: PRIVILEGE BOUNDARY TEST
+Purpose: Verify function crosses privilege boundary
+Steps:
+1. Identify admin/privileged endpoint
+2. Access with low-privilege credentials
+3. Verify function executes
+4. Confirm function should require higher privileges
+
+TEST 2: FUNCTION EXECUTION VERIFICATION
+Purpose: Verify action completes
+Steps:
+1. Trigger admin function as regular user
+2. Check for actual state change
+3. Verify not just endpoint access but action completion
+</independent_control_tests>
+
+<validity_decision_matrix>
+| User Privilege | Function Access | Execution | Decision |
+|---------------|-----------------|-----------|----------|
+| Low/None | Admin function | Executes | VULNERABLE |
+| Low/None | Admin function | Blocked | NOT VULNERABLE |
+| Admin | Admin function | Executes | Working as designed |
+| Low/None | Public function | Executes | NOT VULNERABLE (public) |
+</validity_decision_matrix>
+
+<common_false_positive_patterns>
+REJECT if you observe:
+- Function properly requires authentication
+- Endpoint discovered but function blocked
+- User has legitimate access to function
+- Admin function correctly restricted
+- Only endpoint discovery without execution
+</common_false_positive_patterns>
+</broken_function_level_authorization_verification>

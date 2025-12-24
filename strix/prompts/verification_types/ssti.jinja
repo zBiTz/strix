@@ -1,0 +1,58 @@
+<ssti_verification>
+<validity_requirements>
+For an SSTI claim to be VALID, you must independently verify:
+
+1. TEMPLATE EVALUATION
+   - Template expressions are evaluated on server
+   - NOT: Literal string returned
+   - Check: Does {{7*7}} return 49?
+
+2. SERVER-SIDE EXECUTION
+   - Execution happens on server, not client
+   - NOT: Client-side template (Angular, Vue)
+   - Check: Can you access server objects?
+
+3. RCE OR SENSITIVE ACCESS
+   - Can achieve RCE or access sensitive data
+   - NOT: Just math evaluation
+   - Check: Can you read files or execute commands?
+</validity_requirements>
+
+<independent_control_tests>
+YOU MUST DESIGN YOUR OWN TESTS. Do not reproduce the reporter's tests.
+
+TEST 1: TEMPLATE EXECUTION TEST
+Purpose: Verify template expressions evaluated
+Steps:
+1. Inject: {{7*7}}, ${7*7}, #{7*7}, <%= 7*7 %>
+2. Check response for "49" (evaluated)
+3. If literal string returned, not vulnerable
+4. Identify template engine from syntax
+
+TEST 2: RCE PROGRESSION TEST
+Purpose: Verify SSTI can achieve RCE
+Steps:
+1. Identify template engine from behavior
+2. Use engine-specific RCE payload
+3. Verify via OAST callback or command output
+4. Test file read if RCE not possible
+</independent_control_tests>
+
+<validity_decision_matrix>
+| Expression | Response | Object Access | Decision |
+|------------|----------|---------------|----------|
+| {{7*7}} | 49 | RCE possible | VULNERABLE |
+| {{7*7}} | 49 | Sandboxed | LIMITED - check bypass |
+| {{7*7}} | {{7*7}} literal | N/A | NOT VULNERABLE |
+| {{7*7}} | Error | N/A | INVESTIGATE |
+</validity_decision_matrix>
+
+<common_false_positive_patterns>
+REJECT if you observe:
+- Client-side template (Angular, Vue, React)
+- Template strings reflected literally
+- Sandbox prevents dangerous access
+- Only string interpolation, no objects
+- Server-side but no dangerous primitives
+</common_false_positive_patterns>
+</ssti_verification>

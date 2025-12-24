@@ -1,0 +1,74 @@
+<sql_injection_verification>
+<validity_requirements>
+For a SQL injection claim to be VALID, you must independently verify:
+
+1. QUERY BEHAVIOR CONTROL
+   - You can demonstrably control query logic, not just cause errors
+   - NOT: Generic database errors without exploitation
+   - Check: Does TRUE predicate differ from FALSE predicate in DATA returned?
+
+2. DATA EXTRACTION OR LOGIC BYPASS
+   - You can extract data OR manipulate query logic
+   - NOT: Just seeing error messages with SQL syntax
+   - Check: Can you extract version, user, database name, or table data?
+
+3. CONSISTENT EXPLOITATION
+   - Injection works reliably across multiple attempts
+   - NOT: One-time timing anomaly or network variance
+   - Check: 5+ requests show consistent exploitable pattern
+</validity_requirements>
+
+<independent_control_tests>
+YOU MUST DESIGN YOUR OWN TESTS. Do not reproduce the reporter's tests.
+
+TEST 1: PREDICATE CONTROL TEST
+Purpose: Prove you can control query logic
+Steps:
+1. Send request with TRUE predicate: ' AND 1=1--
+2. Send request with FALSE predicate: ' AND 1=2--
+3. Compare responses (5 times each for consistency):
+   - TRUE and FALSE should produce DIFFERENT data responses
+   - Difference must be in DATA, not just error messages
+   - If both return same data -> NOT controlling query
+
+TEST 2: DATA EXTRACTION TEST
+Purpose: Prove data can be extracted
+Steps:
+1. Attempt to extract known metadata: version(), user(), database()
+2. Use appropriate technique (UNION, error-based, blind boolean, time-based)
+3. Verify extracted data matches expected format:
+   - Database version should look like version string
+   - User should be valid database user format
+   - NOT: Error text or garbage data
+
+TEST 3: TIMING VALIDATION (for time-based)
+Purpose: Prove delay correlates to SLEEP, not network
+Steps:
+1. Baseline: Send 5 requests WITHOUT sleep payload
+2. Record response times (should be <1s typically)
+3. Exploit: Send 5 requests WITH SLEEP(5) payload
+4. Record response times (should be ~5s consistently)
+5. Compare: Exploit requests must be predictably delayed
+</independent_control_tests>
+
+<validity_decision_matrix>
+| TRUE Predicate | FALSE Predicate | Decision |
+|---------------|-----------------|----------|
+| Data returned | Different data | VULNERABLE - boolean-based SQLi |
+| Data returned | No data/empty | VULNERABLE - boolean-based SQLi |
+| Error | Error | NOT VULNERABLE - no query control |
+| Same data | Same data | NOT VULNERABLE - no predicate effect |
+| 5s delay | 0s delay | VULNERABLE - time-based SQLi |
+| Variable timing | Variable timing | NOT VULNERABLE - network variance |
+</validity_decision_matrix>
+
+<common_false_positive_patterns>
+REJECT if you observe:
+- Generic database errors (connection timeout, constraint violation)
+- Response size differences from timestamps/tokens/CSRF tokens
+- Inconsistent timing not correlated to SLEEP value
+- Scanner reports without manual extraction verification
+- Parameterized queries visible in source code
+- WAF blocks without successful bypass demonstration
+</common_false_positive_patterns>
+</sql_injection_verification>

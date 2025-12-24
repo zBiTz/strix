@@ -2,6 +2,15 @@
 
 This module provides tools for creating vulnerability reports with mandatory
 structured evidence to eliminate false positives.
+
+Reports require:
+1. A valid vulnerability_type from the type registry
+2. A claim_assertion describing the specific security claim
+3. At least one reporter_control_test demonstrating the vulnerability
+4. Proper negative_control_passed and description
+
+These requirements enable two-phase verification where the verification agent
+can independently validate the security claim.
 """
 
 import logging
@@ -10,6 +19,10 @@ from typing import Any
 
 from strix.tools.registry import register_tool
 from strix.tools.reporting.evidence import validate_evidence
+from strix.tools.reporting.vulnerability_types import (
+    validate_vulnerability_type,
+    get_all_type_ids,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -319,8 +332,61 @@ def create_vulnerability_report(  # noqa: PLR0911, PLR0912
             "success": False,
             "message": (
                 "Evidence is required. You must provide structured evidence including: "
-                "primary_evidence (HTTP request/response pairs), reproduction_steps, "
-                "poc_payload, and target_url."
+                "vulnerability_type, claim_assertion, primary_evidence (HTTP request/response pairs), "
+                "reproduction_steps, poc_payload, target_url, negative_control_passed, "
+                "negative_control_description, and reporter_control_tests."
+            ),
+        }
+
+    # Validate vulnerability_type first (required for two-phase verification)
+    vuln_type = evidence.get("vulnerability_type")
+    if not vuln_type:
+        all_types = get_all_type_ids()
+        return {
+            "success": False,
+            "message": (
+                "vulnerability_type is required. Specify the type of vulnerability from the registry. "
+                f"Valid types: {', '.join(sorted(all_types))}"
+            ),
+        }
+
+    type_valid, type_error = validate_vulnerability_type(vuln_type)
+    if not type_valid:
+        return {
+            "success": False,
+            "message": f"Invalid vulnerability_type: {type_error}",
+        }
+
+    # Validate claim_assertion (required for validity checking)
+    claim = evidence.get("claim_assertion")
+    if not claim or len(claim.strip()) < 20:
+        return {
+            "success": False,
+            "message": (
+                "claim_assertion is required and must be at least 20 characters. "
+                "Describe the specific security claim being made (e.g., "
+                "'Path traversal bypasses directory restriction to access protected files')."
+            ),
+        }
+
+    # Validate negative control was performed
+    if not evidence.get("negative_control_passed"):
+        return {
+            "success": False,
+            "message": (
+                "negative_control_passed must be True. You must perform a negative control test "
+                "that confirms unauthorized access is denied before reporting a vulnerability."
+            ),
+        }
+
+    # Validate reporter_control_tests
+    control_tests = evidence.get("reporter_control_tests", [])
+    if not control_tests:
+        return {
+            "success": False,
+            "message": (
+                "reporter_control_tests is required. You must include at least one control test "
+                "that demonstrates the vulnerability (e.g., testing direct access vs traversal access)."
             ),
         }
 

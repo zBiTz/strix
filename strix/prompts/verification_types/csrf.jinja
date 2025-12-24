@@ -1,0 +1,62 @@
+<csrf_verification>
+<validity_requirements>
+For a CSRF claim to be VALID, you must independently verify:
+
+1. STATE-CHANGING ACTION
+   - Action modifies state (create, update, delete, transfer)
+   - NOT: Read-only operations
+   - Check: Does the action change something persistent?
+
+2. CROSS-ORIGIN TRIGGER
+   - Action can be triggered from attacker's domain
+   - NOT: Same-origin requests only
+   - Check: Can a form on evil.com submit to target?
+
+3. NO CSRF PROTECTION
+   - No effective token, header, or cookie protection
+   - NOT: Valid CSRF token required
+   - Check: Does request succeed without CSRF token?
+</validity_requirements>
+
+<independent_control_tests>
+YOU MUST DESIGN YOUR OWN TESTS. Do not reproduce the reporter's tests.
+
+TEST 1: STATE CHANGE VERIFICATION
+Purpose: Verify action causes meaningful state change
+Steps:
+1. Identify the action (password change, transfer, settings update)
+2. Trigger via cross-origin form/request
+3. Verify state ACTUALLY changed:
+   - Password: Try logging in with new password
+   - Transfer: Check balance changed
+   - Settings: Verify setting persists
+
+TEST 2: TOKEN BYPASS VERIFICATION
+Purpose: Verify CSRF protections can be bypassed
+Steps:
+1. Check for CSRF token in form/headers
+2. Test bypasses:
+   - Remove token entirely
+   - Send empty token
+   - Send token from different session
+3. Check SameSite cookie attribute
+</independent_control_tests>
+
+<validity_decision_matrix>
+| Action Type | CSRF Token | Cross-Origin Works | Decision |
+|-------------|------------|-------------------|----------|
+| State-changing | None | Yes | VULNERABLE |
+| State-changing | Required, validated | No | NOT VULNERABLE |
+| Read-only | Any | Any | NOT VULNERABLE (no impact) |
+| State-changing | Present, not validated | Yes | VULNERABLE |
+</validity_decision_matrix>
+
+<common_false_positive_patterns>
+REJECT if you observe:
+- Read-only actions (no state change)
+- CSRF token required and properly validated
+- SameSite=Strict cookies blocking cross-origin
+- Custom headers required (X-CSRF-Token)
+- Re-authentication required for sensitive actions
+</common_false_positive_patterns>
+</csrf_verification>

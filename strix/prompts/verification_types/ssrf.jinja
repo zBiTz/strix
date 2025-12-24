@@ -1,0 +1,73 @@
+<ssrf_verification>
+<validity_requirements>
+For an SSRF claim to be VALID, you must independently verify:
+
+1. SERVER-SIDE REQUEST (not client-side)
+   - Request originates from the TARGET SERVER, not your browser
+   - NOT: Browser fetch visible in your network tab
+   - Check: OAST callback source IP matches target server
+
+2. INTERNAL RESOURCE ACCESS
+   - Can access internal/private resources (localhost, metadata, internal services)
+   - NOT: External-to-external fetch that's intended behavior
+   - Check: Can you reach 127.0.0.1, 169.254.169.254, or internal ports?
+
+3. BEYOND INTENDED FUNCTIONALITY
+   - Access goes beyond the feature's intended purpose
+   - NOT: URL preview feature fetching external URLs (that's its job)
+   - Check: Can you access UNINTENDED targets?
+</validity_requirements>
+
+<independent_control_tests>
+YOU MUST DESIGN YOUR OWN TESTS. Do not reproduce the reporter's tests.
+
+TEST 1: SERVER-SIDE VERIFICATION
+Purpose: Verify request is SERVER-initiated
+Steps:
+1. Set up OAST/webhook listener
+2. Submit URL pointing to your OAST endpoint
+3. Check OAST logs for request SOURCE IP:
+   - If source IP = target server IP -> Server-side (SSRF possible)
+   - If source IP = your browser IP -> Client-side (NOT SSRF)
+4. Also check User-Agent and timing
+
+TEST 2: INTERNAL ACCESS TEST
+Purpose: Verify access to internal resources
+Steps:
+1. Test internal addresses: 127.0.0.1, localhost, 169.254.169.254
+2. Test internal ports: :6379 (Redis), :9200 (Elasticsearch)
+3. Compare responses:
+   - Internal returns data/connection -> SSRF confirmed
+   - Internal returns same error as external -> May be blocked
+   - All internal blocked -> Limited impact
+
+TEST 3: INTENDED FUNCTIONALITY CHECK
+Purpose: Verify this isn't just normal behavior
+Steps:
+1. Identify the feature (URL preview? Webhook? Import?)
+2. Determine if external fetch is intended
+3. Test what's UNINTENDED:
+   - Can you access internal IPs?
+   - Can you use non-HTTP protocols (file://, gopher://)?
+   - Can you bypass allowlists?
+</independent_control_tests>
+
+<validity_decision_matrix>
+| Request Origin | Internal Access | Feature Purpose | Decision |
+|---------------|-----------------|-----------------|----------|
+| Server IP | Yes (data returned) | Fetch external | VULNERABLE |
+| Server IP | No (blocked) | Fetch external | Limited/No impact |
+| Browser IP | N/A | Any | NOT SSRF (client-side) |
+| Server IP | External only | URL preview | Intended behavior |
+| Server IP | Metadata (169.254) | Any | VULNERABLE (credential theft) |
+</validity_decision_matrix>
+
+<common_false_positive_patterns>
+REJECT if you observe:
+- Request originates from your browser (client-side)
+- Only external URLs accessible (intended URL preview)
+- All internal IPs blocked uniformly
+- OAST callback but no internal access possible
+- Feature designed to fetch external URLs working as designed
+</common_false_positive_patterns>
+</ssrf_verification>

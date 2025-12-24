@@ -1,0 +1,57 @@
+<open_redirect_verification>
+<validity_requirements>
+For an open redirect claim to be VALID, you must independently verify:
+
+1. EXTERNAL REDIRECT
+   - Can redirect to fully external domain
+   - NOT: Same-origin redirects only
+   - Check: Does browser land on attacker-controlled site?
+
+2. ATTACKER CONTROLS DESTINATION
+   - Redirect URL is attacker-specified
+   - NOT: Fixed redirect targets
+   - Check: Can you specify https://evil.com?
+
+3. PHISHING VIABILITY
+   - Initial URL looks legitimate
+   - NOT: Obvious malicious URL
+   - Check: Would users trust the link?
+</validity_requirements>
+
+<independent_control_tests>
+YOU MUST DESIGN YOUR OWN TESTS. Do not reproduce the reporter's tests.
+
+TEST 1: EXTERNAL REDIRECT TEST
+Purpose: Verify redirect to external domain
+Steps:
+1. Identify redirect parameter (url=, next=, redirect=)
+2. Set to external: https://evil.com
+3. Test bypass variations: //evil.com, ///evil.com
+4. Verify browser lands on external domain
+
+TEST 2: PHISHING VIABILITY
+Purpose: Verify can be used for phishing
+Steps:
+1. Craft URL on target domain with redirect
+2. Verify it looks legitimate
+3. Confirm redirect lands on external site
+</independent_control_tests>
+
+<validity_decision_matrix>
+| Redirect Target | Allowlist | Interstitial | Decision |
+|----------------|-----------|--------------|----------|
+| External domain | None | None | VULNERABLE |
+| External domain | Present, bypassed | None | VULNERABLE |
+| Same-origin only | Enforced | N/A | NOT VULNERABLE |
+| External | Any | Warning shown | LIMITED impact |
+</validity_decision_matrix>
+
+<common_false_positive_patterns>
+REJECT if you observe:
+- Redirect only to same-origin paths
+- Strict domain allowlist enforced
+- Redirect requires authentication/confirmation
+- Interstitial page warns about redirect
+- Only relative paths accepted
+</common_false_positive_patterns>
+</open_redirect_verification>

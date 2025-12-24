@@ -2,11 +2,100 @@
 
 This module provides tools for verification agents to submit their
 decisions on pending vulnerability reports.
+
+Implements TWO-PHASE VERIFICATION enforcement:
+- Phase 1: Reproducibility - Can we reproduce the reported behavior?
+- Phase 2: Validity - Does this behavior actually prove the vulnerability?
+
+Reports cannot be verified without completing BOTH phases and providing
+independent control test evidence for Phase 2.
 """
 
 from typing import Any
 
 from strix.tools.registry import register_tool
+from strix.tools.reporting.vulnerability_types import get_vulnerability_type_spec
+
+
+def _validate_two_phase_evidence(
+    verification_evidence: dict[str, Any] | None,
+    vulnerability_type: str | None,
+) -> tuple[bool, str | None]:
+    """Validate that verification evidence includes proper two-phase verification.
+
+    Args:
+        verification_evidence: The evidence provided by the verification agent
+        vulnerability_type: The vulnerability type from the original report
+
+    Returns:
+        Tuple of (is_valid, error_message)
+    """
+    if not verification_evidence:
+        return False, "Verification evidence is required when verified=True"
+
+    # Check Phase 1 evidence
+    phase1 = verification_evidence.get("phase1_reproduction")
+    if not phase1:
+        return False, "Phase 1 (reproducibility) evidence is required"
+
+    reproduction_count = phase1.get("reproduction_count", 0)
+    if reproduction_count < 3:
+        return (
+            False,
+            f"Phase 1 requires at least 3 reproductions, got {reproduction_count}",
+        )
+
+    # Check Phase 2 evidence - THIS IS CRITICAL
+    phase2 = verification_evidence.get("phase2_validity")
+    if not phase2:
+        return (
+            False,
+            "Phase 2 (validity) evidence is required. Reproducibility alone is NOT sufficient.",
+        )
+
+    # Require explicit validity confirmation
+    if not phase2.get("validity_confirmed"):
+        return (
+            False,
+            "Phase 2 validity_confirmed must be true. Did you complete independent control tests?",
+        )
+
+    # Require independent control tests
+    control_tests = phase2.get("independent_control_tests", [])
+    if not control_tests:
+        return (
+            False,
+            "Phase 2 requires independent_control_tests. You must design and execute your OWN control tests.",
+        )
+
+    # Validate control tests against type-specific requirements
+    if vulnerability_type and vulnerability_type != "unknown":
+        type_spec = get_vulnerability_type_spec(vulnerability_type)
+        if type_spec:
+            required_test_names = {
+                req.name for req in type_spec.control_test_requirements
+            }
+            provided_test_names = {
+                test.get("test_name", "") for test in control_tests
+            }
+
+            # Check if at least one required test was performed
+            overlap = required_test_names & provided_test_names
+            if not overlap:
+                return (
+                    False,
+                    f"Phase 2 requires control tests matching type spec. "
+                    f"Required: {required_test_names}, Provided: {provided_test_names}",
+                )
+
+    # Require validity reasoning
+    if not phase2.get("validity_reasoning"):
+        return (
+            False,
+            "Phase 2 requires validity_reasoning explaining why this is genuinely vulnerable",
+        )
+
+    return True, None
 
 
 @register_tool(sandbox_execution=False)
@@ -15,23 +104,28 @@ def verify_vulnerability_report(  # noqa: PLR0911
     verified: bool,
     verification_evidence: dict[str, Any] | None = None,
     rejection_reason: str | None = None,
+    rejection_phase: str | None = None,
     notes: list[str] | None = None,
     agent_state: Any = None,
 ) -> dict[str, Any]:
     """Submit verification decision for a pending vulnerability report.
 
-    This tool is used by verification agents to mark a pending report as
-    verified (moving it to final reports) or rejected (marking as false positive).
+    This tool implements TWO-PHASE VERIFICATION:
+    - Phase 1: Reproducibility check (can we reproduce the behavior?)
+    - Phase 2: Validity check (does this behavior prove the vulnerability?)
+
+    IMPORTANT: A report can only be verified if BOTH phases pass. Reproducibility
+    alone is NOT sufficient - you must also validate the claim with independent
+    control tests.
 
     Args:
         report_id: The report ID to verify (format: vuln-XXXX)
-        verified: True if vulnerability was successfully reproduced, False otherwise
-        verification_evidence: Evidence from verification if verified, containing:
-            - reproduction_count: Number of successful reproductions
-            - baseline_response: Normal behavior observed
-            - exploit_response: Exploit behavior observed
-            - negative_control: Unauthorized access test result
-        rejection_reason: Required if verified=False - explanation of rejection
+        verified: True if BOTH phases passed, False otherwise
+        verification_evidence: Required if verified=True, must contain:
+            - phase1_reproduction: {reproduction_count, baseline_response, exploit_response}
+            - phase2_validity: {vulnerability_type, independent_control_tests, validity_confirmed, validity_reasoning}
+        rejection_reason: Required if verified=False - explanation with phase info
+        rejection_phase: One of "phase1_reproduction", "phase2_validity", "manual_review"
         notes: Optional additional observations from verification
         agent_state: Agent state for context
 
@@ -68,6 +162,21 @@ def verify_vulnerability_report(  # noqa: PLR0911
         tracer.increment_verification_attempt(report_id)
 
         if verified:
+            # ENFORCEMENT: Validate two-phase verification evidence
+            vulnerability_type = report.get("evidence", {}).get(
+                "vulnerability_type", "unknown"
+            )
+            is_valid, error_msg = _validate_two_phase_evidence(
+                verification_evidence, vulnerability_type
+            )
+            if not is_valid:
+                return {
+                    "success": False,
+                    "message": f"Two-phase verification failed: {error_msg}",
+                    "hint": "You must complete BOTH Phase 1 (reproducibility) AND Phase 2 (validity) "
+                    "with independent control tests before verifying.",
+                }
+
             # Move to verified reports
             success = tracer.finalize_vulnerability_report(
                 report_id,
@@ -78,9 +187,10 @@ def verify_vulnerability_report(  # noqa: PLR0911
             if success:
                 return {
                     "success": True,
-                    "message": f"Report {report_id} verified and finalized",
+                    "message": f"Report {report_id} verified and finalized (two-phase verification passed)",
                     "status": "verified",
                     "report_id": report_id,
+                    "phases_completed": ["phase1_reproduction", "phase2_validity"],
                 }
             return {
                 "success": False,
@@ -88,9 +198,13 @@ def verify_vulnerability_report(  # noqa: PLR0911
             }
 
         # Reject the report
+        # Include phase information for better tracking
+        phase_info = rejection_phase or "unspecified"
+        full_reason = rejection_reason or "Verification failed"
+
         success = tracer.reject_vulnerability_report(
             report_id,
-            reason=rejection_reason or "Verification failed",
+            reason=full_reason,
             notes=notes or [],
         )
 
@@ -102,10 +216,11 @@ def verify_vulnerability_report(  # noqa: PLR0911
 
         return {  # noqa: TRY300
             "success": True,
-            "message": f"Report {report_id} rejected as false positive",
+            "message": f"Report {report_id} rejected ({phase_info})",
             "status": "rejected",
             "report_id": report_id,
-            "reason": rejection_reason,
+            "reason": full_reason,
+            "rejection_phase": phase_info,
         }
 
     except ImportError:

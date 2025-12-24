@@ -1,0 +1,58 @@
+<application_dos_verification>
+<validity_requirements>
+For an application DoS claim to be VALID, you must independently verify:
+
+1. DISPROPORTIONATE RESOURCE USE
+   - Single request causes excessive resource consumption
+   - NOT: Requires massive request volume
+   - Check: One request causes measurable impact?
+
+2. SERVICE DEGRADATION
+   - Other users/requests are affected
+   - NOT: Only attacker's request is slow
+   - Check: Does normal traffic slow down?
+
+3. PRACTICAL ATTACK
+   - Attack is feasible with reasonable resources
+   - NOT: Requires more resources than target
+   - Check: Can attacker sustain the attack?
+</validity_requirements>
+
+<independent_control_tests>
+YOU MUST DESIGN YOUR OWN TESTS. Do not reproduce the reporter's tests.
+
+TEST 1: RESOURCE EXHAUSTION TEST
+Purpose: Verify DoS causes service impact
+Steps:
+1. Identify resource-intensive operation (regex, query, file)
+2. Craft payload triggering excessive resource use
+3. Measure impact: response time, error rate
+4. Verify impact affects OTHER requests
+
+TEST 2: IMPACT ISOLATION TEST
+Purpose: Verify others are affected
+Steps:
+1. Send malicious request
+2. Simultaneously send normal request
+3. Check if normal request is degraded
+4. Verify not just attacker affected
+</independent_control_tests>
+
+<validity_decision_matrix>
+| Request Load | Others Affected | Sustainable | Decision |
+|--------------|-----------------|-------------|----------|
+| Single request | Yes, degraded | Easy | VULNERABLE |
+| Single request | No, isolated | Any | NOT VULNERABLE |
+| Massive volume | Yes | Expensive | Limited - volumetric |
+| Single request | Yes, briefly | Easy | VULNERABLE |
+</validity_decision_matrix>
+
+<common_false_positive_patterns>
+REJECT if you observe:
+- Timeouts prevent resource exhaustion
+- Rate limiting blocks attack
+- Impact only affects attacker's request
+- Resource use is proportional to input
+- Requires volumetric attack (not app-level)
+</common_false_positive_patterns>
+</application_dos_verification>

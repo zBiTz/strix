@@ -1,0 +1,76 @@
+<xss_verification>
+<validity_requirements>
+For an XSS claim to be VALID, you must independently verify:
+
+1. SCRIPT EXECUTION (not just reflection)
+   - Script actually EXECUTES in browser, not just appears in source
+   - NOT: Payload visible in HTML source but encoded or in non-executing context
+   - Check: Does alert fire, DOM change, or OAST callback arrive?
+
+2. PROPER CONTEXT
+   - Injection is in a context where browsers execute scripts
+   - NOT: Inside title, textarea, or properly quoted attributes
+   - Check: Is the payload in HTML body, unquoted attribute, or JS context?
+
+3. NO ENCODING
+   - Special characters are not HTML-encoded
+   - NOT: &lt; &gt; &quot; appearing instead of < > "
+   - Check: View response bytes, not just rendered output
+</validity_requirements>
+
+<independent_control_tests>
+YOU MUST DESIGN YOUR OWN TESTS. Do not reproduce the reporter's tests.
+
+TEST 1: EXECUTION VERIFICATION
+Purpose: Verify script EXECUTES, not just reflects
+Steps:
+1. Inject payload with observable effect: <script>fetch('https://OAST')</script>
+2. Load the page in an ACTUAL BROWSER (not just curl)
+3. Check for execution evidence:
+   - OAST callback received from victim origin
+   - DOM changes visible in inspector
+   - alert() fires (if using that payload)
+4. View source alone is NOT sufficient
+
+TEST 2: ENCODING CHECK
+Purpose: Verify output is not properly encoded
+Steps:
+1. Inject: <script>alert(1)</script>
+2. Examine RAW response (curl or Burp)
+3. Check character representation:
+   - < appearing as < = vulnerable (unencoded)
+   - < appearing as &lt; = safe (encoded)
+   - " appearing as &quot; = safe (encoded)
+
+TEST 3: CONTEXT VALIDATION
+Purpose: Verify injection is in executable context
+Steps:
+1. Identify WHERE payload appears in response
+2. Check context rules:
+   - Inside <title>: scripts don't execute
+   - Inside <textarea>: scripts don't execute
+   - Inside attribute with quotes: need quote break
+   - Inside JS string: need string break
+3. Verify your payload breaks out and executes
+</independent_control_tests>
+
+<validity_decision_matrix>
+| Payload in Source | Browser Execution | Encoding | Decision |
+|------------------|-------------------|----------|----------|
+| Yes | Script executes | Unencoded | VULNERABLE |
+| Yes | No execution | Unencoded | Check context - may be non-exec |
+| Yes | No execution | HTML entities | NOT VULNERABLE - encoded |
+| No | N/A | N/A | NOT VULNERABLE - filtered |
+| Yes (in attr) | Attribute injection | Unencoded | Check if exploitable attr |
+</validity_decision_matrix>
+
+<common_false_positive_patterns>
+REJECT if you observe:
+- Payload appears in source but doesn't execute
+- HTML entities encoding special characters (&lt; &gt;)
+- Injection in non-executable contexts (title, textarea, comment)
+- CSP blocking script execution (check console errors)
+- Reflection in error message without execution
+- Self-XSS requiring victim to paste code
+</common_false_positive_patterns>
+</xss_verification>
