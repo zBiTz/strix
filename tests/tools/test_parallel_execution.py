@@ -254,9 +254,7 @@ class TestProcessToolInvocations:
             ]
 
             conversation_history: list[dict[str, Any]] = []
-            result = await process_tool_invocations(
-                invocations, conversation_history, None
-            )
+            result = await process_tool_invocations(invocations, conversation_history, None)
 
             # finish_scan should be last in execution order
             assert execution_order[-1] == "finish_scan"

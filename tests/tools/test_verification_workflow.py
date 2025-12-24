@@ -256,3 +256,291 @@ class TestCreateVulnerabilityReportWithEvidence:
 
         assert result["success"] is False
         assert "content" in result["message"].lower()
+
+
+class TestIsReportVerified:
+    """Tests for the is_report_verified helper method."""
+
+    def test_returns_false_for_pending_report(self) -> None:
+        """Test that pending reports return False."""
+        from strix.telemetry.tracer import Tracer
+
+        tracer = Tracer(run_name="test-run")
+
+        # Add a pending report
+        report_id = tracer.add_pending_vulnerability_report(
+            title="Pending Report",
+            content="Still pending verification.",
+            severity="high",
+            evidence={"primary_evidence": [{}], "poc_payload": "test", "target_url": "url"},
+        )
+
+        # Should return False since report is still pending
+        assert tracer.is_report_verified(report_id) is False
+
+    def test_returns_true_after_finalization(self) -> None:
+        """Test that finalized reports return True."""
+        from strix.telemetry.tracer import Tracer
+
+        tracer = Tracer(run_name="test-run")
+
+        # Add and finalize a report
+        report_id = tracer.add_pending_vulnerability_report(
+            title="Finalized Report",
+            content="Will be verified.",
+            severity="high",
+            evidence={"primary_evidence": [{}], "poc_payload": "test", "target_url": "url"},
+        )
+
+        tracer.finalize_vulnerability_report(report_id, {"verified_by": "test"})
+
+        # Should return True since report is no longer pending
+        assert tracer.is_report_verified(report_id) is True
+
+    def test_returns_true_after_rejection(self) -> None:
+        """Test that rejected reports return True."""
+        from strix.telemetry.tracer import Tracer
+
+        tracer = Tracer(run_name="test-run")
+
+        # Add and reject a report
+        report_id = tracer.add_pending_vulnerability_report(
+            title="Rejected Report",
+            content="Will be rejected.",
+            severity="high",
+            evidence={"primary_evidence": [{}], "poc_payload": "test", "target_url": "url"},
+        )
+
+        tracer.reject_vulnerability_report(report_id, reason="False positive")
+
+        # Should return True since report is no longer pending
+        assert tracer.is_report_verified(report_id) is True
+
+    def test_returns_true_for_nonexistent_report(self) -> None:
+        """Test that non-existent reports return True (not in pending queue)."""
+        from strix.telemetry.tracer import Tracer
+
+        tracer = Tracer(run_name="test-run")
+
+        # Non-existent report should return True (not pending)
+        assert tracer.is_report_verified("nonexistent-id") is True
+
+
+class TestManualReviewQueue:
+    """Tests for the manual review queue functionality."""
+
+    def test_add_to_manual_review_moves_from_pending(self) -> None:
+        """Test that add_to_manual_review moves report from pending queue."""
+        from strix.telemetry.tracer import Tracer
+
+        tracer = Tracer(run_name="test-run")
+
+        # Add a pending report
+        report_id = tracer.add_pending_vulnerability_report(
+            title="Manual Review Report",
+            content="Needs manual review.",
+            severity="high",
+            evidence={"primary_evidence": [{}], "poc_payload": "test", "target_url": "url"},
+        )
+
+        # Verify it's pending
+        assert len(tracer.get_pending_reports()) == 1
+
+        # Move to manual review
+        success = tracer.add_to_manual_review(
+            report_id,
+            reason="Verification agent hit max iterations",
+            notes=["Agent failed to decide"],
+        )
+
+        assert success is True
+
+        # Check it's no longer pending
+        assert len(tracer.get_pending_reports()) == 0
+
+        # Check it's in manual review queue
+        assert len(tracer.needs_manual_review_reports) == 1
+        review_report = tracer.needs_manual_review_reports[0]
+        assert review_report["id"] == report_id
+        assert review_report["status"] == "needs_manual_review"
+        assert "max iterations" in review_report["review_reason"]
+        assert "Agent failed to decide" in review_report["review_notes"]
+
+    def test_add_to_manual_review_nonexistent_fails(self) -> None:
+        """Test that moving non-existent report to manual review fails."""
+        from strix.telemetry.tracer import Tracer
+
+        tracer = Tracer(run_name="test-run")
+
+        success = tracer.add_to_manual_review("nonexistent-id", "reason")
+        assert success is False
+
+    def test_is_report_verified_true_after_manual_review(self) -> None:
+        """Test that is_report_verified returns True after moving to manual review."""
+        from strix.telemetry.tracer import Tracer
+
+        tracer = Tracer(run_name="test-run")
+
+        # Add a pending report
+        report_id = tracer.add_pending_vulnerability_report(
+            title="Manual Review Report",
+            content="Needs manual review.",
+            severity="high",
+            evidence={"primary_evidence": [{}], "poc_payload": "test", "target_url": "url"},
+        )
+
+        # Move to manual review
+        tracer.add_to_manual_review(report_id, reason="Agent failed")
+
+        # Should return True since report is no longer pending
+        assert tracer.is_report_verified(report_id) is True
+
+
+class TestAgentFinishBlocksUnverifiedVerificationAgents:
+    """Tests that agent_finish blocks verification agents that haven't verified."""
+
+    def test_agent_finish_blocked_without_verification(self) -> None:
+        """Test that agent_finish returns error for unverified verification agents."""
+        from strix.telemetry.tracer import Tracer, set_global_tracer
+        from strix.tools.agents_graph.agents_graph_actions import (
+            _agent_graph,
+            agent_finish,
+        )
+
+        # Setup tracer
+        tracer = Tracer(run_name="test-run")
+        set_global_tracer(tracer)
+
+        # Add a pending report
+        report_id = tracer.add_pending_vulnerability_report(
+            title="Test Vulnerability",
+            content="Needs verification.",
+            severity="high",
+            evidence={"primary_evidence": [{}], "poc_payload": "test", "target_url": "url"},
+        )
+
+        # Create mock agent state for verification agent
+        mock_state = MagicMock()
+        mock_state.agent_id = "test-verifier-123"
+        mock_state.parent_id = "parent-agent"
+
+        # Register verification agent in graph
+        _agent_graph["nodes"]["test-verifier-123"] = {
+            "name": "Test Verifier",
+            "task": "Verify vulnerability",
+            "status": "running",
+            "parent_id": "parent-agent",
+            "type": "verification",  # This marks it as a verification agent
+            "report_id": report_id,
+        }
+
+        # Try to call agent_finish without verifying
+        result = agent_finish(
+            agent_state=mock_state,
+            result_summary="Done",
+            success=True,
+        )
+
+        # Should be blocked
+        assert result["agent_completed"] is False
+        assert "verify_vulnerability_report" in result["error"]
+        assert "required_action" in result
+        assert result["required_action"]["report_id"] == report_id
+
+        # Cleanup
+        _agent_graph["nodes"].pop("test-verifier-123", None)
+
+    def test_agent_finish_allowed_after_verification(self) -> None:
+        """Test that agent_finish works after verify_vulnerability_report is called."""
+        from strix.telemetry.tracer import Tracer, set_global_tracer
+        from strix.tools.agents_graph.agents_graph_actions import (
+            _agent_graph,
+            agent_finish,
+        )
+
+        # Setup tracer
+        tracer = Tracer(run_name="test-run")
+        set_global_tracer(tracer)
+
+        # Add a pending report
+        report_id = tracer.add_pending_vulnerability_report(
+            title="Test Vulnerability",
+            content="Needs verification.",
+            severity="high",
+            evidence={"primary_evidence": [{}], "poc_payload": "test", "target_url": "url"},
+        )
+
+        # Finalize (verify) the report first
+        tracer.finalize_vulnerability_report(report_id, {"verified_by": "test"})
+
+        # Create mock agent state for verification agent
+        mock_state = MagicMock()
+        mock_state.agent_id = "test-verifier-456"
+        mock_state.parent_id = "parent-agent"
+
+        # Register verification agent in graph with parent node
+        _agent_graph["nodes"]["parent-agent"] = {
+            "name": "Parent Agent",
+            "status": "running",
+        }
+        _agent_graph["nodes"]["test-verifier-456"] = {
+            "name": "Test Verifier",
+            "task": "Verify vulnerability",
+            "status": "running",
+            "parent_id": "parent-agent",
+            "type": "verification",
+            "report_id": report_id,
+        }
+
+        # Now agent_finish should work
+        result = agent_finish(
+            agent_state=mock_state,
+            result_summary="Verified successfully",
+            success=True,
+        )
+
+        # Should succeed
+        assert result["agent_completed"] is True
+
+        # Cleanup
+        _agent_graph["nodes"].pop("test-verifier-456", None)
+        _agent_graph["nodes"].pop("parent-agent", None)
+
+    def test_regular_agent_not_blocked(self) -> None:
+        """Test that regular (non-verification) agents are not blocked."""
+        from strix.tools.agents_graph.agents_graph_actions import (
+            _agent_graph,
+            agent_finish,
+        )
+
+        # Create mock agent state for regular agent
+        mock_state = MagicMock()
+        mock_state.agent_id = "regular-agent-789"
+        mock_state.parent_id = "parent-agent"
+
+        # Register regular agent in graph (no "type": "verification")
+        _agent_graph["nodes"]["parent-agent"] = {
+            "name": "Parent Agent",
+            "status": "running",
+        }
+        _agent_graph["nodes"]["regular-agent-789"] = {
+            "name": "Regular Agent",
+            "task": "Do something",
+            "status": "running",
+            "parent_id": "parent-agent",
+            # No "type" field - this is a regular agent
+        }
+
+        # agent_finish should work for regular agents
+        result = agent_finish(
+            agent_state=mock_state,
+            result_summary="Done",
+            success=True,
+        )
+
+        # Should succeed
+        assert result["agent_completed"] is True
+
+        # Cleanup
+        _agent_graph["nodes"].pop("regular-agent-789", None)
+        _agent_graph["nodes"].pop("parent-agent", None)

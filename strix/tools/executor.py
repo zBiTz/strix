@@ -303,9 +303,7 @@ async def _execute_parallel_tools(
         idx: int, tool_inv: dict[str, Any]
     ) -> tuple[int, str, list[dict[str, Any]], bool]:
         try:
-            xml, imgs, finish = await _execute_single_tool(
-                tool_inv, agent_state, tracer, agent_id
-            )
+            xml, imgs, finish = await _execute_single_tool(tool_inv, agent_state, tracer, agent_id)
         except Exception as e:  # noqa: BLE001
             tool_name = tool_inv.get("toolName", "unknown")
             error_xml = (
@@ -353,16 +351,12 @@ async def process_tool_invocations(
 
     # 2. Execute sequential tools one at a time
     for idx, tool_inv in sequential:
-        xml, imgs, finish = await _execute_single_tool(
-            tool_inv, agent_state, tracer, agent_id
-        )
+        xml, imgs, finish = await _execute_single_tool(tool_inv, agent_state, tracer, agent_id)
         results[idx] = (xml, imgs, finish)
 
     # 3. Execute finish tools last
     for idx, tool_inv in finish_tools:
-        xml, imgs, finish = await _execute_single_tool(
-            tool_inv, agent_state, tracer, agent_id
-        )
+        xml, imgs, finish = await _execute_single_tool(tool_inv, agent_state, tracer, agent_id)
         results[idx] = (xml, imgs, finish)
 
     # Aggregate in original order

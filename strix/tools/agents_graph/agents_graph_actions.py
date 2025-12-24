@@ -380,6 +380,36 @@ def agent_finish(
 
         agent_node = _agent_graph["nodes"][agent_id]
 
+        # Check if this is a verification agent that hasn't verified yet
+        if agent_node.get("type") == "verification":
+            report_id = agent_node.get("report_id")
+            if report_id:
+                try:
+                    from strix.telemetry.tracer import get_global_tracer
+
+                    tracer = get_global_tracer()
+                    if tracer and not tracer.is_report_verified(report_id):
+                        return {
+                            "agent_completed": False,
+                            "error": (
+                                "Cannot finish verification agent without recording "
+                                "a verification decision. You MUST call "
+                                f"verify_vulnerability_report(report_id='{report_id}', "
+                                "verified=True/False) before calling agent_finish. "
+                                "If you could not reproduce the vulnerability, call "
+                                "verify_vulnerability_report with verified=False and "
+                                "provide a rejection_reason."
+                            ),
+                            "parent_notified": False,
+                            "required_action": {
+                                "tool": "verify_vulnerability_report",
+                                "report_id": report_id,
+                                "hint": "verified=True if reproduced, False if not",
+                            },
+                        }
+                except ImportError:
+                    pass  # Tracer not available, allow finish
+
         agent_node["status"] = "finished" if success else "failed"
         agent_node["finished_at"] = datetime.now(UTC).isoformat()
         agent_node["result"] = {

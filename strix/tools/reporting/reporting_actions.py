@@ -15,7 +15,7 @@ from strix.tools.reporting.evidence import validate_evidence
 logger = logging.getLogger(__name__)
 
 
-def _spawn_verification_agent(
+def _spawn_verification_agent(  # noqa: PLR0915
     report_id: str,
     title: str,
     evidence: dict[str, Any],
@@ -83,12 +83,14 @@ def _spawn_verification_agent(
             }
 
             if parent_id:
-                _agent_graph["edges"].append({
-                    "from": parent_id,
-                    "to": state.agent_id,
-                    "type": "spawned_verification",
-                    "created_at": datetime.now(UTC).isoformat(),
-                })
+                _agent_graph["edges"].append(
+                    {
+                        "from": parent_id,
+                        "to": state.agent_id,
+                        "type": "spawned_verification",
+                        "created_at": datetime.now(UTC).isoformat(),
+                    }
+                )
 
             _agent_instances[state.agent_id] = agent
         except ImportError:
@@ -101,13 +103,35 @@ def _spawn_verification_agent(
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
             try:
-                loop.run_until_complete(
-                    agent.verify_vulnerability(report_id, title, evidence)
-                )
-                # Update agent graph status on success
-                _update_verification_agent_status(state.agent_id, "completed")
+                loop.run_until_complete(agent.verify_vulnerability(report_id, title, evidence))
+
+                # Check if verification was actually recorded
+                try:
+                    from strix.telemetry.tracer import get_global_tracer
+
+                    tracer = get_global_tracer()
+                    if tracer and not tracer.is_report_verified(report_id):
+                        # Agent completed but didn't record verification - move to manual review
+                        logger.warning(
+                            f"Verification agent for {report_id} completed without recording "
+                            "verification decision. Moving to manual review."
+                        )
+                        _auto_reject_pending_report(
+                            report_id, state.agent_id, "max_iterations_without_decision"
+                        )
+                        _update_verification_agent_status(
+                            state.agent_id, "completed_without_verification"
+                        )
+                    else:
+                        _update_verification_agent_status(state.agent_id, "completed")
+                except ImportError:
+                    # If tracer not available, assume completed
+                    _update_verification_agent_status(state.agent_id, "completed")
+
             except Exception:
                 logger.exception(f"Verification agent failed for {report_id}")
+                # Auto-reject on exception too
+                _auto_reject_pending_report(report_id, state.agent_id, "agent_exception")
                 _update_verification_agent_status(state.agent_id, "failed")
             finally:
                 loop.close()
@@ -116,6 +140,7 @@ def _spawn_verification_agent(
                     from strix.tools.agents_graph.agents_graph_actions import (
                         _running_agents as running,
                     )
+
                     running.pop(state.agent_id, None)
                 except ImportError:
                     pass
@@ -132,6 +157,7 @@ def _spawn_verification_agent(
             from strix.tools.agents_graph.agents_graph_actions import (
                 _running_agents as running,
             )
+
             running[state.agent_id] = thread
         except ImportError:
             pass
@@ -176,6 +202,66 @@ def _update_verification_agent_status(agent_id: str, status: str) -> None:
         pass
     except (KeyError, AttributeError) as e:
         logger.debug(f"Failed to update verification agent status: {e}")
+
+
+def _auto_reject_pending_report(report_id: str, agent_id: str, reason_code: str) -> None:
+    """Move a pending report to manual review when verification agent fails to decide.
+
+    This is called when a verification agent completes without calling
+    verify_vulnerability_report (e.g., hit max iterations, crashed, etc.).
+
+    Args:
+        report_id: The report ID to move to manual review
+        agent_id: The verification agent ID that failed to verify
+        reason_code: Code indicating why auto-rejection occurred:
+            - "max_iterations_without_decision": Agent hit iteration limit
+            - "agent_exception": Agent crashed with exception
+    """
+    try:
+        from strix.telemetry.tracer import get_global_tracer
+
+        tracer = get_global_tracer()
+        if not tracer:
+            logger.warning(f"Cannot move {report_id} to manual review: tracer not available")
+            return
+
+        # Check if report is still pending
+        if not tracer.get_pending_report(report_id):
+            logger.debug(f"Report {report_id} already processed, skipping auto-reject")
+            return
+
+        reason_messages = {
+            "max_iterations_without_decision": (
+                f"Verification agent {agent_id} reached maximum iterations without "
+                "recording a verification decision. Report requires manual review."
+            ),
+            "agent_exception": (
+                f"Verification agent {agent_id} encountered an error during verification. "
+                "Report requires manual review."
+            ),
+        }
+
+        reason = reason_messages.get(reason_code, f"Auto-rejected: {reason_code}")
+
+        success = tracer.add_to_manual_review(
+            report_id,
+            reason=reason,
+            notes=[
+                f"Auto-rejected due to verification agent failure: {reason_code}",
+                f"Agent ID: {agent_id}",
+                "This finding requires manual review to confirm or reject",
+            ],
+        )
+
+        if success:
+            logger.info(f"Moved pending report {report_id} to manual review due to {reason_code}")
+        else:
+            logger.warning(f"Failed to move report {report_id} to manual review")
+
+    except ImportError:
+        logger.warning(f"Cannot move {report_id} to manual review: tracer module not available")
+    except Exception:
+        logger.exception(f"Failed to move report {report_id} to manual review")
 
 
 @register_tool(sandbox_execution=False)

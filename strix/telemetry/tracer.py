@@ -37,6 +37,7 @@ class Tracer:
         self.vulnerability_reports: list[dict[str, Any]] = []
         self.pending_vulnerability_reports: list[dict[str, Any]] = []
         self.rejected_vulnerability_reports: list[dict[str, Any]] = []
+        self.needs_manual_review_reports: list[dict[str, Any]] = []
         self.final_scan_result: str | None = None
 
         self.scan_results: dict[str, Any] | None = None
@@ -55,6 +56,7 @@ class Tracer:
         self._saved_vuln_ids: set[str] = set()
         self._saved_pending_ids: set[str] = set()
         self._saved_rejected_ids: set[str] = set()
+        self._saved_manual_review_ids: set[str] = set()
 
         self.vulnerability_found_callback: Callable[[str, str, str, str], None] | None = None
 
@@ -264,6 +266,63 @@ class Tracer:
                 report["verification_attempts"] = report.get("verification_attempts", 0) + 1
                 return True
         return False
+
+    def is_report_verified(self, report_id: str) -> bool:
+        """Check if a report has been verified (finalized, rejected, or moved to manual review).
+
+        A report is considered "verified" (i.e., no longer pending) if it has been
+        processed by a verification agent and moved out of the pending queue.
+
+        Args:
+            report_id: The report ID to check
+
+        Returns:
+            True if report was verified/rejected/moved, False if still pending
+        """
+        # Return True if report is not in pending queue (i.e., it was processed)
+        return all(report["id"] != report_id for report in self.pending_vulnerability_reports)
+
+    def add_to_manual_review(
+        self,
+        report_id: str,
+        reason: str,
+        notes: list[str] | None = None,
+    ) -> bool:
+        """Move a pending report to manual review queue.
+
+        Used when a verification agent fails to make a decision (e.g., hit max
+        iterations, crashed, etc.). These reports require human review.
+
+        Args:
+            report_id: The report ID to move
+            reason: Reason for requiring manual review
+            notes: Optional notes about why manual review is needed
+
+        Returns:
+            True if report was found and moved, False otherwise
+        """
+        report = None
+        for i, r in enumerate(self.pending_vulnerability_reports):
+            if r["id"] == report_id:
+                report = self.pending_vulnerability_reports.pop(i)
+                break
+
+        if not report:
+            return False
+
+        report["status"] = "needs_manual_review"
+        report["review_reason"] = reason
+        report["review_notes"] = notes or []
+        report["moved_at"] = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S UTC")
+
+        self.needs_manual_review_reports.append(report)
+
+        logger.info(
+            f"Moved report to manual review: {report_id} - {report['title']} (Reason: {reason})"
+        )
+
+        self.save_run_data()
+        return True
 
     def set_final_scan_result(
         self,
@@ -486,8 +545,31 @@ class Tracer:
                     self._saved_rejected_ids.add(report["id"])
 
                 if new_rejected:
+                    logger.info(f"Saved {len(new_rejected)} rejected report(s) to: {rejected_dir}")
+
+            # Save manual review reports (auto-rejected due to verification agent failure)
+            if self.needs_manual_review_reports:
+                manual_review_dir = run_dir / "needs_manual_review"
+                manual_review_dir.mkdir(exist_ok=True)
+
+                import json
+
+                new_manual_review = [
+                    report
+                    for report in self.needs_manual_review_reports
+                    if report["id"] not in self._saved_manual_review_ids
+                ]
+
+                for report in new_manual_review:
+                    review_file = manual_review_dir / f"{report['id']}.json"
+                    with review_file.open("w", encoding="utf-8") as f:
+                        json.dump(report, f, indent=2)
+                    self._saved_manual_review_ids.add(report["id"])
+
+                if new_manual_review:
                     logger.info(
-                        f"Saved {len(new_rejected)} rejected report(s) to: {rejected_dir}"
+                        f"Saved {len(new_manual_review)} report(s) requiring "
+                        f"manual review to: {manual_review_dir}"
                     )
 
             logger.info(f"📊 Essential scan data saved to: {run_dir}")

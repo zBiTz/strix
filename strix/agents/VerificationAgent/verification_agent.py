@@ -87,20 +87,20 @@ class VerificationAgent(BaseAgent):
         for i, ev in enumerate(primary_evidence, 1):
             http_evidence_text += f"""
 ### HTTP Evidence #{i}
-**Request:** {ev.get('method', 'GET')} {ev.get('url', '')}
-**Request Body:** {ev.get('request_body', 'N/A')[:500]}
-**Response Status:** {ev.get('response_status', 'N/A')}
-**Response Body Snippet:** {ev.get('response_body_snippet', '')[:500]}
+**Request:** {ev.get("method", "GET")} {ev.get("url", "")}
+**Request Body:** {ev.get("request_body", "N/A")[:500]}
+**Response Status:** {ev.get("response_status", "N/A")}
+**Response Body Snippet:** {ev.get("response_body_snippet", "")[:500]}
 """
 
         # Format reproduction steps
         steps_text = ""
         for step in reproduction_steps:
             steps_text += f"""
-{step.get('step_number', '?')}. {step.get('description', '')}
-   - Tool: {step.get('tool_used', 'N/A')}
-   - Expected: {step.get('expected_result', 'N/A')}
-   - Actual: {step.get('actual_result', 'N/A')}
+{step.get("step_number", "?")}. {step.get("description", "")}
+   - Tool: {step.get("tool_used", "N/A")}
+   - Expected: {step.get("expected_result", "N/A")}
+   - Actual: {step.get("actual_result", "N/A")}
 """
 
         return f"""<verification_task>
@@ -115,9 +115,9 @@ You must attempt to reproduce the exact same vulnerability behavior described in
 <evidence>
 ## Target Information
 - **URL:** {target_url}
-- **Parameter:** {affected_parameter or 'N/A'}
-- **Baseline State:** {baseline_state or 'N/A'}
-- **Exploited State:** {exploited_state or 'N/A'}
+- **Parameter:** {affected_parameter or "N/A"}
+- **Baseline State:** {baseline_state or "N/A"}
+- **Exploited State:** {exploited_state or "N/A"}
 
 ## PoC Payload
 ```

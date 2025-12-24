@@ -129,9 +129,7 @@ class TestVulnerabilityEvidence:
         assert len(evidence.reproduction_steps) == 1
         assert evidence.poc_payload == '{"role": "admin"}'
 
-    def test_empty_primary_evidence_raises(
-        self, valid_reproduction_step: ReproductionStep
-    ) -> None:
+    def test_empty_primary_evidence_raises(self, valid_reproduction_step: ReproductionStep) -> None:
         """Test that empty primary evidence raises ValueError."""
         with pytest.raises(ValueError):
             VulnerabilityEvidence(
@@ -141,9 +139,7 @@ class TestVulnerabilityEvidence:
                 target_url="https://example.com",
             )
 
-    def test_empty_reproduction_steps_raises(
-        self, valid_http_evidence: HttpEvidence
-    ) -> None:
+    def test_empty_reproduction_steps_raises(self, valid_http_evidence: HttpEvidence) -> None:
         """Test that empty reproduction steps raises ValueError."""
         with pytest.raises(ValueError):
             VulnerabilityEvidence(
