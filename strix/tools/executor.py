@@ -1,3 +1,4 @@
+import asyncio
 import inspect
 import os
 from typing import Any
@@ -12,9 +13,13 @@ from .argument_parser import convert_arguments
 from .registry import (
     get_tool_by_name,
     get_tool_names,
+    is_parallelizable,
     needs_agent_state,
     should_execute_in_sandbox,
 )
+
+
+FINISH_TOOLS = {"finish_scan", "agent_finish"}
 
 
 SANDBOX_EXECUTION_TIMEOUT = float(os.getenv("STRIX_SANDBOX_EXECUTION_TIMEOUT", "500"))
@@ -198,10 +203,7 @@ def _format_tool_result(tool_name: str, result: Any) -> tuple[str, list[dict[str
             end_part = final_result_str[-4000:]
             final_result_str = start_part + "\n\n... [middle content truncated] ...\n\n" + end_part
 
-    observation_xml = (
-        f"<tool_result>\n<tool_name>{tool_name}</tool_name>\n"
-        f"<result>{final_result_str}</result>\n</tool_result>"
-    )
+    observation_xml = f"<tool_result>\n<tool_name>{tool_name}</tool_name>\n<result>{final_result_str}</result>\n</tool_result>"
 
     return observation_xml, images
 
@@ -260,29 +262,114 @@ def _get_tracer_and_agent_id(agent_state: Any | None) -> tuple[Any | None, str]:
     return tracer, agent_id
 
 
+def _group_tool_invocations(
+    tool_invocations: list[dict[str, Any]],
+) -> tuple[
+    list[tuple[int, dict[str, Any]]],
+    list[tuple[int, dict[str, Any]]],
+    list[tuple[int, dict[str, Any]]],
+]:
+    """Group tools into (parallelizable, sequential, finish_tools) with original indices."""
+    parallelizable: list[tuple[int, dict[str, Any]]] = []
+    sequential: list[tuple[int, dict[str, Any]]] = []
+    finish_tools: list[tuple[int, dict[str, Any]]] = []
+
+    for idx, tool_inv in enumerate(tool_invocations):
+        tool_name = tool_inv.get("toolName", "")
+        entry = (idx, tool_inv)
+
+        if tool_name in FINISH_TOOLS:
+            finish_tools.append(entry)
+        elif is_parallelizable(tool_name):
+            parallelizable.append(entry)
+        else:
+            sequential.append(entry)
+
+    return parallelizable, sequential, finish_tools
+
+
+async def _execute_parallel_tools(
+    indexed_invocations: list[tuple[int, dict[str, Any]]],
+    agent_state: Any | None,
+    tracer: Any | None,
+    agent_id: str,
+) -> list[tuple[int, str, list[dict[str, Any]], bool]]:
+    """Execute tools concurrently, returning (idx, xml, images, should_finish) tuples."""
+
+    async def execute_one(
+        idx: int, tool_inv: dict[str, Any]
+    ) -> tuple[int, str, list[dict[str, Any]], bool]:
+        try:
+            xml, imgs, finish = await _execute_single_tool(tool_inv, agent_state, tracer, agent_id)
+        except Exception as e:  # noqa: BLE001
+            tool_name = tool_inv.get("toolName", "unknown")
+            error_xml = f"<tool_result>\n<tool_name>{tool_name}</tool_name>\n<result>Error: {e}</result>\n</tool_result>"
+            return (idx, error_xml, [], False)
+        else:
+            return (idx, xml, imgs, finish)
+
+    tasks = [execute_one(idx, inv) for idx, inv in indexed_invocations]
+    return await asyncio.gather(*tasks)
+
+
 async def process_tool_invocations(
     tool_invocations: list[dict[str, Any]],
     conversation_history: list[dict[str, Any]],
     agent_state: Any | None = None,
 ) -> bool:
+    """Process tool invocations with parallel execution support.
+
+    Execution order:
+    1. Parallel tools execute concurrently via asyncio.gather()
+    2. Sequential tools execute one at a time
+    3. Finish tools (finish_scan, agent_finish) execute last
+
+    Results are ordered by original invocation position for LLM context consistency.
+    """
+    if not tool_invocations:
+        return False
+
+    results: dict[int, tuple[str, list[dict[str, Any]], bool]] = {}
+    tracer, agent_id = _get_tracer_and_agent_id(agent_state)
+
+    # Group tools by execution strategy
+    parallelizable, sequential, finish_tools = _group_tool_invocations(tool_invocations)
+
+    # 1. Execute parallelizable tools concurrently
+    if parallelizable:
+        parallel_results = await _execute_parallel_tools(
+            parallelizable, agent_state, tracer, agent_id
+        )
+        for idx, xml, imgs, finish in parallel_results:
+            results[idx] = (xml, imgs, finish)
+
+    # 2. Execute sequential tools one at a time
+    for idx, tool_inv in sequential:
+        xml, imgs, finish = await _execute_single_tool(tool_inv, agent_state, tracer, agent_id)
+        results[idx] = (xml, imgs, finish)
+
+    # 3. Execute finish tools last
+    for idx, tool_inv in finish_tools:
+        xml, imgs, finish = await _execute_single_tool(tool_inv, agent_state, tracer, agent_id)
+        results[idx] = (xml, imgs, finish)
+
+    # Aggregate in original order
     observation_parts: list[str] = []
     all_images: list[dict[str, Any]] = []
     should_agent_finish = False
 
-    tracer, agent_id = _get_tracer_and_agent_id(agent_state)
-
-    for tool_inv in tool_invocations:
-        observation_xml, images, tool_should_finish = await _execute_single_tool(
-            tool_inv, agent_state, tracer, agent_id
-        )
-        observation_parts.append(observation_xml)
-        all_images.extend(images)
-
-        if tool_should_finish:
+    for idx in sorted(results.keys()):
+        xml, imgs, finish = results[idx]
+        observation_parts.append(xml)
+        all_images.extend(imgs)
+        if finish:
             should_agent_finish = True
 
+    # Build conversation history message
     if all_images:
-        content = [{"type": "text", "text": "Tool Results:\n\n" + "\n\n".join(observation_parts)}]
+        content: list[dict[str, Any]] = [
+            {"type": "text", "text": "Tool Results:\n\n" + "\n\n".join(observation_parts)}
+        ]
         content.extend(all_images)
         conversation_history.append({"role": "user", "content": content})
     else:

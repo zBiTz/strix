@@ -233,7 +233,7 @@ def create_todo(
         return response
 
 
-@register_tool(sandbox_execution=False)
+@register_tool(sandbox_execution=False, parallelizable=True)
 def list_todos(
     agent_state: Any,
     status: str | None = None,
