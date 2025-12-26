@@ -126,7 +126,7 @@ def _check_pending_verifications(agent_state: Any = None) -> dict[str, Any] | No
         ]
 
         for report in pending_reports[:5]:  # Show first 5
-            report_id = report.get("report_id", "unknown")
+            report_id = report.get("id", "unknown")
             title = report.get("title", "Unknown vulnerability")
             severity = report.get("severity", "unknown")
             attempts = report.get("verification_attempts", 0)

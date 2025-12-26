@@ -82,7 +82,7 @@ def _cancel_verification_timeout(report_id: str) -> None:
             timer.cancel()
 
 
-def _spawn_verification_agent(  # noqa: PLR0915
+def _spawn_verification_agent(  # noqa: PLR0912, PLR0915
     report_id: str,
     title: str,
     evidence: dict[str, Any],
@@ -123,12 +123,42 @@ def _spawn_verification_agent(  # noqa: PLR0915
             max_iterations=50,
         )
 
+        # Inherit sandbox from parent (Issue 9 fix)
+        if parent_agent_state:
+            if hasattr(parent_agent_state, "sandbox_id") and parent_agent_state.sandbox_id:
+                state.sandbox_id = parent_agent_state.sandbox_id
+            if hasattr(parent_agent_state, "sandbox_token") and parent_agent_state.sandbox_token:
+                state.sandbox_token = parent_agent_state.sandbox_token
+            if hasattr(parent_agent_state, "sandbox_info") and parent_agent_state.sandbox_info:
+                state.sandbox_info = parent_agent_state.sandbox_info
+
+        # Inherit LLM config from parent (Issue 8 fix)
+        llm_config = None
+        if parent_agent_state and hasattr(parent_agent_state, "agent_id"):
+            try:
+                from strix.llm.config import LLMConfig
+                from strix.tools.agents_graph.agents_graph_actions import _agent_instances
+
+                parent_agent = _agent_instances.get(parent_agent_state.agent_id)
+                if parent_agent and hasattr(parent_agent, "llm_config"):
+                    parent_config = parent_agent.llm_config
+                    # Create new config with verification module but inherited timeout/scan_mode
+                    llm_config = LLMConfig(
+                        prompt_modules=["verification"],
+                        timeout=getattr(parent_config, "timeout", None),
+                        scan_mode=getattr(parent_config, "scan_mode", "standard"),
+                    )
+            except ImportError:
+                pass
+
         # Create verification agent config
         agent_config = {
             "state": state,
             "report_id": report_id,
             "evidence": evidence,
         }
+        if llm_config:
+            agent_config["llm_config"] = llm_config
 
         agent = VerificationAgent(agent_config)
 
@@ -216,9 +246,8 @@ def _spawn_verification_agent(  # noqa: PLR0915
             daemon=True,
             name=f"Verification-{report_id}",
         )
-        thread.start()
 
-        # Register the running thread
+        # Register the running thread BEFORE starting to avoid race condition
         try:
             from strix.tools.agents_graph.agents_graph_actions import (
                 _running_agents as running,
@@ -227,6 +256,8 @@ def _spawn_verification_agent(  # noqa: PLR0915
             running[state.agent_id] = thread
         except ImportError:
             pass
+
+        thread.start()
 
         # Register verification timeout (10 minutes = 600 seconds)
         _register_verification_timeout(
@@ -310,6 +341,9 @@ def _auto_reject_pending_report(report_id: str, agent_id: str, reason_code: str)
             ),
             "agent_exception": (
                 f"Verification agent {agent_id} encountered an error during verification. Report requires manual review."
+            ),
+            "verification_timeout": (
+                f"Verification agent {agent_id} timed out after 600 seconds without completing verification. Report requires manual review."
             ),
         }
 

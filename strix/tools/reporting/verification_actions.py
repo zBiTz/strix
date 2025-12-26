@@ -17,6 +17,21 @@ from strix.tools.registry import register_tool
 from strix.tools.reporting.vulnerability_types import get_vulnerability_type_spec
 
 
+def _normalize_test_name(name: str) -> str:
+    """Normalize test name for flexible matching.
+
+    Converts to lowercase, replaces spaces/hyphens with underscores,
+    and strips whitespace. This allows matching between different naming
+    conventions used in prompts and validation.
+
+    Examples:
+        "AUTHORIZATION BOUNDARY TEST" -> "authorization_boundary_test"
+        "authorization-boundary-test" -> "authorization_boundary_test"
+        "Authorization Boundary Test" -> "authorization_boundary_test"
+    """
+    return name.lower().replace(" ", "_").replace("-", "_").strip()
+
+
 def _validate_two_phase_evidence(
     verification_evidence: dict[str, Any] | None,
     vulnerability_type: str | None,
@@ -69,18 +84,25 @@ def _validate_two_phase_evidence(
         )
 
     # Validate control tests against type-specific requirements
+    # Use normalized names for flexible matching (handles case/spacing differences)
     if vulnerability_type and vulnerability_type != "unknown":
         type_spec = get_vulnerability_type_spec(vulnerability_type)
         if type_spec:
-            required_test_names = {req.name for req in type_spec.control_test_requirements}
-            provided_test_names = {test.get("test_name", "") for test in control_tests}
+            required_normalized = {
+                _normalize_test_name(req.name) for req in type_spec.control_test_requirements
+            }
+            provided_normalized = {
+                _normalize_test_name(test.get("test_name", "")) for test in control_tests
+            }
 
-            # Check if at least one required test was performed
-            overlap = required_test_names & provided_test_names
+            # Check if at least one required test was performed (using normalized names)
+            overlap = required_normalized & provided_normalized
             if not overlap:
                 return (
                     False,
-                    f"Phase 2 requires control tests matching type spec. Required: {required_test_names}, Provided: {provided_test_names}",
+                    f"Phase 2 requires control tests matching type spec. "
+                    f"Required (normalized): {required_normalized}, "
+                    f"Provided (normalized): {provided_normalized}",
                 )
 
     # Require validity reasoning

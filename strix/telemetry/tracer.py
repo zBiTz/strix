@@ -269,17 +269,20 @@ class Tracer:
     def is_report_verified(self, report_id: str) -> bool:
         """Check if a report has been verified (finalized, rejected, or moved to manual review).
 
-        A report is considered "verified" (i.e., no longer pending) if it has been
-        processed by a verification agent and moved out of the pending queue.
+        A report is considered "verified" if it exists in a finalized state (verified,
+        rejected, or manual review). Returns False for invalid/non-existent report IDs.
 
         Args:
             report_id: The report ID to check
 
         Returns:
-            True if report was verified/rejected/moved, False if still pending
+            True if report exists in a finalized state, False otherwise
         """
-        # Return True if report is not in pending queue (i.e., it was processed)
-        return all(report["id"] != report_id for report in self.pending_vulnerability_reports)
+        # Check if report exists in any finalized state (not just "not pending")
+        in_verified = any(r["id"] == report_id for r in self.vulnerability_reports)
+        in_rejected = any(r["id"] == report_id for r in self.rejected_vulnerability_reports)
+        in_manual = any(r["id"] == report_id for r in self.needs_manual_review_reports)
+        return in_verified or in_rejected or in_manual
 
     def add_to_manual_review(
         self,

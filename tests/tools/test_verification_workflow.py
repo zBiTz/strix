@@ -316,14 +316,15 @@ class TestIsReportVerified:
         # Should return True since report is no longer pending
         assert tracer.is_report_verified(report_id) is True
 
-    def test_returns_true_for_nonexistent_report(self) -> None:
-        """Test that non-existent reports return True (not in pending queue)."""
+    def test_returns_false_for_nonexistent_report(self) -> None:
+        """Test that non-existent reports return False (not in any finalized state)."""
         from strix.telemetry.tracer import Tracer
 
         tracer = Tracer(run_name="test-run")
 
-        # Non-existent report should return True (not pending)
-        assert tracer.is_report_verified("nonexistent-id") is True
+        # Non-existent report should return False (not verified, rejected, or in manual review)
+        # This prevents verification agents from bypassing verification with invalid report IDs
+        assert tracer.is_report_verified("nonexistent-id") is False
 
 
 class TestManualReviewQueue:

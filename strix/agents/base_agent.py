@@ -116,6 +116,9 @@ class BaseAgent(metaclass=AgentMeta):
     def _add_to_agents_graph(self) -> None:
         from strix.tools.agents_graph import agents_graph_actions
 
+        # Get existing node data (may have been pre-registered with special fields)
+        existing = agents_graph_actions._agent_graph["nodes"].get(self.state.agent_id, {})
+
         node = {
             "id": self.state.agent_id,
             "name": self.state.agent_name,
@@ -129,6 +132,12 @@ class BaseAgent(metaclass=AgentMeta):
             "agent_type": self.__class__.__name__,
             "state": self.state.model_dump(),
         }
+
+        # Preserve special fields from pre-registration (type, report_id for verification agents)
+        for key in ["type", "report_id"]:
+            if key in existing:
+                node[key] = existing[key]
+
         agents_graph_actions._agent_graph["nodes"][self.state.agent_id] = node
 
         agents_graph_actions._agent_instances[self.state.agent_id] = self
